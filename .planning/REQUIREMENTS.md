@@ -37,6 +37,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 None carved out separately. Research (`research/SUMMARY.md`) identifies differentiators — bootstrap confidence bands on Qini, regression-adjusted ATE, known-propensity IPW policy-value estimate, multi-arm argmax policy, decile uplift chart, cost/margin inputs — that materially affect whether v1's core value claim is defensible (see Pitfall: "no business case without a cost assumption"). These are treated as implementation quality bars within the phases above, not deferred scope, and will be resolved during phase planning.
 
+Roadmap note: Phase 5 (Business & Policy Layer) is the phase where these quality bars are met. It carries no direct requirement ID for exactly this reason — the work is real and scheduled, but this document deliberately expresses it as quality bars rather than as separate requirements.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -49,27 +51,27 @@ None carved out separately. Research (`research/SUMMARY.md`) identifies differen
 
 ## Traceability
 
-Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | TBD | Pending |
-| DATA-02 | TBD | Pending |
-| DATA-03 | TBD | Pending |
-| DATA-04 | TBD | Pending |
-| VALID-01 | TBD | Pending |
-| VALID-02 | TBD | Pending |
-| UPLIFT-01 | TBD | Pending |
-| UPLIFT-02 | TBD | Pending |
-| APP-01 | TBD | Pending |
-| APP-02 | TBD | Pending |
-| DOC-01 | TBD | Pending |
+| DATA-01 | Phase 1 — Data Foundation | Pending |
+| DATA-02 | Phase 1 — Data Foundation | Pending |
+| DATA-03 | Phase 1 — Data Foundation | Pending |
+| DATA-04 | Phase 1 — Data Foundation | Pending |
+| VALID-01 | Phase 2 — Experiment Validity | Pending |
+| VALID-02 | Phase 2 — Experiment Validity | Pending |
+| UPLIFT-02 | Phase 3 — Uplift Evaluation Metric | Pending |
+| UPLIFT-01 | Phase 4 — Uplift Modeling | Pending |
+| APP-01 | Phase 6 — Streamlit App & Deployment | Pending |
+| APP-02 | Phase 6 — Streamlit App & Deployment | Pending |
+| DOC-01 | Phase 7 — Documentation & Delivery | Pending |
 
 **Coverage:**
 - v1 requirements: 11 total
-- Mapped to phases: 0
-- Unmapped: 11 ⚠️ (pending roadmap creation)
+- Mapped to phases: 11
+- Unmapped: 0 ✓
+
+Note: UPLIFT-02 maps to Phase 3 rather than Phase 4 by design — the Qini / uplift-at-k implementation is built and unit-tested against synthetic oracles *before* any model exists, so a disappointing real curve can be trusted rather than blamed on the metric. Phase 4 consumes the metric to evaluate UPLIFT-01's models.
 
 ---
 *Requirements defined: 2026-09-01*
-*Last updated: 2026-09-01 after initial definition*
+*Last updated: 2026-09-01 after roadmap creation (traceability populated)*
