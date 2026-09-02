@@ -849,27 +849,31 @@ Optional hardening the planner may consider: `pip install --require-hashes` with
 | A4 | Streamlit Community Cloud will offer a Python runtime able to install this pinned set in Phase 6 | Open Question 2 | Medium — if Cloud's runtime is older than 3.11, `requirements.txt` needs a compatible variant. Out of scope now, but the pin choice propagates. STATE.md already flags Phase 6 for a re-check |
 | A5 | `duckdb.connect()` used as a context manager releases the in-memory database deterministically | Code Example 2 | Low — worst case is a lingering in-process handle within a short-lived CLI run; no file is written either way |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Is `pyarrow` admissible under the CLAUDE.md library allowlist?**
    - What we know: the allowlist names ten libraries and pyarrow is not among it. But `pandas.to_parquet` raises `ImportError` without it [VERIFIED], and D-09 mandates Parquet as the committed artifact format. The two constraints cannot both be satisfied without pyarrow.
    - What's unclear: whether the allowlist was intended to cover transitive/engine dependencies at all. Read literally it would also exclude `joblib`, `pillow`, `patsy`, and `pydantic`, which arrive automatically with scikit-learn, matplotlib, statsmodels, and pandera respectively.
    - Recommendation: treat the allowlist as governing **modeling/analysis** libraries — its stated rationale is "demonstrates the technique from first principles, not library calls" — and admit pyarrow as an I/O engine. The planner should note this reading explicitly in the plan (one line) so it is a recorded decision rather than a silent one. If the user objects, the only alternative is `fastparquet`, which is equally outside the list and less standard.
+   - **RESOLVED: pyarrow is admitted as an I/O engine, implemented in 01-01 Task 2 and recorded in README's C6 decision, gated behind an explicit human checkpoint in 01-05 Task 2.**
 
 2. **Should `pytest` live in `requirements.txt` or a separate dev file?**
    - What we know: ARCHITECTURE.md treats `requirements.txt` as the Streamlit Community Cloud dependency file, and notes it "dominates cold-start time." Community Cloud has no concept of dev dependencies.
    - What's unclear: whether Phase 6 will want a single file for simplicity.
    - Recommendation: split now (`requirements.txt` + `requirements-dev.txt` with `-r requirements.txt`), as specified in §Standard Stack. Splitting later means editing a file Phase 6 depends on; splitting now costs one extra file. Note that streamlit itself is deliberately absent from both until Phase 6 (D-07/D-08).
+   - **RESOLVED: split implemented in 01-01 Task 2 (`requirements.txt` + `requirements-dev.txt`).**
 
 3. **How is criterion 2's "fresh clone on a second machine" satisfied without a second machine?**
    - What we know: no second machine is available [VERIFIED: §Environment Availability]. But the failure mode the criterion is really testing — git line-ending normalization — is fully reproducible locally: `git cat-file -p HEAD:<path> | sha256sum` inspects the exact bytes any clone receives, and `git -c core.autocrlf=input clone` reproduces Linux checkout behavior. Both were executed successfully during this research.
    - What's unclear: whether the user considers the local simulation sufficient evidence, or wants a real second-machine/CI confirmation.
    - Recommendation: implement the local simulation as an automated test (`tests/test_provenance.py`), and have the planner add a `checkpoint:human-verify` task offering the user the option of a real second-machine clone. The simulation catches the actual defect; the checkpoint respects that the criterion says "second machine."
+   - **RESOLVED: local simulation implemented as `tests/test_provenance.py` (01-02); `checkpoint:human-verify` task added in 01-05 Task 2, offering accept-simulation or real-clone.**
 
 4. **`data/processed/` versus `artifacts/` for the committed Parquet.**
    - What we know: CONTEXT.md/D-09 and the phase brief say `data/processed/`. ARCHITECTURE.md §Recommended Project Structure says `artifacts/` and describes `data/processed/*.duckdb` as gitignored.
    - What's unclear: nothing substantive — this is a naming inconsistency between two planning documents, not a design conflict.
    - Recommendation: follow **`data/processed/`** — CONTEXT.md is a locked user decision and outranks the earlier research doc. The planner should add `*.duckdb` to `.gitignore` so ARCHITECTURE.md's actual intent (never commit DuckDB files) is preserved regardless of directory naming, and note the reconciliation in one line so Phase 6 does not resurrect `artifacts/`.
+   - **RESOLVED: `data/processed/` used throughout (01-04); `*.duckdb` added to `.gitignore` (01-01).**
 
 ## Sources
 
