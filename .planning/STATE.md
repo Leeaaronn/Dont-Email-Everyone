@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 1 context gathered
-last_updated: "2026-09-02T19:29:48.729Z"
-last_activity: 2026-09-02 -- Phase 01 planning complete
+last_updated: "2026-09-02T20:11:55.824Z"
+last_activity: 2026-09-02
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 1 — Data Foundation
+**Current focus:** Phase 01 — Data Foundation
 
 ## Current Position
 
-Phase: 1 of 7 (Data Foundation)
-Plan: 0 of TBD in current phase
+Phase: 01 (Data Foundation) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-09-02 -- Phase 01 planning complete
+Last activity: 2026-09-02
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01 P01 | 12min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,9 @@ Recent decisions affecting current work:
 - [Roadmap]: Qini/uplift-at-k metric is sequenced in Phase 3, *before* the models it evaluates (Phase 4) — the highest-leverage ordering decision surfaced by research; prevents tuning a metric to flatter a model.
 - [Roadmap]: Business/policy layer (Phase 5) is separated from the Streamlit app (Phase 6) because the cost/capacity framing determines what the app's core interaction is; it must be settled before UI work starts.
 - [Roadmap]: Phase 5 carries no direct v1 requirement by design — REQUIREMENTS.md folds policy value, bootstrap bands, and cost/margin into per-phase quality bars rather than separate requirements.
+- [Phase 01 P01]: pyarrow admitted despite not being named in CLAUDE.md's allowlist: read the allowlist as governing modeling/analysis libraries; pyarrow is an I/O engine required by pandas.to_parquet and CONTEXT.md D-09's Parquet artifact requirement
+- [Phase 01 P01]: requirements-dev.txt split from requirements.txt now (Phase 1) rather than at Phase 6, so the Streamlit serve-time file never needs restructuring
+- [Phase 01 P01]: numpy and scipy pinned below their latest releases (2.4.6 / 1.17.1) because numpy >=2.5 and scipy >=1.18 both require Python >=3.12
 
 ### Pending Todos
 
@@ -88,6 +92,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-01T18:34:45.181Z
+Last session: 2026-09-02T20:09:18.891Z
 Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-data-foundation/01-CONTEXT.md
+Resume file: None

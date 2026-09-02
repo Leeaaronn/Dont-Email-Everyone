@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Data Foundation
 
-- [ ] **DATA-01**: Raw Hillstrom CSV is vendored into the repo (`data/raw/`) with a recorded SHA-256 checksum, fetched once from the MineThatData source
+- [x] **DATA-01**: Raw Hillstrom CSV is vendored into the repo (`data/raw/`) with a recorded SHA-256 checksum, fetched once from the MineThatData source
 - [ ] **DATA-02**: Pipeline loads the vendored CSV into DuckDB, verifying the checksum on every run (never re-downloads)
 - [ ] **DATA-03**: Pandera schema validates the raw data on ingest (types, value ranges, no unexpected nulls/categories)
-- [ ] **DATA-04**: Pytest coverage for the ingestion and schema-validation pipeline
+- [x] **DATA-04**: Pytest coverage for the ingestion and schema-validation pipeline
 
 ### Experiment Validity
 
@@ -53,10 +53,10 @@ Roadmap note: Phase 5 (Business & Policy Layer) is the phase where these quality
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 — Data Foundation | Pending |
+| DATA-01 | Phase 1 — Data Foundation | Complete |
 | DATA-02 | Phase 1 — Data Foundation | Pending |
 | DATA-03 | Phase 1 — Data Foundation | Pending |
-| DATA-04 | Phase 1 — Data Foundation | Pending |
+| DATA-04 | Phase 1 — Data Foundation | Complete |
 | VALID-01 | Phase 2 — Experiment Validity | Pending |
 | VALID-02 | Phase 2 — Experiment Validity | Pending |
 | UPLIFT-02 | Phase 3 — Uplift Evaluation Metric | Pending |
