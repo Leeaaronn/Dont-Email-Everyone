@@ -164,3 +164,7 @@ None - no external service configuration required. No network access was used; a
 ---
 *Phase: 01-data-foundation*
 *Completed: 2026-09-02*
+
+## Self-Check: PASSED
+
+All 6 referenced files verified present on disk (dont_email_everyone/schemas.py, ingest.py; tests/conftest.py, test_schemas.py, test_ingest.py; this SUMMARY.md). All 3 commit hashes (2b6c14d, 382a4d3, d1e54fa) verified present in `git log --oneline --all`. No missing items.
