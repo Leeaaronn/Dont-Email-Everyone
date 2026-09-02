@@ -1,0 +1,24 @@
+# Pinned Python 3.11 runtime dependency set (RESEARCH.md Standard Stack).
+# Exact == pins only — never >= or ~= — verified together with
+# --only-binary=:all: on cp311-win_amd64, zero conflicts, zero source builds.
+#
+# Recorded decisions:
+# (a) pyarrow is not in CLAUDE.md's explicit modeling-library allowlist, but
+#     pandas.to_parquet raises ImportError without it, and CONTEXT.md D-09
+#     mandates Parquet as the committed processed-data format. The allowlist
+#     governs modeling/analysis libraries ("demonstrates the technique from
+#     first principles, not library calls"); pyarrow is admitted here as an
+#     I/O engine, the same category as the joblib/patsy/pydantic transitives
+#     that arrive with scikit-learn/statsmodels/pandera.
+# (b) numpy and scipy are capped by the Python 3.11 floor: numpy >=2.5 and
+#     scipy >=1.18 both require Python >=3.12, so 2.4.6 / 1.17.1 are the
+#     newest cp311 builds. Pinning makes the cap visible, not incidental.
+pandas==3.0.5
+numpy==2.4.6
+pandera[pandas]==0.32.1
+duckdb==1.5.5
+pyarrow==25.0.1
+scipy==1.17.1
+scikit-learn==1.9.0
+statsmodels==0.15.0
+matplotlib==3.11.1
