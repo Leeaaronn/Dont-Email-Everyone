@@ -1,0 +1,12 @@
+# Project-local virtual environment (CONTEXT.md D-05: never a global/system install)
+.venv/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# DuckDB is an in-process engine, never a committed artifact (CONTEXT.md D-09).
+# This entry is load-bearing: it enforces that rule structurally, not by discipline.
+*.duckdb
+*.duckdb.wal

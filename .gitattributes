@@ -1,0 +1,9 @@
+# Byte-stability gate for vendored raw data.
+# -text unsets git's line-ending conversion (the correctness-critical half) so
+# data/raw/*.csv is stored and checked out byte-exact, regardless of the local
+# core.autocrlf setting. -diff stops git from attempting textual diffs of a
+# multi-megabyte data file (ergonomic only).
+#
+# Do NOT add a broader normalization rule (e.g. `* text=auto`) to this file —
+# that would defeat this specific unset for data/raw/*.csv.
+data/raw/*.csv -text -diff
