@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-02T20:11:55.824Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-02T20:54:32.565Z"
 last_activity: 2026-09-02
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 01 (Data Foundation) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-09-02
 
-Progress: [██░░░░░░░░] 20%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [██░░░░░░░░] 20%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 12min | 3 tasks | 5 files |
+| Phase 01 P02 | 24min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,9 @@ Recent decisions affecting current work:
 - [Phase 01 P01]: pyarrow admitted despite not being named in CLAUDE.md's allowlist: read the allowlist as governing modeling/analysis libraries; pyarrow is an I/O engine required by pandas.to_parquet and CONTEXT.md D-09's Parquet artifact requirement
 - [Phase 01 P01]: requirements-dev.txt split from requirements.txt now (Phase 1) rather than at Phase 6, so the Streamlit serve-time file never needs restructuring
 - [Phase 01 P01]: numpy and scipy pinned below their latest releases (2.4.6 / 1.17.1) because numpy >=2.5 and scipy >=1.18 both require Python >=3.12
+- [Phase 01-02]: config.py uses data/processed/ (not artifacts/) per CONTEXT.md D-09, outranking ARCHITECTURE.md's earlier artifacts/ naming
+- [Phase 01-02]: history_segment deliberately excluded from PRE_TREATMENT_FEATURES as redundant with history (PITFALLS.md Pitfall 7) - intentional, not an oversight
+- [Phase 01-02]: checksum sidecar is 80 bytes per the plan's own action-section format spec, not the 82 stated in acceptance criteria - treated as a plan arithmetic note, not a deviation
 
 ### Pending Todos
 
@@ -92,6 +96,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-02T20:09:18.891Z
-Stopped at: Phase 1 context gathered
+Last session: 2026-09-02T20:54:32.554Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
