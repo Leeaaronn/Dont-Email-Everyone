@@ -27,6 +27,17 @@ verified (64000, 12) shape/dtypes. That all-positional form is used below;
 the f-string fallback documented in research was not needed. Either form is
 equally safe here since `csv_path` and `RAW_COLUMNS` are internal constants,
 never user input — but full parameter binding is the better habit.
+
+`build_all()` composes four gates in strict order -- bytes (checksum), then
+types (DuckDB load), then values (Pandera schema), then experimental
+structure (arm-vs-control frames) -- so each gate can fail for exactly one
+reason. No try/except collapses them together and there is no fallback,
+repair, or re-fetch branch: a failure here means the run stops, not that it
+silently limps forward on bad data. `build_all()` writes three committed
+Parquet artifacts under `config.PROCESSED` and has no side effects at
+import time, so Phase 7's `dont_email_everyone/pipeline.py` (ROADMAP
+criterion 5, `python -m dont_email_everyone.pipeline all`) can import and
+call it directly.
 """
 
 import hashlib
@@ -35,6 +46,8 @@ import pathlib
 import duckdb
 
 from dont_email_everyone import config
+from dont_email_everyone.frames import build_all_frames
+from dont_email_everyone.schemas import RawHillstrom
 
 
 class ChecksumMismatchError(RuntimeError):
@@ -117,7 +130,67 @@ def load_raw(csv_path=config.RAW_CSV):
         ).df()
 
 
+def build_all() -> None:
+    """Run the four gates in order and write the three committed Parquet
+    artifacts under `config.PROCESSED`.
+
+    Gate 1 (bytes): `verify_checksum` -- raises `ChecksumMismatchError` or
+    lets `FileNotFoundError` propagate unwrapped.
+    Gate 2 (types): `load_raw` -- raises `duckdb.ConversionException`.
+    Gate 3 (values): `RawHillstrom.validate(df, lazy=True)` -- raises
+    `SchemaErrors` listing every violation.
+    Gate 4 (experimental structure): `build_all_frames` plus assertions
+    that each frame has exactly two `segment` values and a control count
+    of 21306 -- raises `AssertionError` naming the arm and the observed
+    count.
+
+    Each gate is a separate statement, never combined into one try/except,
+    so a failure is diagnosable to exactly one cause. There is no repair,
+    retry, or re-fetch branch anywhere in this function.
+
+    Writes `analysis_table.parquet` (the validated 64000 x 12 table),
+    `mens_vs_control.parquet`, and `womens_vs_control.parquet`, all with
+    `index=False`. Creates `config.PROCESSED` if it does not already
+    exist. Has no side effects at import time -- only calling this
+    function touches the filesystem beyond reading the vendored CSV.
+    """
+    verify_checksum(config.RAW_CSV, config.CHECKSUM_FILE)
+    print(f"[gate 1/4] checksum verified: {config.RAW_CSV.name}")
+
+    raw = load_raw(config.RAW_CSV)
+    print(f"[gate 2/4] loaded: shape={raw.shape}")
+
+    validated = RawHillstrom.validate(raw, lazy=True)
+    print(f"[gate 3/4] schema validated: shape={validated.shape}")
+
+    frames = build_all_frames(validated)
+    for arm_key in config.ARMS:
+        frame = frames[arm_key]
+        n_segments = frame["segment"].nunique()
+        assert n_segments == 2, (
+            f"{arm_key} frame has {n_segments} distinct segment values, "
+            "expected 2 -- the control group may be contaminated"
+        )
+        control_count = int((frame["treatment"] == 0).sum())
+        assert control_count == 21306, (
+            f"{arm_key} frame control count is {control_count}, expected "
+            "21306 -- 42693 is the pooled-control signature"
+        )
+    print(
+        "[gate 4/4] frames built: "
+        f"mens={frames['mens'].shape} womens={frames['womens'].shape}"
+    )
+
+    config.PROCESSED.mkdir(parents=True, exist_ok=True)
+    validated.to_parquet(config.PROCESSED / "analysis_table.parquet", index=False)
+    frames["mens"].to_parquet(
+        config.PROCESSED / "mens_vs_control.parquet", index=False
+    )
+    frames["womens"].to_parquet(
+        config.PROCESSED / "womens_vs_control.parquet", index=False
+    )
+    print(f"[done] wrote 3 parquet artifacts to {config.PROCESSED}")
+
+
 if __name__ == "__main__":
-    digest = sha256_file(config.RAW_CSV)
-    config.CHECKSUM_FILE.write_text(f"{digest}  hillstrom.csv\n", newline="")
-    print(digest)
+    build_all()
