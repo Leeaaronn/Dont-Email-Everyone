@@ -87,4 +87,4 @@ All eleven rows above confirmed green both in the working tree (41 passed, 0 fai
 - [x] Feedback latency < 1s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** verified via clean-clone reproduction (plan 01-05, Task 1, 2026-09-02) — pending developer sign-off on the second-machine question at Task 2's checkpoint.
+**Approval:** approved 2026-09-02 — clean-clone reproduction (plan 01-05, Task 1) plus developer sign-off at Task 2's checkpoint (accept-simulation on the second-machine question; accept on the C6 pyarrow-allowlist reading).

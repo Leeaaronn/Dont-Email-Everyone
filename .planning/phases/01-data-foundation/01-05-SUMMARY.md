@@ -28,12 +28,14 @@ key-files:
 
 key-decisions:
   - "Task 1 (automated clean-clone verification) executed and committed independently of Task 2 (the human checkpoint). VALIDATION.md is marked verified based on Task 1's automated evidence; the phase itself is not marked complete until the developer responds at the Task 2 checkpoint per the plan's autonomous: false gate."
+  - "Developer reply (via AskUserQuestion, 2026-09-02): accept-simulation — the local git -c core.autocrlf=input clone satisfies ROADMAP criterion 2's second-machine wording. Phase 1 closes on this evidence; Phase 6's real Streamlit Community Cloud (Linux) deploy independently re-tests the claim."
+  - "Developer reply on C6 (2026-09-02): accept — pyarrow is admitted as the Parquet I/O engine despite not being named in CLAUDE.md's library allowlist, since the allowlist governs modeling/analysis libraries and pyarrow is a transitive I/O dependency of pandas.to_parquet, not a modeling library."
 patterns-established: []
 
-requirements-completed: []  # DATA-01..04 already marked complete by plans 01-01 through 01-04; this plan adds independent clean-clone evidence, not new implementation. Left empty here to avoid double-counting in STATE.md's requirement tracking pending the Task 2 checkpoint.
+requirements-completed: []  # DATA-01..04 already marked complete by plans 01-01 through 01-04; this plan adds independent clean-clone evidence, not new implementation.
 
 # Metrics
-duration: ~35min (Task 1 only; Task 2 checkpoint pending)
+duration: ~35min (Task 1) + checkpoint resolved same day
 completed: 2026-09-02
 ---
 
@@ -73,8 +75,7 @@ completed: 2026-09-02
 ## Task Commits
 
 1. **Task 1: Reproduce the phase from a clean Linux-style clone** - `b7219a0` (docs) — `01-VALIDATION.md` marked fully green after clean-clone verification. No repo source files were modified (verification-only task; the clone itself was scratch and discarded).
-
-Task 2 is a `checkpoint:human-verify` gate (`autonomous: false`) and has not been executed by this agent — see "Next Phase Readiness" below.
+2. **Task 2: Confirm the phase goal and decide the second-machine question** — resolved via `AskUserQuestion` (2026-09-02). Developer reply: **accept-simulation** (worded "Accept the simulation (Recommended)") for the second-machine question, and **accept** ("Accept — pyarrow is fine as an I/O engine (Recommended)") for the C6 pyarrow-allowlist confirmation. Both replies recorded verbatim in `key-decisions` above.
 
 ## Files Created/Modified
 
@@ -112,14 +113,10 @@ None - no external service configuration required.
 ## Next Phase Readiness
 
 - **Task 1 is fully complete and committed** (`b7219a0`). `01-VALIDATION.md` is fully green with `nyquist_compliant: true`.
-- **Task 2 (`checkpoint:human-verify`, gate="blocking") has NOT been resolved.** Per this plan's `autonomous: false` frontmatter and explicit resume-signal requirement, execution stops here. The developer must reply with one of:
-  - `approved` / `accept-simulation` — the local Linux-checkout clone simulation satisfies ROADMAP criterion 2's "second machine" wording; Phase 1 can close.
-  - `real-clone` — the developer wants to run a genuine second-machine (or WSL/container) clone and confirm the digest themselves before Phase 1 closes.
-  - A described issue — captured as a gap for `/gsd:plan-phase --gaps` rather than silently absorbed.
-  - Additionally, explicit confirmation (or a flagged objection) on the C6 decision: `pyarrow` admitted as a Parquet I/O engine despite not appearing in CLAUDE.md's library allowlist.
-- **STATE.md, ROADMAP.md, and REQUIREMENTS.md are intentionally NOT updated to a "phase complete" state by this SUMMARY.** Per the plan's own instructions, that update belongs to whichever agent resolves the Task 2 checkpoint, using the developer's actual reply.
-- No blockers for the automated evidence itself — every criterion the developer is asked to confirm at Task 2 is already backed by the literal command output recorded above.
+- **Task 2 (`checkpoint:human-verify`, gate="blocking") is RESOLVED.** Developer replied `accept-simulation` on the second-machine question and `accept` on C6. Both plan 01-05 and Phase 1 are now complete.
+- STATE.md, ROADMAP.md, and REQUIREMENTS.md are updated to reflect Phase 1 complete as part of resolving this checkpoint.
+- Phase 2 (Experiment Validity) is unblocked.
 
 ---
 *Phase: 01-data-foundation*
-*Completed: 2026-09-02 (Task 1 only; Task 2 checkpoint pending)*
+*Completed: 2026-09-02*
