@@ -15,14 +15,26 @@ python -m pip install --only-binary=:all: -r requirements-dev.txt
 Run the data pipeline:
 
 ```
-python -m dont_email_everyone.ingest
+python -m dont_email_everyone.pipeline all
 ```
 
-This produces three committed artifacts under `data/processed/`:
+`all` runs `ingest` (the four checksum and schema gates, writing the three input tables) then `analyze` (every Phase 2 estimator, writing the analysis artifacts and figures). Either subcommand can be run on its own; `analyze` reads the committed Parquet inputs and never re-reads the raw CSV.
+
+This produces seven committed artifacts under `data/processed/`:
 
 - `analysis_table.parquet` — the validated 64,000 x 12 table
 - `mens_vs_control.parquet` — the mens-email-vs-control analysis frame
 - `womens_vs_control.parquet` — the womens-email-vs-control analysis frame
+- `balance.parquet` — the 33-row standardized-mean-difference table across all three pairwise arm comparisons, with the per-covariate tests joined on
+- `ate.parquet` — the six pre-registered treatment effects with HC3-robust intervals, covariate-adjusted estimates and Holm-adjusted p-values
+- `coverage.parquet` — the five-row Welch-interval coverage-vs-cell-size sweep
+- `ate.json` — the scalar headline block (effects, seeded bootstrap, omnibus balance test, both winsorization variants, balance and coverage summaries) for quoting without a Parquet read
+
+and three committed deliverables under `reports/`:
+
+- `validity.md` — the Phase 2 write-up: acceptance criteria, balance evidence, the ATE table against its published targets, robustness, and coverage interpretation
+- `figures/love_plot.png` — the covariate Love plot with the ±0.1 acceptance band on the canvas
+- `figures/ate_forest.png` — the six treatment effects with confidence intervals, panelled by unit
 
 Run the test suite:
 
