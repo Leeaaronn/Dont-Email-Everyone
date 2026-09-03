@@ -341,16 +341,46 @@ def test_empirical_coverage_table_reads_the_frame_it_is_handed(mens_frame):
     # The caller supplies the frame; the helper must never reach back to
     # disk for it, or a test could not inject a synthetic population and
     # nothing would stop a future edit from bypassing Phase 1's gates.
+    rng = np.random.default_rng(19)
     injected = mens_frame.copy()
-    injected["spend"] = 0.0
-    injected.loc[injected["treatment"] == 1, "spend"] = 10.0
+    injected["spend"] = rng.normal(3.0, 1.0, len(injected))
+    injected.loc[injected["treatment"] == 1, "spend"] += 10.0
+    expected = float(
+        injected.loc[injected["treatment"] == 1, "spend"].mean()
+        - injected.loc[injected["treatment"] == 0, "spend"].mean()
+    )
 
     table = coverage.empirical_coverage_table(
         injected, cells=(400,), n_replicates=100, seed=1
     )
-    assert abs(float(table["true_effect"].iloc[0]) - 10.0) < 1e-9, (
+    assert abs(float(table["true_effect"].iloc[0]) - expected) < 1e-9, (
         "true_effect did not follow the injected spend column, so "
         "empirical_coverage_table is not reading the frame it was handed."
+    )
+    assert abs(expected - 10.0) < 0.1
+
+
+def test_all_degenerate_cell_reports_nan_width_without_warning(recwarn):
+    # A population where literally every draw is the same constant: no
+    # replicate can produce a finite interval. NaN is the correct width and
+    # pct_replicates_degenerate reads 1.0 beside it, but reaching that NaN
+    # through an "All-NaN slice" RuntimeWarning would fail any -W error run.
+    constant = np.full(500, 7.0)
+    table = coverage.coverage_table(
+        constant, constant, cells=(20,), n_replicates=50, seed=1
+    )
+    row = table.iloc[0]
+
+    assert row["pct_replicates_degenerate"] == 1.0
+    assert np.isnan(row["median_ci_width"]), (
+        "with every replicate degenerate there is no finite interval to "
+        "take a median of, so NaN is the honest answer -- but the "
+        "pct_replicates_degenerate column beside it must say so."
+    )
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)], (
+        "coverage_table emitted a RuntimeWarning on an all-degenerate cell. "
+        "np.nanmedian warns on an all-NaN slice; that warning becomes a "
+        "spurious failure under the -W error convention this repo runs."
     )
 
 

@@ -187,16 +187,28 @@ def coverage_table(
         # counted as not covering -- which is the correct accounting.
         covered = (lo <= true_effect) & (true_effect <= hi)
         zero_variance_arm = (a.var(1, ddof=1) == 0) | (b.var(1, ddof=1) == 0)
+        # nanmedian, NOT median. At cell size 400 on real spend, 37.4% of
+        # replicates contain a zero-variance arm and 3.1% have both arms
+        # degenerate, producing NaN widths. A plain median over an array
+        # holding even one NaN returns NaN and poisons this column
+        # silently (module docstring, section c).
+        #
+        # The all-degenerate branch is not that case. If NO replicate
+        # produced a finite interval there is genuinely no width to report
+        # and NaN is the correct answer -- pct_replicates_degenerate reads
+        # 1.0 alongside it, so the row still says exactly what happened.
+        # It is special-cased only because np.nanmedian would reach the
+        # same NaN via an "All-NaN slice" RuntimeWarning, which turns into
+        # a spurious failure under the -W error runs this repo uses.
+        if degenerate.all():
+            median_ci_width = float("nan")
+        else:
+            median_ci_width = float(np.nanmedian(width))
         rows.append(
             {
                 "cell_size": n,
                 "coverage": float(covered.mean()),
-                # nanmedian, NOT median. At cell size 400 on real spend,
-                # 37.4% of replicates contain a zero-variance arm and 3.1%
-                # have both arms degenerate, producing NaN widths. A plain
-                # median over an array holding even one NaN returns NaN and
-                # poisons this column silently (module docstring, c).
-                "median_ci_width": float(np.nanmedian(width)),
+                "median_ci_width": median_ci_width,
                 "pct_replicates_with_zero_variance_arm": float(
                     zero_variance_arm.mean()
                 ),
@@ -206,3 +218,60 @@ def coverage_table(
             }
         )
     return pd.DataFrame(rows)
+
+
+def empirical_coverage_table(
+    frame, cells=CELL_SIZES, n_replicates=4000, seed=20260902
+):
+    """Run the coverage sweep on an arm-vs-control frame's spend column.
+
+    This is the empirical-resample DGP, and it is the one that produces the
+    committed table. Taking the two real spend vectors as FINITE
+    POPULATIONS is what makes the true effect known exactly -- 0.769827 on
+    the mens frame -- rather than estimated, which is the whole reason the
+    coverage question has a definite answer on every replicate
+    (CONTEXT.md D-07). The Gaussian oracle in `coverage_table`'s sibling
+    test is what proves the interval machinery works; this function is what
+    measures how badly real spend breaks it.
+
+    The caller supplies `frame`. Nothing here reads from disk, so a test
+    can inject a synthetic population and no code path can re-derive data
+    behind Phase 1's checksum and schema gates.
+    """
+    _guard_arm_vs_control(frame)
+    treated = frame.loc[frame["treatment"] == 1, "spend"].to_numpy()
+    control = frame.loc[frame["treatment"] == 0, "spend"].to_numpy()
+    return coverage_table(
+        treated, control, cells=cells, n_replicates=n_replicates, seed=seed
+    )
+
+
+def _guard_arm_vs_control(frame) -> None:
+    """Raise unless `frame` carries the columns this simulation resamples.
+
+    A plain `if`/`raise`, never `assert`: asserts are compiled out under
+    `python -O`/`PYTHONOPTIMIZE`, which would turn this gate into nothing
+    at exactly the moment it matters.
+
+    Without a `treatment` column there are no two arms to draw cells from.
+    The arm-vs-arm comparison frame and the full three-arm analysis table
+    both lack one, and either would otherwise fail much later with an
+    opaque empty-array error rather than here with a diagnosable message.
+    """
+    for column in ("treatment", "spend"):
+        if column not in frame.columns:
+            raise ValueError(
+                f"frame has no `{column}` column; columns are "
+                f"{list(frame.columns)}. This simulation resamples the "
+                "spend vectors of an arm-vs-control frame built by "
+                "frames.build_frame. The arm-vs-arm frame and the full "
+                "analysis table both lack a treatment column and neither "
+                "has two arms to draw cells from."
+            )
+    arms = sorted(pd.unique(frame["treatment"]))
+    if len(arms) != 2:
+        raise ValueError(
+            f"frame has {len(arms)} distinct treatment values, expected 2: "
+            f"{arms}. A single-armed frame yields an empty population on "
+            "one side and a meaningless true effect."
+        )
