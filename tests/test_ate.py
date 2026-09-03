@@ -394,3 +394,151 @@ def test_holm_does_not_mutate_its_input(adjusted_table):
         "apply_holm assigned into its input; a caller holding the "
         "unadjusted table would silently acquire correction columns"
     )
+
+
+# --------------------------------------------------------------------------
+# Robustness: seeded bootstrap cross-check and labeled winsorization
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def bootstrap(mens_frame):
+    return ate.bootstrap_spend_ate(mens_frame)
+
+
+def test_bootstrap_agrees_with_analytic(bootstrap, table):
+    row = table.loc[(table["arm"] == "mens") & (table["outcome"] == "spend")]
+    analytic_low = float(row["ci_low"].iloc[0])
+    analytic_high = float(row["ci_high"].iloc[0])
+    assert abs(bootstrap["ci_low"] - analytic_low) < 0.02, (
+        f"bootstrap lower endpoint {bootstrap['ci_low']:.4f} vs analytic "
+        f"HC3 {analytic_low:.4f}. Agreement to roughly one cent at full arm "
+        "size is the point: at n = 42,613 the central limit theorem has "
+        "kicked in and the analytic interval is fine despite spend being "
+        "zero-inflated."
+    )
+    assert abs(bootstrap["ci_high"] - analytic_high) < 0.02
+    assert bootstrap["ci_low"] < bootstrap["ci_high"]
+
+
+def test_bootstrap_is_seed_reproducible(mens_frame, bootstrap):
+    again = ate.bootstrap_spend_ate(mens_frame)
+    assert again["ci_low"] == bootstrap["ci_low"], (
+        "two calls at the same seed returned different endpoints; the "
+        "interval quoted in reports/validity.md would not be reproducible"
+    )
+    assert again["ci_high"] == bootstrap["ci_high"]
+
+    other = ate.bootstrap_spend_ate(mens_frame, seed=7)
+    assert abs(other["ci_low"] - bootstrap["ci_low"]) < 0.02, (
+        f"seed 7 gives {other['ci_low']:.4f} vs seed 20260902 "
+        f"{bootstrap['ci_low']:.4f}. Seed-to-seed wobble is about $0.003 at "
+        "R=4000, so the honest claim is agreement within $0.02, never exact "
+        "equality across seeds."
+    )
+    assert abs(other["ci_high"] - bootstrap["ci_high"]) < 0.02
+
+
+def test_bootstrap_reports_its_provenance(bootstrap):
+    assert bootstrap["method"] == "percentile", (
+        "BCa is 12x slower and yields a shifted interval that would not "
+        "match the analytic cross-check; the method is reported so "
+        "reports/validity.md can quote it alongside the interval"
+    )
+    assert bootstrap["seed"] == 20260902
+    assert bootstrap["n_resamples"] == 4000
+    assert set(bootstrap) == {"ci_low", "ci_high", "n_resamples", "seed", "method"}
+
+
+def test_bootstrap_does_not_mutate_input(mens_frame):
+    before = mens_frame["spend"].to_numpy().copy()
+    ate.bootstrap_spend_ate(mens_frame, n_resamples=200)
+    assert np.array_equal(mens_frame["spend"].to_numpy(), before)
+
+
+@pytest.fixture(scope="module")
+def winsorized(real_frames):
+    return ate.winsorization_robustness(real_frames)
+
+
+def test_winsorization_returns_two_labeled_variants(winsorized):
+    assert len(winsorized) == 4, (
+        f"winsorization_robustness returned {len(winsorized)} rows, expected "
+        "4 (2 arms x 2 labeled variants). Returning only the aggressive "
+        "variant would invite a reader to think the headline is fragile."
+    )
+    assert set(winsorized["variant"]) == {"topcode_499", "pct_99_9"}
+    assert set(winsorized["arm"]) == {"mens", "womens"}
+    for column in ("threshold", "n_trimmed", "effect", "ci_low", "ci_high"):
+        assert column in winsorized.columns
+    assert (winsorized["n_trimmed"] >= 0).all()
+
+
+def test_winsorization_pct_99_9_moves_the_estimate(winsorized):
+    mens = winsorized.loc[
+        (winsorized["arm"] == "mens") & (winsorized["variant"] == "pct_99_9")
+    ]
+    effect = float(mens["effect"].iloc[0])
+    assert effect == pytest.approx(0.6493, abs=0.01), (
+        f"mens 99.9th-percentile winsorized ATE is {effect:.4f}, expected "
+        "~0.6493 -- a ~16% drop from the raw 0.7698. That drop is an "
+        "expected, documented property of this data, not a regression: with "
+        "only 267 non-zero treated spenders the 99.9th percentile of the "
+        "mostly-zero spend column is $233.30, so this variant trims 43 of "
+        "the 267 real purchases. Sign, significance, and the qualitative "
+        "conclusion all survive."
+    )
+    assert float(mens["ci_low"].iloc[0]) == pytest.approx(0.4289, abs=0.01)
+    assert float(mens["ci_high"].iloc[0]) == pytest.approx(0.8697, abs=0.01)
+    assert int(mens["n_trimmed"].iloc[0]) == 43
+    assert float(mens["threshold"].iloc[0]) == pytest.approx(233.30, abs=0.05)
+
+    womens = winsorized.loc[
+        (winsorized["arm"] == "womens") & (winsorized["variant"] == "pct_99_9")
+    ]
+    assert float(womens["effect"].iloc[0]) == pytest.approx(0.3620, abs=0.01)
+
+
+def test_topcode_variant_is_closer_to_raw_than_the_stress_test(winsorized, table):
+    for arm in ("mens", "womens"):
+        raw = float(
+            table.loc[
+                (table["arm"] == arm) & (table["outcome"] == "spend"), "effect"
+            ].iloc[0]
+        )
+        rows = winsorized.loc[winsorized["arm"] == arm].set_index("variant")
+        topcode = abs(float(rows.loc["topcode_499", "effect"]) - raw)
+        stress = abs(float(rows.loc["pct_99_9", "effect"]) - raw)
+        assert topcode < stress, (
+            f"{arm}: the $499 top-code variant moved the estimate by "
+            f"{topcode:.4f} and the 99.9th-percentile stress test by "
+            f"{stress:.4f}. The top-code clips at the source data's own "
+            "censoring point and should be a near-no-op; if it moves the "
+            "estimate more than the stress test, the two variants are "
+            "mislabeled."
+        )
+        assert float(rows.loc["topcode_499", "threshold"]) == 499.0
+
+
+def test_headline_path_is_never_winsorized(table, mens_frame):
+    raw = float(
+        table.loc[
+            (table["arm"] == "mens") & (table["outcome"] == "spend"), "effect"
+        ].iloc[0]
+    )
+    assert raw == pytest.approx(0.769827, abs=1e-4), (
+        "the headline spend effect is not the raw-spend value. Winsorization "
+        "must stay confined to winsorization_robustness as a separately "
+        "labeled secondary check; applying it on the headline path would "
+        "publish a trimmed number as the result (threat T-02-08)."
+    )
+    assert float(mens_frame["spend"].max()) == pytest.approx(499.0)
+
+
+def test_winsorization_does_not_mutate_input(mens_frame, womens_frame):
+    before = mens_frame["spend"].to_numpy().copy()
+    ate.winsorization_robustness({"mens": mens_frame, "womens": womens_frame})
+    assert np.array_equal(mens_frame["spend"].to_numpy(), before), (
+        "winsorization_robustness clipped the caller's frame in place; every "
+        "later estimate on that frame would silently use trimmed spend"
+    )
