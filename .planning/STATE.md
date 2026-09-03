@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-03T18:23:05.915Z"
-last_activity: 2026-09-03 -- Completed 02-01 (shared primitives)
+last_updated: "2026-09-03T19:19:49.937Z"
+last_activity: 2026-09-03
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 11
-  completed_plans: 6
-  percent: 55
+  completed_plans: 7
+  percent: 14
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 02 (experiment-validity) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
-Last activity: 2026-09-03 -- Completed 02-01 (shared primitives: REPORTS/FIGURES constants, build_arm_vs_arm_frame, Phase 2 fixtures)
+Last activity: 2026-09-03
 
-Progress: [██████░░░░] 55%
+Progress: [██████░░░░] 64%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [██████░░░░] 55%
 | Phase 01 P03 | 30min | 2 tasks | 5 files |
 | Phase 01 P04 | 45min | 3 tasks | 8 files |
 | Phase 02 P01 | 26min | 3 tasks | 5 files |
+| Phase 02 P02 | 35min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,11 @@ Recent decisions affecting current work:
 - [Phase 01-04]: Three narrow Parquet artifacts (analysis_table, mens_vs_control, womens_vs_control) committed under data/processed/ rather than one wide table -- Phase 2 needs the full table for all pairwise arm comparisons, Phases 3-5 consume the arm frames directly, Phase 6's app loads only what it needs
 - [Phase 02-01]: synthetic_frame spend uses a low-variance gamma base, not a replica of the real spend distribution -- the real column's std of ~15 makes the true ATE unrecoverable within the plan's own 0.35 tolerance at n=4000
 - [Phase 02-01]: VALID-01/VALID-02 left Pending despite appearing in the plan frontmatter -- this plan builds shared primitives only and computes no balance table or ATE; plans 02-02 and 02-03 satisfy them
+- [Phase 02-02]: SMD denominator is the Austin (2009) simple average of the two group variances (Bernoulli for binary covariates), never the n-weighted pooled or combined-sample SD, which would bias every SMD toward zero
+- [Phase 02-02]: Two opposite one-hot conventions coexist deliberately -- all K levels for the balance table so no level is invisible on the Love plot, K-1 plus a constant for the MNLogit design matrix to avoid perfect collinearity; each call site comments the other
+- [Phase 02-02]: per_covariate_pvalues tests the 7 raw features, not the 11 expanded one-hot levels, so the multiple-comparisons count stays the 21 the report quotes
+- [Phase 02-02]: No test or docstring claims a significant per-covariate p-value -- none exists (min 0.19377). Acceptance is pre-registered: every |SMD| < 0.1 across all three comparisons plus a non-rejecting omnibus LR test (11.1301 / df 18 / p 0.888753)
+- [Phase 02-02]: VALID-01 marked complete here -- this plan computes the three-way balance check and the omnibus test; plans 02-05 and 02-06 only persist and narrate those numbers
 
 ### Pending Todos
 
@@ -105,6 +111,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-03T18:23:05.909Z
+Last session: 2026-09-03T19:19:33.206Z
 Stopped at: Completed 02-01-PLAN.md
 Resume file: None
