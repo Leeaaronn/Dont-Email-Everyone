@@ -35,6 +35,16 @@ odd plot. They are stated here so a future agent does not "simplify" them.
     correct for their own call site and must not be unified
     (RESEARCH.md Pitfall 6).
 
+(c) `MNLogit`'s endog is integer-coded inside `omnibus_lr_test` via
+    `pd.Categorical(...).codes`. Under statsmodels 0.15.0 with pandas
+    3.0.5, both a `str` endog and a `categorical` endog raise
+    `ValueError: endog has evaluated to an array with multiple columns
+    ...`, because the formula backend expands a non-numeric endog into a
+    K-column dummy matrix and then rejects it. The coding is done at the
+    call site rather than left to the caller, so no consumer can hand in a
+    frame straight off Parquet and get an exception (RESEARCH.md
+    Pitfall 3).
+
 The pre-registered acceptance rule, fixed before any result was computed:
 randomization is accepted if (a) every abs(SMD) is below SMD_THRESHOLD
 across all three pairwise comparisons and (b) the omnibus likelihood-ratio
@@ -47,6 +57,8 @@ evidence against random assignment.
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
+from scipy import stats
 
 from dont_email_everyone import config
 
@@ -213,3 +225,134 @@ def balance_table(df):
     out = pd.DataFrame(rows)
     out["abs_smd"] = out["smd"].abs()
     return out
+
+
+def per_covariate_pvalues(df):
+    """Return the tidy per-covariate significance table for `df`.
+
+    One row per (comparison, covariate) over the 7 raw features in
+    `config.PRE_TREATMENT_FEATURES` -- not the 11 expanded one-hot levels --
+    so the table has 21 rows on the full analysis table. 21 is the number
+    the report's multiple-comparisons arithmetic quotes; testing expanded
+    levels instead would silently change it to 33. Columns are
+    `comparison`, `covariate`, `test`, `statistic`, `p_value`. A `str`
+    covariate is tested with `chi2_contingency` on the two-arm crosstab and
+    recorded as `"chi2"`; a numeric covariate uses an unequal-variance
+    (Welch) t-test and is recorded as `"welch_t"`.
+
+    These p-values are reported for completeness and are deliberately NOT
+    part of the acceptance criterion. With 21 tests, roughly one p-value
+    below 0.05 is expected under perfect randomization, so a single
+    significant covariate would be noise and would not overturn the
+    randomization conclusion; the pre-registered rule (module docstring)
+    rests on the SMD threshold and the omnibus test instead. As a fact
+    about this dataset, the observed minimum is 0.19377 (`channel`, Mens
+    vs Womens) -- no covariate here is significant at any conventional
+    level.
+
+    A comparison whose second arm is absent from `df` -- a two-arm frame
+    handed in by mistake -- yields NaN for that row rather than raising.
+    NaN is not less than 0.05, so such a row cannot masquerade as a
+    passing test; `omnibus_lr_test` carries the explicit three-arm guard.
+    The input frame is never mutated.
+    """
+    feats = list(config.PRE_TREATMENT_FEATURES)
+    _guard_no_post_treatment(feats)
+    cats = set(_categorical_features(df, feats))
+    labels = df["segment"].to_numpy()
+
+    rows = []
+    for label_a, label_b in _comparison_pairs():
+        in_a = labels == label_a
+        in_b = labels == label_b
+        for covariate in feats:
+            values = df[covariate].to_numpy()
+            a, b = values[in_a], values[in_b]
+            if a.size == 0 or b.size == 0:
+                kind = "chi2" if covariate in cats else "welch_t"
+                statistic = p_value = float("nan")
+            elif covariate in cats:
+                kind = "chi2"
+                observed = pd.crosstab(
+                    np.concatenate([a, b]),
+                    np.concatenate(
+                        [np.repeat(label_a, a.size), np.repeat(label_b, b.size)]
+                    ),
+                )
+                result = stats.chi2_contingency(observed)
+                statistic, p_value = float(result.statistic), float(result.pvalue)
+            else:
+                kind = "welch_t"
+                result = stats.ttest_ind(a, b, equal_var=False)
+                statistic, p_value = float(result.statistic), float(result.pvalue)
+            rows.append(
+                {
+                    "comparison": f"{label_a} vs {label_b}",
+                    "covariate": covariate,
+                    "test": kind,
+                    "statistic": statistic,
+                    "p_value": p_value,
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def omnibus_lr_test(df):
+    """Return the single omnibus multinomial-logit LR test on `df`.
+
+    Regresses arm assignment on the full pre-treatment covariate vector and
+    compares that fit to the intercept-only model. The question it answers
+    is the one the randomization claim actually needs: does *anything* about
+    a customer predict which arm they landed in? One test, one p-value, no
+    multiple-comparisons arithmetic. This -- not a per-covariate p-value --
+    is the failure signal named in the module's pre-registered rule and in
+    ROADMAP Phase 2 success criterion #2.
+
+    Returns `{"lr_statistic", "df", "p_value"}`. Verified on the committed
+    64,000-row analysis table: 11.1301 / 18 / 0.888753.
+
+    Runs on the full three-arm table, never on an arm-vs-control frame --
+    hence the explicit three-arm guard below. The input is not mutated.
+    """
+    segments = pd.unique(df["segment"])
+    if len(segments) != 3:
+        raise ValueError(
+            f"omnibus_lr_test needs all three arms, got {len(segments)} "
+            f"distinct segment values: {sorted(segments)}. This test runs on "
+            "the full analysis table; an arm-vs-control frame would silently "
+            "answer a different question (does assignment differ between two "
+            "of the three arms) than the one the randomization claim needs."
+        )
+
+    expanded, _ = _expand_covariates(df, drop_first=True)
+    # MNLogit design matrix: K-1 levels plus the constant added here.
+    # Retaining all K levels alongside an intercept is perfectly collinear
+    # and produces a singular Hessian or nonsense standard errors. The
+    # balance_table() call site deliberately uses the opposite convention
+    # (all K, so no level is invisible on the Love plot) -- the two must
+    # not be unified (RESEARCH.md Pitfall 6).
+    design = sm.add_constant(expanded)
+
+    # Integer-code the endog: a `str` endog AND a `categorical` endog both
+    # raise under statsmodels 0.15.0 with pandas 3.0.5 (module docstring,
+    # decision (c)). The array API is used rather than the formula API so
+    # this coding is visible at the call site instead of hidden in an
+    # .assign().
+    endog = pd.Categorical(df["segment"]).codes
+    # disp=0 suppresses the optimizer's per-iteration output (this module
+    # prints nothing); maxiter=200 because the default 35 is not guaranteed
+    # to converge on a wider design.
+    result = sm.MNLogit(endog, design).fit(disp=0, maxiter=200)
+
+    # `llr` is the documented attribute -2*(llnull - llf); a hand-fitted
+    # intercept-only model agrees to 6 decimals, so there is no reason to
+    # fit one. df_model = 18 = 9 expanded covariates x 2 non-baseline
+    # equations. The LR statistic is invariant to which arm statsmodels
+    # picks as the baseline category, so the alphabetical default needs no
+    # configuration.
+    return {
+        "lr_statistic": float(result.llr),
+        "df": int(result.df_model),
+        "p_value": float(result.llr_pvalue),
+    }
