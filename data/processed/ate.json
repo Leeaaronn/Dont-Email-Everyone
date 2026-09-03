@@ -1,0 +1,181 @@
+{
+  "generated_by": "dont_email_everyone.pipeline.analyze",
+  "effects": [
+    {
+      "arm": "mens",
+      "outcome": "visit",
+      "unit": "pp",
+      "control_base_rate": 0.10616727682343002,
+      "effect": 0.07658956365153388,
+      "se": 0.0033859672707970134,
+      "ci_low": 0.06995318974794036,
+      "ci_high": 0.0832259375551274,
+      "p_raw": 2.7735980189820346e-113,
+      "n_treated": 21307,
+      "n_control": 21306,
+      "effect_adj": 0.07605926468497408,
+      "ci_low_adj": 0.06951843132029813,
+      "ci_high_adj": 0.08260009804965003,
+      "p_holm": 1.6641588113892207e-112,
+      "reject_holm": true
+    },
+    {
+      "arm": "mens",
+      "outcome": "conversion",
+      "unit": "pp",
+      "control_base_rate": 0.005726086548390125,
+      "effect": 0.0068050065196159255,
+      "se": 0.0009208943964457762,
+      "ci_low": 0.005000086669017453,
+      "ci_high": 0.008609926370214398,
+      "p_raw": 1.4731292655147021e-13,
+      "n_treated": 21307,
+      "n_control": 21306,
+      "effect_adj": 0.006773492096981171,
+      "ci_low_adj": 0.004970878032924694,
+      "ci_high_adj": 0.008576106161037649,
+      "p_holm": 5.892517062058809e-13,
+      "reject_holm": true
+    },
+    {
+      "arm": "mens",
+      "outcome": "spend",
+      "unit": "$",
+      "control_base_rate": 0.6527893551112361,
+      "effect": 0.7698271558945627,
+      "se": 0.14524996883999752,
+      "ci_low": 0.4851424482126025,
+      "ci_high": 1.054511863576523,
+      "p_raw": 1.1579254582312593e-07,
+      "n_treated": 21307,
+      "n_control": 21306,
+      "effect_adj": 0.7668731049546283,
+      "ci_low_adj": 0.4825033840145526,
+      "ci_high_adj": 1.051242825894704,
+      "p_holm": 3.473776374693778e-07,
+      "reject_holm": true
+    },
+    {
+      "arm": "womens",
+      "outcome": "visit",
+      "unit": "pp",
+      "control_base_rate": 0.10616727682343002,
+      "effect": 0.04523310658705318,
+      "se": 0.003234537841627255,
+      "ci_low": 0.03889352891083184,
+      "ci_high": 0.05157268426327452,
+      "p_raw": 1.9407690497302942e-44,
+      "n_treated": 21387,
+      "n_control": 21306,
+      "effect_adj": 0.045409116458176135,
+      "ci_low_adj": 0.039152952250682355,
+      "ci_high_adj": 0.051665280665669916,
+      "p_holm": 9.703845248651472e-44,
+      "reject_holm": true
+    },
+    {
+      "arm": "womens",
+      "outcome": "conversion",
+      "unit": "pp",
+      "control_base_rate": 0.005726086548390125,
+      "effect": 0.0031110575110852652,
+      "se": 0.0008226963402129848,
+      "ci_low": 0.0014986023140549037,
+      "ci_high": 0.004723512708115627,
+      "p_raw": 0.0001558623950231931,
+      "n_treated": 21387,
+      "n_control": 21306,
+      "effect_adj": 0.0031124034370694736,
+      "ci_low_adj": 0.0015013664716176133,
+      "ci_high_adj": 0.004723440402521334,
+      "p_holm": 0.0003117247900463862,
+      "reject_holm": true
+    },
+    {
+      "arm": "womens",
+      "outcome": "spend",
+      "unit": "$",
+      "control_base_rate": 0.6527893551112361,
+      "effect": 0.42441221593659756,
+      "se": 0.13033590994571234,
+      "ci_low": 0.16895852655074556,
+      "ci_high": 0.6798659053224496,
+      "p_raw": 0.001128762735566473,
+      "n_treated": 21387,
+      "n_control": 21306,
+      "effect_adj": 0.4246386475762211,
+      "ci_low_adj": 0.16935717533961292,
+      "ci_high_adj": 0.6799201198128293,
+      "p_holm": 0.001128762735566473,
+      "reject_holm": true
+    }
+  ],
+  "bootstrap_spend_mens": {
+    "ci_low": 0.48451391052831355,
+    "ci_high": 1.0557860882979229,
+    "n_resamples": 4000,
+    "seed": 20260902,
+    "method": "percentile"
+  },
+  "omnibus_balance_lr_test": {
+    "lr_statistic": 11.130125427909661,
+    "df": 18,
+    "p_value": 0.8887532974792363
+  },
+  "winsorization_robustness": [
+    {
+      "arm": "mens",
+      "variant": "topcode_499",
+      "threshold": 499.0,
+      "n_trimmed": 0,
+      "effect": 0.7698271558945627,
+      "ci_low": 0.4851424482126025,
+      "ci_high": 1.054511863576523
+    },
+    {
+      "arm": "mens",
+      "variant": "pct_99_9",
+      "threshold": 233.3000799999939,
+      "n_trimmed": 43,
+      "effect": 0.6492564056199656,
+      "ci_low": 0.42885279633277557,
+      "ci_high": 0.8696600149071556
+    },
+    {
+      "arm": "womens",
+      "variant": "topcode_499",
+      "threshold": 499.0,
+      "n_trimmed": 0,
+      "effect": 0.42441221593659756,
+      "ci_low": 0.16895852655074556,
+      "ci_high": 0.6798659053224496
+    },
+    {
+      "arm": "womens",
+      "variant": "pct_99_9",
+      "threshold": 209.91407999999794,
+      "n_trimmed": 43,
+      "effect": 0.3619961295937487,
+      "ci_low": 0.16681233675492718,
+      "ci_high": 0.5571799224325702
+    }
+  ],
+  "balance_summary": {
+    "smd_threshold": 0.1,
+    "max_abs_smd": 0.016899516199233428,
+    "n_covariate_comparisons": 33,
+    "n_at_or_above_threshold": 0,
+    "min_p_value": 0.1937681462080613
+  },
+  "coverage_summary": {
+    "cell_sizes": [
+      42613,
+      4000,
+      2000,
+      1000,
+      400
+    ],
+    "n_replicates": 4000,
+    "true_effect": 0.7698271558945368
+  }
+}
