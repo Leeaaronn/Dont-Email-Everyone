@@ -59,8 +59,10 @@ selling point is that its numbers are correct.
 
 import types
 
+import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
+from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
 from dont_email_everyone import config
@@ -301,3 +303,142 @@ def apply_holm(table, alpha: float = 0.05):
         table["p_raw"].to_numpy(), alpha=alpha, method="holm"
     )
     return table.assign(p_holm=p_adjusted, reject_holm=reject)
+
+
+def _mean_difference(treated, control, axis=-1):
+    """Vectorized treated-minus-control mean, over the axis scipy supplies.
+
+    Written to accept `axis` and reduce along it so `vectorized=True` can
+    resample all replicates in one array operation rather than looping.
+    """
+    return treated.mean(axis=axis) - control.mean(axis=axis)
+
+
+def bootstrap_spend_ate(frame, n_resamples: int = 4000, seed: int = 20260902) -> dict:
+    """Return a seeded percentile bootstrap interval for the spend ATE.
+
+    A non-parametric cross-check on the analytic HC3 interval, which is the
+    one outcome where the analytic interval is most open to challenge:
+    spend is zero-inflated and heavily right-skewed, so a reader may
+    reasonably ask whether a normal-theory interval is credible.
+
+    It is. On the mens frame the bootstrap gives [0.4845, 1.0558] against
+    the analytic [0.48514, 1.05451] -- agreement to roughly one cent at
+    full arm size. That is the honest reading of the result: at
+    n = 42,613 the central limit theorem has done its work and the analytic
+    interval is fine. The report must NOT claim the analytic test is wrong
+    because spend is zero-inflated; this cross-check is the evidence that
+    it is not.
+
+    Seed-to-seed wobble is about $0.003 at R = 4000 (seed 7 gives
+    [0.4873, 1.0550]), so the defensible acceptance claim is agreement
+    within $0.02, never exact equality across seeds. Two calls at the SAME
+    seed do return identical endpoints, which is why `seed`, `method`, and
+    `n_resamples` are echoed back in the result: `reports/validity.md`
+    quotes them beside the interval so the number is reproducible from the
+    report alone.
+
+    `method="percentile"` deliberately, rather than the bias-corrected
+    accelerated variant: the latter is roughly 12x slower here and yields a
+    shifted interval that would no longer match the analytic cross-check
+    this function exists to perform. The frame is read only; `.to_numpy()`
+    copies the two spend vectors out before any resampling.
+    """
+    treated = frame.loc[frame["treatment"] == 1, "spend"].to_numpy()
+    control = frame.loc[frame["treatment"] == 0, "spend"].to_numpy()
+    result = stats.bootstrap(
+        (treated, control),
+        _mean_difference,
+        n_resamples=n_resamples,
+        method="percentile",
+        vectorized=True,
+        confidence_level=0.95,
+        # `rng=`, not the legacy random-state keyword it replaces: `rng` is
+        # the modern SPEC-7 name, and the older spelling is on a
+        # deprecation path in scipy even though both still bind today.
+        rng=np.random.default_rng(seed),
+    )
+    return {
+        "ci_low": float(result.confidence_interval.low),
+        "ci_high": float(result.confidence_interval.high),
+        "n_resamples": int(n_resamples),
+        "seed": int(seed),
+        "method": "percentile",
+    }
+
+
+# The source data top-codes spend at $499. Clipping there is a near-no-op
+# that addresses the censoring point directly (PITFALLS.md Pitfall 13); the
+# 99.9th percentile is a deliberate stress test. Both are returned so
+# neither can be read alone.
+_TOPCODE = 499.0
+
+
+def winsorization_robustness(frames):
+    """Return the four-row labeled winsorization robustness table.
+
+    Two arms x two clearly labeled variants, never one:
+
+    - `topcode_499` clips spend at $499, the source data's own top-code.
+      This is the near-no-op that speaks directly to the censoring concern
+      in PITFALLS.md Pitfall 13: only 8 mens and 6 womens observations sit
+      at the cap, so the estimate barely moves.
+    - `pct_99_9` clips at the 99.9th percentile of that frame's spend
+      column. This is a stress test, not a headline.
+
+    **Expect the stress test to move the estimate a lot, and do not treat
+    that as a red flag.** The mens spend ATE drops about 16%, from 0.7698
+    to 0.6493 [0.4289, 0.8697]; womens drops from 0.4244 to 0.3620. The
+    reason is arithmetic, not instability: there are only 267 non-zero
+    treated spenders, so the 99.9th percentile of the mostly-zero spend
+    column is just $233.30, and a "99.9th percentile winsorization"
+    therefore trims 43 of the 267 real purchases -- a far more aggressive
+    intervention than the label suggests. Sign, significance, and the
+    qualitative conclusion all survive.
+
+    Reporting only the `pct_99_9` row would invite a reader to conclude the
+    headline is fragile when the actual censoring artifact is much smaller,
+    which is exactly why both variants are returned, each with its
+    `threshold` and `n_trimmed` so a reader can see how aggressive it was.
+
+    Winsorization appears nowhere on the headline path: `ate_table` returns
+    raw-spend results and this function clips a `.copy()`, so no caller's
+    frame is modified and no robustness row can be mistaken for the
+    published number (threat T-02-08).
+
+    Columns: `arm`, `variant`, `threshold`, `n_trimmed`, `effect`,
+    `ci_low`, `ci_high`. `n_trimmed` counts rows strictly ABOVE the
+    threshold, so `topcode_499` reports 0 rather than 8: the source data is
+    already capped at $499, so the 8 mens observations sitting exactly at
+    the cap are untouched by clipping there. Zero is the correct answer and
+    is itself the finding -- it is the measurement of how small the
+    censoring artifact actually is.
+    """
+    rows = []
+    for arm_key in config.ARMS:
+        frame = frames[arm_key]
+        _guard_arm_vs_control(frame, arm_key)
+        spend = frame["spend"]
+        variants = (
+            ("topcode_499", _TOPCODE),
+            ("pct_99_9", float(spend.quantile(0.999))),
+        )
+        for variant, threshold in variants:
+            # `.copy()` first, then assign: clipping in place would leave
+            # every later estimate on the caller's frame silently trimmed.
+            clipped = frame.copy()
+            clipped["spend"] = spend.clip(upper=threshold)
+            result = _fit(clipped, "spend ~ treatment")
+            ci_low, ci_high = result.conf_int().loc["treatment"]
+            rows.append(
+                {
+                    "arm": arm_key,
+                    "variant": variant,
+                    "threshold": float(threshold),
+                    "n_trimmed": int((spend > threshold).sum()),
+                    "effect": float(result.params["treatment"]),
+                    "ci_low": float(ci_low),
+                    "ci_high": float(ci_high),
+                }
+            )
+    return pd.DataFrame(rows)
