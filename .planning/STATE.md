@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 2 context gathered
-last_updated: "2026-09-03T04:16:13.176Z"
-last_activity: 2026-09-03
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-09-03T18:23:05.915Z"
+last_activity: 2026-09-03 -- Completed 02-01 (shared primitives)
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 14
+  total_plans: 11
+  completed_plans: 6
+  percent: 55
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 2 — experiment validity
+**Current focus:** Phase 02 — experiment-validity
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-09-03
+Phase: 02 (experiment-validity) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-09-03 -- Completed 02-01 (shared primitives: REPORTS/FIGURES constants, build_arm_vs_arm_frame, Phase 2 fixtures)
 
-Progress: [████████░░] 80%
+Progress: [██████░░░░] 55%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [████████░░] 80%
 | Phase 01 P02 | 24min | 3 tasks | 9 files |
 | Phase 01 P03 | 30min | 2 tasks | 5 files |
 | Phase 01 P04 | 45min | 3 tasks | 8 files |
+| Phase 02 P01 | 26min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 01-03]: RawHillstrom schema built as pa.DataFrameSchema (object style) with coerce=False, resolving PATTERNS.md conflicts C1/C3; string columns declared as str not object, resolving conflict C2.
 - [Phase 01-04]: build_all()'s __main__ guard replaces plan 01-02's bootstrap checksum-generation __main__ block, per this plan's single-entrypoint instruction and the exactly-one-if__name__ acceptance criterion; sha256_file/read_expected remain importable
 - [Phase 01-04]: Three narrow Parquet artifacts (analysis_table, mens_vs_control, womens_vs_control) committed under data/processed/ rather than one wide table -- Phase 2 needs the full table for all pairwise arm comparisons, Phases 3-5 consume the arm frames directly, Phase 6's app loads only what it needs
+- [Phase 02-01]: synthetic_frame spend uses a low-variance gamma base, not a replica of the real spend distribution -- the real column's std of ~15 makes the true ATE unrecoverable within the plan's own 0.35 tolerance at n=4000
+- [Phase 02-01]: VALID-01/VALID-02 left Pending despite appearing in the plan frontmatter -- this plan builds shared primitives only and computes no balance table or ATE; plans 02-02 and 02-03 satisfy them
 
 ### Pending Todos
 
@@ -102,6 +105,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-03T04:16:13.165Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-experiment-validity/02-CONTEXT.md
+Last session: 2026-09-03T18:23:05.909Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
