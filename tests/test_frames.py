@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from dont_email_everyone import config
-from dont_email_everyone.frames import build_all_frames
+from dont_email_everyone.frames import build_all_frames, build_arm_vs_arm_frame
 
 
 @pytest.fixture(scope="module")
@@ -66,6 +66,52 @@ def test_frames_do_not_mutate_input(raw_df):
     before_shape = raw_df.shape
     before_columns = list(raw_df.columns)
     build_all_frames(raw_df)
+    assert raw_df.shape == before_shape
+    assert list(raw_df.columns) == before_columns
+
+
+def test_arm_vs_arm_frame_shape(raw_df):
+    frame = build_arm_vs_arm_frame(raw_df)
+    assert frame.shape == (42694, 12), (
+        f"arm-vs-arm frame is {frame.shape}, expected (42694, 12). 64000 "
+        "rows means the control arm was never dropped; 42693 rows is the "
+        "exclusion-form signature (everything except Mens E-Mail), which "
+        "keeps all 21306 control customers and drops the mens arm entirely "
+        "-- the opposite of what this frame is for (PITFALLS.md Pitfall 1)."
+    )
+    counts = frame["segment"].value_counts().to_dict()
+    assert counts == {
+        config.ARMS["womens"]: 21387,
+        config.ARMS["mens"]: 21307,
+    }, f"arm-vs-arm segment counts are {counts}, expected Womens 21387 / Mens 21307"
+
+
+def test_arm_vs_arm_frame_has_no_control_rows(raw_df):
+    frame = build_arm_vs_arm_frame(raw_df)
+    control_count = int((frame["segment"] == config.CONTROL).sum())
+    assert control_count == 0, (
+        f"arm-vs-arm frame contains {control_count} control rows. This frame "
+        "compares the two treated arms to each other; any control row here "
+        "means it was built by excluding one arm rather than by positive "
+        "membership on both arm labels."
+    )
+    assert frame["segment"].nunique() == 2
+
+
+def test_arm_vs_arm_frame_has_no_treatment_column(raw_df):
+    frame = build_arm_vs_arm_frame(raw_df)
+    assert "treatment" not in frame.columns, (
+        "the arm-vs-arm frame has no control arm, so a treatment indicator "
+        "here would be meaningless and would invite an ATE to be estimated "
+        "from it. This frame exists only for the third pairwise balance "
+        "comparison (ROADMAP Phase 2 success criterion #1)."
+    )
+
+
+def test_arm_vs_arm_frame_does_not_mutate_input(raw_df):
+    before_shape = raw_df.shape
+    before_columns = list(raw_df.columns)
+    build_arm_vs_arm_frame(raw_df)
     assert raw_df.shape == before_shape
     assert list(raw_df.columns) == before_columns
 
