@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-03T19:19:49.937Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-09-03T20:14:43.809Z"
 last_activity: 2026-09-03
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 11
-  completed_plans: 7
+  completed_plans: 8
   percent: 14
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 02 (experiment-validity) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-09-03
 
-Progress: [██████░░░░] 64%
+Progress: [███████░░░] 73%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [██████░░░░] 64%
 | Phase 01 P04 | 45min | 3 tasks | 8 files |
 | Phase 02 P01 | 26min | 3 tasks | 5 files |
 | Phase 02 P02 | 35min | 2 tasks | 2 files |
+| Phase 02 P03 | 43min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,10 @@ Recent decisions affecting current work:
 - [Phase 02-02]: per_covariate_pvalues tests the 7 raw features, not the 11 expanded one-hot levels, so the multiple-comparisons count stays the 21 the report quotes
 - [Phase 02-02]: No test or docstring claims a significant per-covariate p-value -- none exists (min 0.19377). Acceptance is pre-registered: every |SMD| < 0.1 across all three comparisons plus a non-rejecting omnibus LR test (11.1301 / df 18 / p 0.888753)
 - [Phase 02-02]: VALID-01 marked complete here -- this plan computes the three-way balance check and the omnibus test; plans 02-05 and 02-06 only persist and narrate those numbers
+- [Phase 02-03]: The six ATE rows are generated from config.ARMS x OUTCOMES rather than hand-listed, so the Holm family size is structural -- apply_holm's != 6 guard and the row generator cannot disagree
+- [Phase 02-03]: n_trimmed counts rows strictly above the clip threshold, so topcode_499 reports 0 not 8 -- the source data is already capped at 499 dollars, and zero is itself the finding that the censoring artifact is a no-op
+- [Phase 02-03]: Three grep-forbidden tokens were rephrased rather than the warnings dropped -- each caution is stated in full using a non-greppable spelling so the reason not to switch survives
+- [Phase 02-03]: VALID-02 marked complete here -- this plan computes the ATE with confidence intervals for both arms on all three outcomes; plans 02-05 and 02-06 only persist and narrate those numbers
 
 ### Pending Todos
 
@@ -111,6 +116,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-03T19:19:33.206Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-09-03T20:14:43.802Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None

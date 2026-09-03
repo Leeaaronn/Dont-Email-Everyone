@@ -17,7 +17,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Experiment Validity
 
 - [x] **VALID-01**: Randomization balance check — pre-treatment covariates compared across the three arms (mens email, womens email, no email) to confirm random assignment held
-- [ ] **VALID-02**: Average Treatment Effect (ATE) computed with confidence intervals, for each treatment arm vs. control, on visit/conversion/spend outcomes (Statsmodels/SciPy)
+- [x] **VALID-02**: Average Treatment Effect (ATE) computed with confidence intervals, for each treatment arm vs. control, on visit/conversion/spend outcomes (Statsmodels/SciPy)
 
 ### Uplift Modeling
 
@@ -58,7 +58,7 @@ Roadmap note: Phase 5 (Business & Policy Layer) is the phase where these quality
 | DATA-03 | Phase 1 — Data Foundation | Complete |
 | DATA-04 | Phase 1 — Data Foundation | Complete |
 | VALID-01 | Phase 2 — Experiment Validity | Complete |
-| VALID-02 | Phase 2 — Experiment Validity | Pending |
+| VALID-02 | Phase 2 — Experiment Validity | Complete |
 | UPLIFT-02 | Phase 3 — Uplift Evaluation Metric | Pending |
 | UPLIFT-01 | Phase 4 — Uplift Modeling | Pending |
 | APP-01 | Phase 6 — Streamlit App & Deployment | Pending |
