@@ -12,7 +12,7 @@ The project moves from raw provenance to a defended dollar figure in a strict de
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Data Foundation** - Vendored, checksummed, schema-validated ingest and two mutually exclusive arm-vs-control analysis frames
+- [x] **Phase 1: Data Foundation** - Vendored, checksummed, schema-validated ingest and two mutually exclusive arm-vs-control analysis frames (completed 2026-09-02)
 - [ ] **Phase 2: Experiment Validity** - Balance check and ATE with intervals, proving randomization held before any modeling
 - [ ] **Phase 3: Uplift Evaluation Metric** - Hand-rolled Qini / uplift-at-k, unit-tested against synthetic oracles before any model exists
 - [ ] **Phase 4: Uplift Modeling** - T-learner per arm, evaluated honestly on holdout against a permutation null and a response-model baseline
@@ -120,7 +120,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Foundation | 4/5 | In Progress|  |
+| 1. Data Foundation | 5/5 | Complete   | 2026-09-02 |
 | 2. Experiment Validity | 0/TBD | Not started | - |
 | 3. Uplift Evaluation Metric | 0/TBD | Not started | - |
 | 4. Uplift Modeling | 0/TBD | Not started | - |
