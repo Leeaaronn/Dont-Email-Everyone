@@ -159,3 +159,7 @@ None. No placeholder values, no hardcoded empty returns, no TODO or FIXME marker
 ## Threat Flags
 
 None. This plan adds no network endpoint, no auth path, no file access, and no schema at a trust boundary — `coverage.py` is a pure in-memory simulation that reads and writes nothing.
+
+## Self-Check: PASSED
+
+Both created files exist on disk (`dont_email_everyone/coverage.py` 277 lines, `tests/test_coverage.py` 410 lines) and all four task commits (`a5c60b4`, `9897985`, `da296d0`, `a22e554`) plus the summary commit (`5e49a67`) are present in `git log`.
