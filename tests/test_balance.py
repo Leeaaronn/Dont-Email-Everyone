@@ -221,3 +221,109 @@ def test_balance_table_does_not_mutate_input(analysis_df):
     balance.balance_table(analysis_df)
     assert analysis_df.shape == before_shape
     assert list(analysis_df.columns) == before_columns
+
+
+@pytest.fixture(scope="module")
+def pvalues(analysis_df):
+    return balance.per_covariate_pvalues(analysis_df)
+
+
+@pytest.fixture(scope="module")
+def omnibus(analysis_df):
+    return balance.omnibus_lr_test(analysis_df)
+
+
+def test_per_covariate_pvalue_count(pvalues):
+    assert len(pvalues) == 21, (
+        f"per-covariate table has {len(pvalues)} rows, expected 21 (7 raw "
+        "covariates x 3 comparisons). The tests are run on the 7 columns of "
+        "config.PRE_TREATMENT_FEATURES, not on the 11 expanded one-hot "
+        "levels -- 21 is the multiple-comparisons arithmetic the report "
+        "quotes, and 33 would silently change it."
+    )
+    for column in ("comparison", "covariate", "test", "statistic", "p_value"):
+        assert column in pvalues.columns, f"missing {column!r}"
+
+
+def test_per_covariate_test_kinds(pvalues):
+    kinds = pvalues.groupby("covariate")["test"].unique().to_dict()
+    for covariate in ("zip_code", "channel"):
+        assert list(kinds[covariate]) == ["chi2"], (
+            f"{covariate} is a pandas 3.0 `str` column and must be tested "
+            f"with a contingency-table chi-squared, got {kinds[covariate]}"
+        )
+    for covariate in ("recency", "history", "mens", "womens", "newbie"):
+        assert list(kinds[covariate]) == ["welch_t"], (
+            f"{covariate} is numeric and must use an unequal-variance "
+            f"(Welch) t-test, got {kinds[covariate]}"
+        )
+
+
+def test_no_covariate_is_significant(pvalues):
+    n_significant = int((pvalues["p_value"] < 0.05).sum())
+    observed_min = float(pvalues["p_value"].min())
+    assert observed_min == pytest.approx(0.19377, abs=1e-4), (
+        f"minimum per-covariate p-value is {observed_min:.5f}, expected "
+        "0.19377 (channel, Mens vs Womens). This test asserts the observed "
+        "minimum rather than a count of significant covariates on purpose: "
+        "with 21 tests, roughly one p < 0.05 is expected under perfect "
+        "randomization, so a single significant covariate would be noise "
+        "and would NOT fail the randomization claim. The acceptance rule is "
+        "the SMD threshold plus the omnibus test, never a per-covariate "
+        "p-value."
+    )
+    assert n_significant == 0, (
+        f"{n_significant} covariates have p < 0.05. On this data none do "
+        "(all p >= 0.19377). This assertion records that fact; it is not "
+        "the acceptance criterion, and a future dataset producing one or "
+        "two small p-values here would not by itself overturn the "
+        "randomization conclusion."
+    )
+
+
+def test_omnibus_lr_does_not_reject(omnibus):
+    assert set(omnibus) == {"lr_statistic", "df", "p_value"}
+    assert omnibus["df"] == 18, (
+        f"omnibus df is {omnibus['df']}, expected 18 = 9 covariates after "
+        "the K-1 expansion x 2 non-baseline equations. 9 means the design "
+        "matrix was built with all K levels, or the multinomial was "
+        "collapsed to a single binary equation."
+    )
+    assert omnibus["lr_statistic"] == pytest.approx(11.1301, abs=0.01)
+    assert omnibus["p_value"] == pytest.approx(0.888753, abs=1e-4)
+    assert omnibus["p_value"] >= 0.05, (
+        f"the omnibus likelihood-ratio test rejects at p = "
+        f"{omnibus['p_value']:.6f}. This -- not any individual covariate "
+        "p-value -- is the actual failure signal for the randomization "
+        "claim: it asks whether the full covariate vector predicts arm "
+        "assignment at all, in one test, with no multiple-comparisons "
+        "arithmetic."
+    )
+
+
+def test_omnibus_accepts_str_segment_column(analysis_df):
+    assert str(analysis_df["segment"].dtype) == "str", (
+        "this test is only meaningful while `segment` round-trips as the "
+        "pandas 3.0 `str` dtype"
+    )
+    result = balance.omnibus_lr_test(analysis_df)
+    assert result["df"] == 18, (
+        "a `str` endog (and a `categorical` one) raises ValueError under "
+        "statsmodels 0.15.0 with pandas 3.0.5, so the integer coding must "
+        "happen inside omnibus_lr_test rather than being the caller's job "
+        "(RESEARCH.md Pitfall 3)."
+    )
+
+
+def test_omnibus_requires_all_three_arms(mens_frame):
+    with pytest.raises(ValueError, match="2"):
+        balance.omnibus_lr_test(mens_frame)
+
+
+def test_pvalue_functions_do_not_mutate_input(analysis_df):
+    before_shape = analysis_df.shape
+    before_columns = list(analysis_df.columns)
+    balance.per_covariate_pvalues(analysis_df)
+    balance.omnibus_lr_test(analysis_df)
+    assert analysis_df.shape == before_shape
+    assert list(analysis_df.columns) == before_columns
