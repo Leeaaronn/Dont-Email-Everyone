@@ -15,6 +15,12 @@ CHECKSUM_FILE = ROOT / "data" / "raw" / "CHECKSUMS.sha256"
 # data/processed/ (not artifacts/) — CONTEXT.md D-09 is a locked user decision
 # that outranks ARCHITECTURE.md's earlier "artifacts/" naming (PATTERNS.md C5).
 PROCESSED = ROOT / "data" / "processed"
+# reports/ — figures under reports/figures/, the Phase 2 write-up at
+# reports/validity.md — is CONTEXT.md D-06, a locked user decision that
+# establishes the reports convention project-wide; Phase 7's README will
+# embed these PNGs directly.
+REPORTS = ROOT / "reports"
+FIGURES = REPORTS / "figures"
 
 CONTROL = "No E-Mail"
 # MappingProxyType, not a plain dict: this constant guards which frames get

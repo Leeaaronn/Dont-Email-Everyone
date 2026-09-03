@@ -31,3 +31,7 @@ def test_allowlist_and_arms_are_immutable():
 def test_paths_are_cwd_independent():
     assert config.RAW_CSV.is_absolute()
     assert config.RAW_CSV.as_posix().endswith("data/raw/hillstrom.csv")
+    assert config.REPORTS.is_absolute()
+    assert config.REPORTS.as_posix().endswith("reports")
+    assert config.FIGURES.is_absolute()
+    assert config.FIGURES.as_posix().endswith("reports/figures")
