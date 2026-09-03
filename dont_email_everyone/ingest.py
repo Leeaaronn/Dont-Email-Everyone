@@ -65,8 +65,10 @@ def sha256_file(path, chunk_size: int = 1 << 20) -> str:
 
 def read_expected(checksum_path) -> str:
     """Parse the first entry of a `sha256sum`-format sidecar: '<hex>  <filename>'."""
-    first_line = pathlib.Path(checksum_path).read_text().strip().splitlines()[0]
-    return first_line.split()[0].lower()
+    lines = pathlib.Path(checksum_path).read_text().strip().splitlines()
+    if not lines:
+        raise ValueError(f"{checksum_path} is empty; expected a sha256sum-format entry")
+    return lines[0].split()[0].lower()
 
 
 def verify_checksum(csv_path, checksum_path) -> str:
@@ -90,6 +92,12 @@ def verify_checksum(csv_path, checksum_path) -> str:
 # deliberately, so DuckDB's `.df()` output is dtype-identical to what
 # pandas.read_csv produces — hand-built test fixtures in tests/conftest.py
 # stay interchangeable with production data against a single schema.
+# Deliberately a plain dict, not types.MappingProxyType: duckdb.sql()'s
+# `params=` binding raises `NotImplementedException` on a MappingProxyType
+# (verified locally) since it cannot transform that type to a DuckDB
+# LogicalType, so an immutable wrapper here would break load_raw() outright
+# (code review WR-01 considered this fix and it does not apply to this
+# constant for that reason).
 RAW_COLUMNS = {
     "recency": "BIGINT",
     "history_segment": "VARCHAR",
@@ -139,10 +147,11 @@ def build_all() -> None:
     Gate 2 (types): `load_raw` -- raises `duckdb.ConversionException`.
     Gate 3 (values): `RawHillstrom.validate(df, lazy=True)` -- raises
     `SchemaErrors` listing every violation.
-    Gate 4 (experimental structure): `build_all_frames` plus assertions
-    that each frame has exactly two `segment` values and a control count
-    of 21306 -- raises `AssertionError` naming the arm and the observed
-    count.
+    Gate 4 (experimental structure): `build_all_frames` plus explicit
+    checks that each frame has exactly two `segment` values and a control
+    count of 21306 -- raises `ValueError` naming the arm and the observed
+    count. These are plain `if`/`raise` checks, not `assert`, so the gate
+    cannot be silently compiled out under `python -O`/`PYTHONOPTIMIZE`.
 
     Each gate is a separate statement, never combined into one try/except,
     so a failure is diagnosable to exactly one cause. There is no repair,
@@ -167,15 +176,17 @@ def build_all() -> None:
     for arm_key in config.ARMS:
         frame = frames[arm_key]
         n_segments = frame["segment"].nunique()
-        assert n_segments == 2, (
-            f"{arm_key} frame has {n_segments} distinct segment values, "
-            "expected 2 -- the control group may be contaminated"
-        )
+        if n_segments != 2:
+            raise ValueError(
+                f"{arm_key} frame has {n_segments} distinct segment values, "
+                "expected 2 -- the control group may be contaminated"
+            )
         control_count = int((frame["treatment"] == 0).sum())
-        assert control_count == 21306, (
-            f"{arm_key} frame control count is {control_count}, expected "
-            "21306 -- 42693 is the pooled-control signature"
-        )
+        if control_count != 21306:
+            raise ValueError(
+                f"{arm_key} frame control count is {control_count}, expected "
+                "21306 -- 42693 is the pooled-control signature"
+            )
     print(
         "[gate 4/4] frames built: "
         f"mens={frames['mens'].shape} womens={frames['womens'].shape}"

@@ -1,3 +1,5 @@
+import types
+
 from dont_email_everyone import config
 
 
@@ -10,7 +12,7 @@ def test_no_post_treatment_leakage():
 
 
 def test_allowlist_is_exact():
-    assert config.PRE_TREATMENT_FEATURES == [
+    assert config.PRE_TREATMENT_FEATURES == (
         "recency",
         "history",
         "mens",
@@ -18,7 +20,12 @@ def test_allowlist_is_exact():
         "zip_code",
         "newbie",
         "channel",
-    ]
+    )
+
+
+def test_allowlist_and_arms_are_immutable():
+    assert isinstance(config.PRE_TREATMENT_FEATURES, tuple)
+    assert isinstance(config.ARMS, types.MappingProxyType)
 
 
 def test_paths_are_cwd_independent():

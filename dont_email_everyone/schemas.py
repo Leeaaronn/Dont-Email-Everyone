@@ -27,7 +27,9 @@ Reconciliation notes (PATTERNS.md conflicts):
 
 import pandera.pandas as pa  # NOT `import pandera as pa` — deprecated since 0.29.0
 
-HISTORY_SEGMENTS = [
+# Tuples, not lists: these are fixed category constants, never mutated
+# in place (code review WR-01).
+HISTORY_SEGMENTS = (
     "1) $0 - $100",
     "2) $100 - $200",
     "3) $200 - $350",
@@ -35,13 +37,13 @@ HISTORY_SEGMENTS = [
     "5) $500 - $750",
     "6) $750 - $1,000",
     "7) $1,000 +",
-]
+)
 # NB: one of these three zip-code values is the vendored file's own literal
 # misspelling, read directly out of the real data. Do not "correct" it; the
 # schema must match the data as recorded, not a tidied-up idea of it.
-ZIP_CODES = ["Rural", "Surburban", "Urban"]
-CHANNELS = ["Multichannel", "Phone", "Web"]
-SEGMENTS = ["Mens E-Mail", "No E-Mail", "Womens E-Mail"]
+ZIP_CODES = ("Rural", "Surburban", "Urban")
+CHANNELS = ("Multichannel", "Phone", "Web")
+SEGMENTS = ("Mens E-Mail", "No E-Mail", "Womens E-Mail")
 
 BINARY = pa.Check.isin([0, 1])
 
