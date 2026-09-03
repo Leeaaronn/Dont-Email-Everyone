@@ -1,0 +1,223 @@
+"""Tests proving the randomization balance check is computed on
+pre-treatment covariates only, across all three pairwise arm comparisons,
+with the Austin (2009) denominator -- the evidence VALID-01 rests on.
+
+`test_no_post_treatment_covariates` is the load-bearing test. Two naive
+alternatives would both pass while the code is silently wrong: asserting
+the table is non-empty, and asserting on row count alone. A balance table
+built from a leaked outcome column (`visit`, `conversion`, `spend`) or from
+the assignment label itself (`segment`, `treatment`) is still non-empty and
+can still have a plausible row count -- it just reports the treatment effect
+as if it were a covariate imbalance, which inverts the conclusion
+(PITFALLS.md Pitfall 12 error #1).
+
+`test_detects_injected_imbalance` is the companion: it proves the check
+*fires* rather than merely passing, by shifting one covariate in one arm of
+a synthetic frame and requiring an |SMD| at or above the threshold.
+
+These tests deliberately make NO claim that some per-covariate p-value is
+significant. On this data all 21 are >= 0.19377. The acceptance rule is
+pre-registered: every |SMD| < 0.1 across all three comparisons, and an
+omnibus likelihood-ratio test that does not reject at alpha = 0.05.
+"""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from dont_email_everyone import balance, config
+
+POST_TREATMENT = {"visit", "conversion", "spend", "segment", "treatment", "history_segment"}
+
+EXPANDED_COVARIATES = {
+    "recency",
+    "history",
+    "mens",
+    "womens",
+    "newbie",
+    "zip_code_Rural",
+    "zip_code_Surburban",
+    "zip_code_Urban",
+    "channel_Multichannel",
+    "channel_Phone",
+    "channel_Web",
+}
+
+
+@pytest.fixture(scope="module")
+def table(analysis_df):
+    return balance.balance_table(analysis_df)
+
+
+@pytest.fixture
+def hand_frame():
+    """A 6-row frame small enough that every SMD can be computed by hand.
+
+    Three Mens rows then three control rows, so `mean_a` is the mean of the
+    first three values of each column and `mean_b` the mean of the last
+    three. `history` is continuous, `newbie` is binary -- the two branches
+    of the Austin denominator.
+    """
+    return pd.DataFrame(
+        {
+            "recency": np.array([1, 2, 3, 4, 5, 6], dtype="int64"),
+            "history": np.array([10.0, 20.0, 30.0, 45.0, 55.0, 80.0]),
+            "mens": np.array([1, 0, 1, 0, 1, 0], dtype="int64"),
+            "womens": np.array([0, 1, 0, 1, 0, 1], dtype="int64"),
+            "zip_code": pd.Series(
+                ["Rural", "Urban", "Rural", "Urban", "Rural", "Urban"], dtype="str"
+            ),
+            "newbie": np.array([1, 1, 0, 0, 0, 1], dtype="int64"),
+            "channel": pd.Series(
+                ["Phone", "Web", "Phone", "Web", "Phone", "Web"], dtype="str"
+            ),
+            "segment": pd.Series(
+                [config.ARMS["mens"]] * 3 + [config.CONTROL] * 3, dtype="str"
+            ),
+        }
+    )
+
+
+def test_balance_table_row_count(table):
+    assert len(table) == 33, (
+        f"balance table has {len(table)} rows, expected 33 (11 expanded "
+        "covariates x 3 pairwise comparisons). 22 is the two-comparison "
+        "signature -- it means the mens-vs-womens pair was never built, "
+        "which is ROADMAP Phase 2 criterion #1's explicit requirement."
+    )
+
+
+def test_balance_table_columns(table):
+    for column in ("comparison", "covariate", "mean_a", "mean_b", "smd", "abs_smd"):
+        assert column in table.columns, f"balance table is missing {column!r}"
+
+
+def test_all_three_pairwise_comparisons_present(table):
+    comparisons = set(table["comparison"])
+    assert len(comparisons) == 3, f"expected 3 comparisons, got {sorted(comparisons)}"
+    mens_vs_womens = [
+        c
+        for c in comparisons
+        if config.ARMS["mens"] in c and config.ARMS["womens"] in c
+    ]
+    assert len(mens_vs_womens) == 1, (
+        f"no mens-vs-womens comparison in {sorted(comparisons)}. Neither "
+        "arm-vs-control frame contains both treated arms, so iterating only "
+        "build_all_frames covers two of the three required comparisons "
+        "(RESEARCH Pitfall 4)."
+    )
+
+
+def test_no_post_treatment_covariates(table):
+    leaked = set(table["covariate"]) & POST_TREATMENT
+    assert not leaked, (
+        f"post-treatment columns reached the balance table: {sorted(leaked)}. "
+        "An outcome or the assignment label appearing here reports the "
+        "treatment effect as a covariate imbalance, inverting the "
+        "randomization conclusion (PITFALLS.md Pitfall 12 error #1). "
+        "Asserting the table is merely non-empty, or asserting only on row "
+        "count, would both pass in this state."
+    )
+
+
+def test_covariates_are_exactly_the_expanded_allowlist(table):
+    assert set(table["covariate"]) == EXPANDED_COVARIATES
+
+
+def test_max_abs_smd_matches_verified_value(table):
+    observed = float(table["abs_smd"].max())
+    assert observed == pytest.approx(0.016900, abs=1e-4), (
+        f"max |SMD| is {observed:.6f}, expected 0.016900. A value near "
+        "half of this suggests the combined-sample SD was used as the "
+        "denominator instead of the Austin (2009) simple average of the "
+        "two group variances -- that mistake biases every SMD toward zero "
+        "and would make a real imbalance look acceptable."
+    )
+
+
+def test_no_covariate_exceeds_the_threshold(table):
+    flagged = table.loc[table["abs_smd"] >= balance.SMD_THRESHOLD]
+    assert len(flagged) == 0, (
+        f"{len(flagged)} rows at or above the {balance.SMD_THRESHOLD} "
+        f"threshold: {flagged[['comparison', 'covariate', 'smd']].to_dict('records')}"
+    )
+
+
+def test_smd_matches_hand_computation_for_continuous_covariate(hand_frame):
+    table = balance.balance_table(hand_frame)
+    row = table.loc[
+        (table["covariate"] == "history")
+        & (table["comparison"] == f"{config.ARMS['mens']} vs {config.CONTROL}")
+    ]
+    assert len(row) == 1
+
+    a = np.array([10.0, 20.0, 30.0])
+    b = np.array([45.0, 55.0, 80.0])
+    expected = (a.mean() - b.mean()) / np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / 2.0)
+
+    assert float(row["smd"].iloc[0]) == pytest.approx(float(expected), abs=1e-12), (
+        "the continuous-covariate SMD must use the simple average of the "
+        "two group variances with ddof=1, not the sample-size-weighted "
+        "pooled variance a two-sample t-test uses."
+    )
+
+
+def test_smd_matches_hand_computation_for_binary_covariate(hand_frame):
+    table = balance.balance_table(hand_frame)
+    row = table.loc[
+        (table["covariate"] == "newbie")
+        & (table["comparison"] == f"{config.ARMS['mens']} vs {config.CONTROL}")
+    ]
+    assert len(row) == 1
+
+    pa = 2.0 / 3.0
+    pb = 1.0 / 3.0
+    expected = (pa - pb) / np.sqrt((pa * (1 - pa) + pb * (1 - pb)) / 2.0)
+
+    assert float(row["smd"].iloc[0]) == pytest.approx(float(expected), abs=1e-12), (
+        "a binary covariate's SMD denominator must use the Bernoulli "
+        "variance p*(1-p) per group, not the sample variance."
+    )
+
+
+def test_detects_injected_imbalance(synthetic_frame):
+    frame = synthetic_frame(imbalance="recency")
+    table = balance.balance_table(frame)
+    flagged = table.loc[table["abs_smd"] >= balance.SMD_THRESHOLD]
+    assert len(flagged) >= 1, (
+        "a covariate deliberately shifted in the treated arm produced no "
+        "|SMD| at or above the threshold. A balance check that cannot fire "
+        "is not evidence of balance -- it is evidence of nothing."
+    )
+
+
+def test_balanced_synthetic_frame_is_not_flagged(synthetic_frame):
+    frame = synthetic_frame(imbalance=None)
+    table = balance.balance_table(frame)
+    flagged = table.loc[table["abs_smd"] >= balance.SMD_THRESHOLD]
+    assert len(flagged) == 0, (
+        "the default synthetic frame draws every covariate identically in "
+        "both arms, so it is balanced by construction; flagging it means "
+        f"the check is oversensitive. Flagged: {sorted(flagged['covariate'])}"
+    )
+
+
+def test_guard_fires_when_a_post_treatment_column_reaches_the_allowlist(
+    monkeypatch, synthetic_frame
+):
+    frame = synthetic_frame()
+    monkeypatch.setattr(
+        config,
+        "PRE_TREATMENT_FEATURES",
+        tuple(config.PRE_TREATMENT_FEATURES) + ("spend",),
+    )
+    with pytest.raises(ValueError, match="spend"):
+        balance.balance_table(frame)
+
+
+def test_balance_table_does_not_mutate_input(analysis_df):
+    before_shape = analysis_df.shape
+    before_columns = list(analysis_df.columns)
+    balance.balance_table(analysis_df)
+    assert analysis_df.shape == before_shape
+    assert list(analysis_df.columns) == before_columns
