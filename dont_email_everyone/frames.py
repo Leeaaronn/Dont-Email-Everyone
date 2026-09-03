@@ -43,3 +43,31 @@ def build_frame(df, arm_label: str):
 def build_all_frames(df):
     """Return {"mens": frame, "womens": frame}, keyed by config.ARMS."""
     return {key: build_frame(df, arm_label) for key, arm_label in config.ARMS.items()}
+
+
+def build_arm_vs_arm_frame(df):
+    """Return a copy of df restricted to the two treated arms.
+
+    This frame exists solely for the third pairwise balance comparison
+    required by ROADMAP Phase 2 success criterion #1: mens-vs-womens.
+    Neither `mens_vs_control` nor `womens_vs_control` contains both treated
+    arms, so a plan that only iterates `build_all_frames` covers two of the
+    three required comparisons.
+
+    It deliberately carries NO `treatment` column. Neither arm is a control,
+    so no treatment effect is estimable from it; a treatment indicator here
+    would be a meaningless label that invites an ATE to be computed against
+    a counterfactual that does not exist.
+
+    Verified shape: (42694, 12) -- Womens 21387, Mens 21307. The source
+    frame is never mutated -- `.copy()` is taken before the frame is
+    returned.
+    """
+    # Positive membership only (see module docstring): name both arm labels
+    # this frame is allowed to contain. Selecting the complement of
+    # config.CONTROL would produce the same rows today, but it silently
+    # admits any future segment value that is neither arm -- including a
+    # second control-like group -- into a frame whose whole purpose is that
+    # it holds exactly the two treated arms.
+    mask = df["segment"].isin([config.ARMS["mens"], config.ARMS["womens"]])
+    return df.loc[mask].copy()
