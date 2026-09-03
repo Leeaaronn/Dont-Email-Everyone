@@ -246,16 +246,24 @@ def test_ate_forest_error_bars_span_the_confidence_interval(ate_df):
         assert len(spans) == len(ate_df), (
             f"expected one horizontal error bar per ATE, found {len(spans)}"
         )
-        widths = sorted(round(hi - lo, 6) for lo, hi in spans)
-        expected = sorted(
-            round(row.ci_high - row.ci_low, 6) for row in ate_df.itertuples()
-        )
-        # Compared as widths, because each unit's panel may carry its own
-        # scale factor -- the pp panel is drawn in percentage points.
-        for drawn, want in zip(widths, expected):
-            assert drawn == pytest.approx(want, rel=1e-6) or drawn == pytest.approx(
-                want * 100, rel=1e-6
-            )
+        # Matched by row, never by sorted width: each unit's panel may carry
+        # its own scale factor (the proportion panel is drawn in percentage
+        # points), so a drawn span is compared against its own row's interval
+        # under its own unit's scale. Sorting the widths together would let a
+        # spend bar validate against a visit bar's width.
+        rows = {
+            f"{row.arm} / {row.outcome}": row for row in ate_df.itertuples()
+        }
+        checked = 0
+        for ax in fig.axes:
+            labels = [text.get_text() for text in ax.get_yticklabels()]
+            for (drawn_low, drawn_high), label in zip(_errorbar_spans(ax), labels):
+                row = rows[label]
+                scale = 100.0 if row.unit == "pp" else 1.0
+                assert drawn_low == pytest.approx(row.ci_low * scale, rel=1e-9)
+                assert drawn_high == pytest.approx(row.ci_high * scale, rel=1e-9)
+                checked += 1
+        assert checked == len(ate_df)
     finally:
         plt.close(fig)
 
