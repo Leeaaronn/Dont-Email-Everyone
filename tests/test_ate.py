@@ -16,7 +16,16 @@ The unit test is the third: `spend` is measured in dollars, not percentage
 points. A shared formatter that multiplies every coefficient by 100 and
 appends "pp" renders the spend ATE as "+76.98pp" (PITFALLS.md Pitfall 9),
 so the `unit` column is asserted directly rather than assumed.
+
+`test_adjusted_agrees_with_unadjusted` carries a different kind of weight:
+it is not a regression guard but the phase's strongest piece of evidence.
+Adding the full pre-treatment covariate vector moves every point estimate
+by well under 1%, which is exactly what a valid randomization predicts. A
+large divergence there would say the randomization did not hold -- not that
+the adjustment is wrong.
 """
+
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -42,6 +51,24 @@ VERIFIED = {
 # the SAME 21,306 control customers. Divergence here is the pooled-control
 # signature.
 CONTROL_BASE_RATES = {"visit": 0.10617, "conversion": 0.00573, "spend": 0.65279}
+
+# Covariate-adjusted mens coefficients, same source and date as VERIFIED.
+# Every one sits within 1% of its unadjusted counterpart above.
+VERIFIED_ADJUSTED_MENS = {
+    "visit": (0.076059, 0.06952, 0.08260),
+    "conversion": (0.006773, 0.00497, 0.00858),
+    "spend": (0.766873, 0.48250, 1.05124),
+}
+
+# Holm-adjusted p-values across exactly the six pre-registered tests.
+VERIFIED_HOLM = {
+    ("mens", "visit"): 1.664e-112,
+    ("mens", "conversion"): 5.893e-13,
+    ("mens", "spend"): 3.474e-07,
+    ("womens", "visit"): 9.704e-44,
+    ("womens", "conversion"): 3.117e-04,
+    ("womens", "spend"): 1.129e-03,
+}
 
 
 @pytest.fixture(scope="module")
@@ -239,3 +266,131 @@ def test_table_columns_are_primitive_and_complete(table):
     for column in ("n_treated", "n_control"):
         assert table[column].dtype == "int64"
     assert isinstance(table, pd.DataFrame)
+
+
+# --------------------------------------------------------------------------
+# Covariate-adjusted estimates (CONTEXT.md D-02) and the Holm correction
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def adjusted_table(real_frames):
+    return ate.ate_table(real_frames, adjusted=True)
+
+
+def test_adjusted_table_adds_three_columns(adjusted_table, table):
+    assert len(adjusted_table) == 6
+    for column in ("effect_adj", "ci_low_adj", "ci_high_adj"):
+        assert column in adjusted_table.columns
+        assert adjusted_table[column].dtype == "float64"
+    # The unadjusted headline is untouched by the adjusted path.
+    assert list(adjusted_table["effect"]) == pytest.approx(list(table["effect"]))
+    assert "effect_adj" not in table.columns, (
+        "the default ate_table() must remain the unadjusted headline "
+        "(CONTEXT.md D-01); the adjusted columns are opt-in"
+    )
+
+
+@pytest.mark.parametrize("outcome", ["visit", "conversion", "spend"])
+def test_adjusted_matches_verified_mens_values(adjusted_table, outcome):
+    expected, lo, hi = VERIFIED_ADJUSTED_MENS[outcome]
+    row = adjusted_table.loc[
+        (adjusted_table["arm"] == "mens") & (adjusted_table["outcome"] == outcome)
+    ]
+    assert float(row["effect_adj"].iloc[0]) == pytest.approx(expected, abs=1e-4)
+    assert float(row["ci_low_adj"].iloc[0]) == pytest.approx(lo, abs=1e-4)
+    assert float(row["ci_high_adj"].iloc[0]) == pytest.approx(hi, abs=1e-4)
+
+
+def test_adjusted_agrees_with_unadjusted(adjusted_table):
+    for _, row in adjusted_table.iterrows():
+        relative = abs(row["effect_adj"] - row["effect"]) / abs(row["effect"])
+        assert relative < 0.05, (
+            f"{row['arm']} {row['outcome']}: adjusting for "
+            "config.PRE_TREATMENT_FEATURES moved the point estimate by "
+            f"{relative:.1%} ({row['effect']:.6f} -> {row['effect_adj']:.6f}). "
+            "Under a valid randomization the covariates are independent of "
+            "assignment, so adjustment should move every estimate by well "
+            "under 1%. A divergence this large is evidence that the "
+            "randomization did not hold, NOT that the adjustment is wrong -- "
+            "investigate the balance table before touching this module."
+        )
+
+
+def test_adjustment_terms_wrap_only_string_columns(mens_frame):
+    terms = ate.adjustment_terms(mens_frame)
+    assert "C(zip_code)" in terms
+    assert "C(channel)" in terms
+    for numeric in ("recency", "history", "mens", "womens", "newbie"):
+        assert f"C({numeric})" not in terms, (
+            f"{numeric} is numeric and must pass through unwrapped; C() "
+            "would expand it into one dummy per distinct value"
+        )
+        assert numeric in terms
+    assert len(terms.split(" + ")) == len(config.PRE_TREATMENT_FEATURES)
+
+
+def test_adjusted_fit_is_warning_clean(mens_frame):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        warnings.simplefilter("error", DeprecationWarning)
+        ate.ate_table({"mens": mens_frame, "womens": mens_frame}, adjusted=True)
+
+
+def test_holm_correction(adjusted_table):
+    corrected = ate.apply_holm(adjusted_table)
+    assert len(corrected) == 6
+    assert "p_holm" in corrected.columns
+    assert "reject_holm" in corrected.columns
+    for _, row in corrected.iterrows():
+        expected = VERIFIED_HOLM[(row["arm"], row["outcome"])]
+        assert row["p_holm"] == pytest.approx(expected, rel=1e-3)
+        assert row["p_holm"] >= row["p_raw"], (
+            f"{row['arm']} {row['outcome']}: adjusted p {row['p_holm']:.3e} "
+            f"is below the raw p {row['p_raw']:.3e}. A multiplicity "
+            "correction can only make a p-value larger; a smaller one means "
+            "the step-down monotonicity enforcement was skipped."
+        )
+        assert bool(row["reject_holm"]) is True, (
+            f"{row['arm']} {row['outcome']} does not survive the Holm "
+            "correction at alpha = 0.05. All six effects are large relative "
+            "to their standard errors; a non-rejection here means the "
+            "p-values fed to multipletests were not the six raw ones."
+        )
+
+
+def test_holm_is_applied_to_raw_not_adjusted_pvalues(adjusted_table):
+    corrected = ate.apply_holm(adjusted_table)
+    ordered = corrected.sort_values("p_raw")
+    assert list(ordered["p_holm"]) == sorted(ordered["p_holm"]), (
+        "Holm-adjusted p-values must be monotone in the raw p-values; a "
+        "non-monotone sequence is the classic hand-rolled step-down bug"
+    )
+
+
+@pytest.mark.parametrize("n_rows", [5, 7])
+def test_holm_rejects_wrong_test_count(adjusted_table, n_rows):
+    if n_rows < 6:
+        wrong = adjusted_table.iloc[:n_rows].copy()
+    else:
+        wrong = pd.concat(
+            [adjusted_table, adjusted_table.iloc[:1]], ignore_index=True
+        )
+    with pytest.raises(ValueError) as excinfo:
+        ate.apply_holm(wrong)
+    assert str(n_rows) in str(excinfo.value), (
+        f"the guard message must name the observed row count ({n_rows}) so "
+        "the caller can see what was handed in; the six tests are "
+        "pre-registered and appending a single exploratory row silently "
+        "changes every adjusted p-value in the table (PITFALLS.md "
+        "Pitfall 11)."
+    )
+
+
+def test_holm_does_not_mutate_its_input(adjusted_table):
+    before = list(adjusted_table.columns)
+    ate.apply_holm(adjusted_table)
+    assert list(adjusted_table.columns) == before, (
+        "apply_holm assigned into its input; a caller holding the "
+        "unadjusted table would silently acquire correction columns"
+    )
