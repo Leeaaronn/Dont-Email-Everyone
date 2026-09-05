@@ -199,9 +199,83 @@ selling point is that its numbers are correct.
     the identity holds, and that `Q(k) / k` is not the identity -- so a
     future "simplification" into the wrong units fires a test instead of
     silently changing the units of a published number.
+
+(h) THE TWO CONFIDENCE BANDS (D-06), AND WHY THEY ARE NOT ONE BAND TWICE.
+    A reviewer who cannot tell them apart will read a precision interval
+    as a significance screen, so both definitions live here rather than in
+    a plan document.
+
+    RANDOM-SCORE NULL BAND -- `qini_random_band`. Draw a RANDOM score
+    (default 200 draws), recompute the curve on the UNRESAMPLED data, and
+    take the 5th/95th percentiles pointwise. It answers: is this curve
+    distinguishable from random targeting at all? That is what turns "the
+    curve sits above the chord" into a defensible claim rather than an
+    observation about one arbitrary ranking.
+
+    BOOTSTRAP BAND -- `qini_bootstrap_band`. Resample the holdout WITH
+    REPLACEMENT, stratified by arm, recompute the curve on each replicate,
+    and take the pointwise 2.5/97.5 percentiles (default 500 replicates).
+    It answers a different question: how precise is this curve?
+
+    Together they support the sentence this project is aiming at -- the
+    model beats random targeting in the top ~20% and is indistinguishable
+    from random beyond that -- which needs both halves: the curve escaping
+    the null band near the head, and the two bands overlapping in the
+    tail. Neither band alone can say it, and a band read as the other kind
+    says it wrongly.
+
+    Both return the SAME `(grid, lo, hi)` triple on the same grid and in
+    the curve's own RAW units, so `plots.qini_plot` has exactly one band
+    shape to draw and applies its unit scaling once. A band handed back
+    already scaled would be scaled a second time on the canvas.
+
+    `qini_random_band` deliberately takes NO score argument. It GENERATES
+    the scores it needs; accepting one would invite passing the model
+    score into the null band and computing a number that means nothing.
+
+    The consequence 02-05 records for `coverage.py` applies here
+    identically: the RNG is seeded once per band call, so a one-off single
+    call returns a slightly different result from the same computation run
+    inside a larger sweep. Both are correct, and neither is reproducible
+    from the other without its seed.
 """
 
 import numpy as np
+
+# Band defaults, pinned in the style of `coverage.CELL_SIZES` -- each is a
+# measured choice, and editing one breaks nothing loudly.
+#
+# 101 grid points: the resolution `plots.qini_plot` draws and Phase 6's
+# targeting slider reads. The grid exists because
+# `np.percentile(..., axis=0)` needs aligned columns across replicates, and
+# replicates of different lengths cannot be stacked at all. Left a
+# parameter, so Phase 6 may raise it; the returned band is therefore
+# coarser than the full-length curve `qini_curve` returns.
+BAND_GRID_POINTS = 101
+
+# 200 replicates for the random-score null band -- PITFALLS.md's figure,
+# measured at ~1.1 s for n=42,613. The 5th/95th percentiles it feeds are
+# stable at this count; well below it the tails wander between calls and
+# the "distinguishable from random" claim starts moving with the seed.
+NULL_BAND_RESAMPLES = 200
+
+# 500 replicates for the bootstrap band -- the bottom of FEATURES.md's
+# 500-1000 range, measured at 2.47 s with an 85 MB index matrix for
+# n=42,613. R=1000 doubles both the time and the memory for a marginal
+# percentile-stability gain. Left a parameter so Phase 4 can raise it if a
+# band looks ragged. `bootstrap_indices` repeats this same default in its
+# own signature; the two are the same number deliberately.
+BOOTSTRAP_BAND_RESAMPLES = 500
+
+# 0.90 for the null band and 0.95 for the bootstrap band, deliberately
+# different rather than accidentally so. The null band is a "could random
+# targeting have produced this?" screen and 5th/95th is the interval
+# PITFALLS.md reports; the bootstrap band is a precision interval quoted
+# beside every other 95% interval in the project (ate.json's HC3 bounds,
+# `coverage.CONFIDENCE`). Editing either silently changes what a published
+# band means without changing how it looks.
+NULL_BAND_LEVEL = 0.90
+BOOTSTRAP_BAND_LEVEL = 0.95
 
 
 def _guard_no_nan_scores(score) -> None:
@@ -660,3 +734,181 @@ def bootstrap_indices(treatment, n_resamples: int = 500, seed: int = 20260902):
             pos, size=(n_resamples, pos.size), replace=True
         )
     return out
+
+
+def _guard_band_grid(n_grid, level) -> None:
+    """Validate the two arguments both bands share.
+
+    One shared validator for the same reason `_guard_inputs` is one: two
+    band functions with two hand-written copies of these checks are two
+    band functions that eventually disagree about what a level of 0 means.
+    """
+    if not isinstance(n_grid, (int, np.integer)) or n_grid < 2:
+        raise ValueError(
+            f"`n_grid` is {n_grid!r}; the band grid needs an integer count "
+            "of at least 2 points. A one-point band is a pair of numbers "
+            "that `plots.qini_plot` would happily fill between and render "
+            "as an empty ribbon."
+        )
+    if not 0.0 < level < 1.0:
+        raise ValueError(
+            f"`level` is {level!r}; a two-sided coverage level must satisfy "
+            "0 < level < 1. A level of 1 asks for the 0th and 100th "
+            "percentiles, which is the min/max envelope of the replicates "
+            "and not a confidence band at all."
+        )
+
+
+def qini_bootstrap_band(
+    score,
+    treatment,
+    outcome,
+    *,
+    indices=None,
+    n_resamples: int = BOOTSTRAP_BAND_RESAMPLES,
+    n_grid: int = BAND_GRID_POINTS,
+    level: float = BOOTSTRAP_BAND_LEVEL,
+    seed: int = 20260902,
+):
+    """Pointwise percentile band from an arm-stratified bootstrap.
+
+    Answers "how precise is this curve?" -- NOT "is it better than random
+    targeting?", which is `qini_random_band`'s question (module docstring,
+    decision (h)). Returns `(grid, lo, hi)`: three float64 arrays of
+    length `n_grid`, where `grid` is `np.linspace(0.0, 1.0, n_grid)` and
+    `lo`/`hi` are the pointwise 2.5/97.5 percentiles at the default level.
+
+    UNITS ARE RAW, exactly the units `qini_curve` returns -- an average
+    incremental outcome per treated customer. `plots.qini_plot` applies
+    its own unit scaling to whatever band it is handed, so a band scaled
+    here would be scaled twice on the canvas.
+
+    THE GRID IS COARSER THAN THE CURVE, ON PURPOSE. Each replicate has its
+    own `n + 1` points, and `np.percentile(..., axis=0)` needs aligned
+    columns, so every replicate is mapped onto one shared grid with
+    `np.interp` -- which is exact for a piecewise-linear curve on a
+    monotone increasing x, and `qini_curve` returns exactly that. 101
+    points is what the figure and Phase 6's slider consume; `n_grid` is a
+    parameter for the case where that stops being the resolution wanted.
+
+    `indices` is D-07's shared-draw hook. Pass a matrix from
+    `bootstrap_indices` and Phase 5's policy-value interval, Phase 6's
+    revenue band and this band are all built on the SAME replicates, which
+    is what makes three intervals jointly valid instead of three
+    independently drawn intervals that quietly disagree. When it is None
+    this function builds its own matrix and `n_resamples` governs; when it
+    is supplied `n_resamples` is ignored, and the two paths return
+    identical arrays at matching seeds --
+    `test_bands_precomputed_indices_path_matches_self_generated` exists
+    because two code paths through one computation is the risk this
+    parameter buys.
+
+    `np.percentile` rather than an index into a sorted replicate stack: it
+    interpolates between order statistics, where the naive
+    `sorted(values)[int(0.025 * R)]` is biased low at small R, and the
+    band would be quietly too narrow in exactly the regime a reader is
+    most likely to reach for before any other.
+    """
+    score, treatment, outcome = _guard_inputs(score, treatment, outcome)
+    _guard_band_grid(n_grid, level)
+    n = treatment.size
+
+    if indices is None:
+        indices = bootstrap_indices(treatment, n_resamples, seed)
+    else:
+        indices = np.asarray(indices)
+        if indices.ndim != 2 or indices.shape[1] != n:
+            raise ValueError(
+                f"`indices` has shape {indices.shape}; a resample matrix "
+                "must be 2-D with one column per row of the data, i.e. "
+                f"(n_resamples, {n}). A matrix built for a different frame "
+                "would index the wrong customers without raising."
+            )
+        if indices.dtype.kind not in ("i", "u"):
+            raise ValueError(
+                f"`indices` has dtype {indices.dtype}; it must be an "
+                "integer kind. A float matrix cannot be used as a fancy "
+                "index, and a boolean one would silently select a mask "
+                "instead of a resample."
+            )
+        if indices.shape[0] < 1:
+            raise ValueError(
+                f"`indices` carries {indices.shape[0]} replicate rows; the "
+                "percentile of an empty replicate stack is nan, which "
+                "renders as a missing band rather than as an error."
+            )
+
+    grid = np.linspace(0.0, 1.0, n_grid)
+    curves = np.empty((indices.shape[0], n_grid))
+    # A plain Python loop over replicates, deliberately. The fully
+    # vectorized R-at-once alternative (a 2-D argsort along axis 1 and a
+    # 2-D cumsum) is roughly 2-3x faster but allocates an R x n float64
+    # array -- 170 MB at R=500, n=42,613 -- ON TOP OF the 85 MB index
+    # matrix. At 2.47 s for this loop there is no case for trading 2 s
+    # against a 340 MB peak inside Streamlit Community Cloud's ~690 MB
+    # envelope. Considered, measured, rejected; do not "optimize" it.
+    for r, take in enumerate(indices):
+        fraction, qini = qini_curve(
+            score[take], treatment[take], outcome[take], seed=seed + r
+        )
+        curves[r] = np.interp(grid, fraction, qini)
+
+    tail = (1.0 - level) / 2.0 * 100.0
+    lo, hi = np.percentile(curves, [tail, 100.0 - tail], axis=0)
+    return grid, np.asarray(lo, dtype=float), np.asarray(hi, dtype=float)
+
+
+def qini_random_band(
+    treatment,
+    outcome,
+    *,
+    n_resamples: int = NULL_BAND_RESAMPLES,
+    n_grid: int = BAND_GRID_POINTS,
+    level: float = NULL_BAND_LEVEL,
+    seed: int = 20260902,
+):
+    """Pointwise null band traced by random targeting on this same data.
+
+    Answers "is this curve distinguishable from random targeting at all?"
+    -- NOT "how precise is it?", which is `qini_bootstrap_band`'s question
+    (module docstring, decision (h)). Returns the same `(grid, lo, hi)`
+    triple of float64 arrays, in the same RAW curve units and on the same
+    `np.linspace(0.0, 1.0, n_grid)` grid, so `plots.qini_plot` has one
+    band shape to draw and a caller may hand it either band.
+
+    THERE IS DELIBERATELY NO `score` PARAMETER. This function GENERATES a
+    fresh random score per replicate; accepting one would invite a caller
+    to hand in the model score, whereupon the returned envelope would be
+    the sampling spread of THAT ranking under nothing at all -- a number
+    that looks like a null band, plots like a null band, and means
+    nothing. The signature is the guard.
+
+    The data is NOT resampled here. Every replicate scores the same rows
+    under a different random ranking, which is what isolates "the ranking
+    carries no information" from "the sample happened to be lucky" -- the
+    latter being what the bootstrap band measures instead. Default 200
+    draws at the 5th/95th percentiles, measured ~1.1 s at n=42,613.
+
+    A curve that leaves this band near the head of the ranking is the
+    "beats random targeting in the top ~20%" half of the claim decision
+    (h) states; a curve that stays inside it further along is the
+    "indistinguishable from random beyond that" half.
+    """
+    _guard_band_grid(n_grid, level)
+    n = np.asarray(treatment).size
+
+    grid = np.linspace(0.0, 1.0, n_grid)
+    # Seeded ONCE outside the loop (coverage.py's precedent), so the whole
+    # null band is a single reproducible stream and replicate r + 1 cannot
+    # re-use replicate r's draws.
+    rng = np.random.default_rng(seed)
+    curves = np.empty((n_resamples, n_grid))
+    for r in range(n_resamples):
+        fraction, qini = qini_curve(
+            rng.normal(size=n), treatment, outcome, seed=seed + r
+        )
+        curves[r] = np.interp(grid, fraction, qini)
+
+    tail = (1.0 - level) / 2.0 * 100.0
+    lo, hi = np.percentile(curves, [tail, 100.0 - tail], axis=0)
+    return grid, np.asarray(lo, dtype=float), np.asarray(hi, dtype=float)
