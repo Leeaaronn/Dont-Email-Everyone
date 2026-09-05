@@ -58,13 +58,15 @@ current.
 | 03-04-T3 | 03-04 | 3 | UPLIFT-02 / C2 (D-03) | — | N/A | statistical | `pytest tests/test_evaluation.py::test_tie_heavy_wobble_is_below_the_noise_floor -x` | ❌ W0 | ⬜ pending |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_is_not_forced_monotone -x` | ✅ | ✅ green |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C3 | — | N/A | unit (source-reading) | `pytest tests/test_evaluation.py::test_docstring_pins_the_normalization_convention -x` | ✅ | ✅ green |
-| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | N/A | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_matches_the_curve_identity -x` | ❌ W0 | ⬜ pending |
-| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | Raises rather than silently returning NaN | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_raises_on_empty_arm -x` | ❌ W0 | ⬜ pending |
+| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | N/A | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_matches_the_curve_identity -x` | ✅ | ✅ green |
+| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | Raises rather than silently returning NaN | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_raises_on_empty_arm -x` | ✅ | ✅ green |
 | 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | Returns `Figure`, never calls `plt.show()` | unit | `pytest tests/test_plots.py -k qini -x` | ✅ file / ❌ W0 cases | ⬜ pending |
 | 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_chord_is_computed_not_diagonal -x` | ❌ W0 | ⬜ pending |
 | 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_axis_labels_carry_units -x` | ❌ W0 | ⬜ pending |
 | 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_saves_a_non_trivial_png -x` | ❌ W0 | ⬜ pending |
-| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / D-04 | — | N/A | unit | `pytest tests/test_evaluation.py::test_tie_diagnostics -x` | ❌ W0 | ⬜ pending |
+| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / D-04 | — | N/A | unit | `pytest tests/test_evaluation.py::test_tie_diagnostics -x` | ✅ | ✅ green |
+| 03-02-T2 (added) | 03-02 | 2 | UPLIFT-02 / C3 | T-03-07 | `0 < k <= 1` guarded by if/raise, never assert | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_rejects_a_k_outside_the_unit_interval -x` | ✅ | ✅ green |
+| 03-02-T2 (added) | 03-02 | 2 | UPLIFT-02 / C3 | T-03-09 | Exactly one executable sort, so the two functions cannot rank differently | unit (source-reading) | `pytest tests/test_evaluation.py::test_evaluation_module_has_exactly_one_sort -x` | ✅ | ✅ green |
 | 03-05-T3 | 03-05 | 4 | UPLIFT-02 / D-07 | — | N/A | unit | `pytest tests/test_evaluation.py -k bootstrap_indices -x` | ❌ W0 | ⬜ pending |
 | 03-05-T3 | 03-05 | 4 | UPLIFT-02 / D-06 | — | N/A | statistical | `pytest tests/test_evaluation.py -k bands -x` | ❌ W0 | ⬜ pending |
 | 03-06-T2 | 03-06 | 5 | UPLIFT-02 / D-08 | — | N/A | unit | `pytest tests/test_reports.py -q` | ✅ file / ❌ W0 case | ⬜ pending |
