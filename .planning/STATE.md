@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-09-05T18:25:40.197Z"
-last_activity: 2026-09-05 -- Phase 3 planning complete
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-09-05T18:58:47.850Z"
+last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 17
-  completed_plans: 11
+  completed_plans: 12
   percent: 29
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 03 — uplift-evaluation-metric (not started)
+**Current focus:** Phase 03 — uplift-evaluation-metric
 
 ## Current Position
 
-Phase: 02 (experiment-validity) — COMPLETE (2026-09-05)
-Plan: 6 of 6
+Phase: 03 (uplift-evaluation-metric) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-09-05 -- Phase 3 planning complete
+Last activity: 2026-09-05
 
-Progress: [███░░░░░░░] 29% (2 of 7 phases)
+Progress: [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [███░░░░░░░] 29% (2 of 7 phases)
 | Phase 02 P04 | 22min | 2 tasks | 2 files |
 | Phase 02 P05 | 44min | 2 tasks | 4 files |
 | Phase 02 P06 | 97min | 3 tasks | 10 files |
+| Phase 03 P01 | 26min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -107,6 +108,9 @@ Recent decisions affecting current work:
 - [Phase 02-06]: Committed-artifact freshness is asserted on content (shapes, dtypes, and a canary pinning the mens visit effect at 0.076590), never on bytes or a checksum; Parquet and PNG both embed run-specific metadata, so a byte assertion fails on a correct regeneration while a stale-but-valid file passes
 - [Phase 02-06]: reports/validity.md quotes 38.05% as this repo's zero-variance-arm rate at cell 400 and cites the research note's 37.4% as a separately generated number, rather than claiming to have reproduced it -- same disposition as the 1-2pp coverage gap
 - [Phase 02-06]: reports/validity.md is the technical evidence document, deliberately not reader-facing; Phase 7's README links to it rather than re-deriving it, and quotes ate.json's scalar block
+- [Phase 03-01]: qini_coefficient is a separate module-level function taking (fraction, qini), not a field on qini_curve's return -- the band functions recompute it on resampled curves, so a baked-in field would be redundant, and the area definition stays independently testable against a hand-written polyline
+- [Phase 03-01]: the np.trapezoid warning is written non-greppably ('the name without the ezoid on the end') because the plan's own acceptance criterion greps evaluation.py for the dead NumPy 1.x spelling -- same rephrase-rather-than-drop disposition as 02-03's three forbidden tokens
+- [Phase 03-01]: UPLIFT-02 left Pending despite appearing in this plan's requirements frontmatter -- plan 03-01 delivers the curve and coefficient only; uplift-at-k, the Matplotlib figure and both confidence bands land in plans 03-02 through 03-05, and the requirement is not satisfied until they do
 
 ### Pending Todos
 
@@ -117,7 +121,6 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 1] Stack research was skipped project-wide (5 consecutive agent failures on a transient infra error). Phase 1 planning needs a research pass to pin exact library versions, resolve the local Python 3.9 vs. current library floors question, and confirm the Pandera import path (`import pandera.pandas as pa`) before any ingest code is written.
-- [Phase 3] Qini normalization convention is unsettled — several published definitions differ. Pick one explicitly, document it in the module docstring, and encode it in a test.
 - [Phase 4/5] Multi-arm channel-choice tie-break rule is undecided; T-learner scores across arms share a correlated control group and are only loosely comparable. Needs a documented decision.
 - [Phase 4/5] Whether a genuine negative-uplift segment survives holdout validation on the Mens arm is unknown. Settle empirically; do not assume either answer.
 - [Phase 6] Streamlit Community Cloud resource limits are sourced from a Feb-2024 forum FAQ (MEDIUM confidence). Re-check at planning time.
@@ -132,6 +135,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-05T17:22:34.238Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-uplift-evaluation-metric/03-CONTEXT.md
+Last session: 2026-09-05T18:57:07.248Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
