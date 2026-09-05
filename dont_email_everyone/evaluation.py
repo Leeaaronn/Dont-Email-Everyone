@@ -140,10 +140,88 @@ selling point is that its numbers are correct.
     uplift at the top 20%?", which is exactly the question Phase 6's
     targeting slider is built around. D-01's seeded shuffle traces an
     unbiased path through each tie group instead, and (c) bounds what that
-    choice costs.
+    choice costs. `tie_diagnostics` reports that tie structure as a number,
+    so a write-up can state the fraction rather than hand-wave it (D-04) --
+    and D-04 deliberately keeps that dict OUT of `qini_curve`'s return
+    value, because folding it in would widen a return type that every call
+    site and every band replicate has to unpack.
+
+(f) THE UPLIFT-AT-K CONVENTION: `overall`, NEVER `by_group`, WITH AN
+    `int(n * k)` SELECTION SIZE. ROADMAP criterion 3's second convention,
+    stated here and pinned by a test for the same reason as (a).
+
+    Take the top-k of the COMBINED sample, then difference the treated and
+    the control mean outcomes WITHIN that selection. That is the `overall`
+    strategy. It is not the top-k taken within each arm separately, which
+    is the `by_group` strategy, and the two return different numbers on the
+    same data.
+
+    The reason, not merely the choice: `overall` is the quantity the
+    deployment decision actually produces. You rank the whole list once,
+    you mail the top k, and you observe what the mailed-versus-not
+    comparison inside that slice yields. `by_group` describes an experiment
+    nobody runs, because in deployment there is no separate control ranking
+    to take a top-k of.
+
+    The selection size is `int(n * k)` -- truncation, and not rounding --
+    matching the reference implementation. Either rule would be defensible;
+    the failure mode is leaving it unstated, so that two call sites
+    disagree by one row and two reports quote different numbers for "the
+    uplift in the top 20%".
+
+(g) UNITS, AND THE EXACT BRIDGE FROM THE CURVE TO THE TOP-K NUMBER.
+
+    `uplift_at_k` is an average incremental outcome per targeted customer
+    -- percentage points of visit rate per targeted customer, or dollars
+    per targeted customer. `Q(phi)` is an average incremental outcome per
+    treated customer in the whole population. Those are NOT the same
+    quantity, they differ by roughly a factor of k, and conflating them is
+    PITFALLS.md Pitfall 8's headline failure mode. Any axis label or
+    sentence quoting either number has to say which one it is.
+
+    The exact conversion, verified to 1.4e-17 at five values of k, writing
+    n_k = int(n * k):
+
+        uplift_at_k(k) == Q(k) * N_t / n_t(k)
+
+    dividing by the REALIZED treated count inside the top-k, n_t(k), and
+    never by k * N_t.
+
+    It is NOT `Q(k) / k`. Measured on the real mens frame, visit outcome,
+    under one arbitrary ranking score at k = 0.20, the two give 0.09384 and
+    0.09429: a 0.5% gap, invisible to anyone eyeballing the two columns
+    side by side, because n_t(k) fluctuates around k * N_t rather than
+    equalling it. The SIZE of that gap moves with the score -- a different
+    arbitrary score on the same frame gives 0.07776 against 0.07673, 1.3%
+    -- so derive nothing from 0.5%; only the existence of the gap is a
+    property of the arithmetic.
+    `test_uplift_at_k_matches_the_curve_identity` pins both halves -- that
+    the identity holds, and that `Q(k) / k` is not the identity -- so a
+    future "simplification" into the wrong units fires a test instead of
+    silently changing the units of a published number.
 """
 
 import numpy as np
+
+
+def _guard_no_nan_scores(score) -> None:
+    """Raise if `score` holds any nan value.
+
+    Its own function because `tie_diagnostics` takes `score` alone and has
+    no treatment or outcome array to hand to `_guard_inputs`. A second
+    hand-written copy of this check is how one entry point ends up
+    admitting a nan that the others reject.
+    """
+    nan_positions = np.flatnonzero(np.isnan(score))
+    if nan_positions.size:
+        raise ValueError(
+            f"`score` holds {nan_positions.size} nan value(s), the first at "
+            f"position {int(nan_positions[0])}. np.argsort places nan LAST "
+            "regardless of sign, so a nan score is silently ranked as the "
+            "worst prospect: a Phase 4 learner emitting nan on an unseen "
+            "category would sink those customers to the bottom of the "
+            "targeting list with no warning."
+        )
 
 
 def _guard_inputs(score, treatment, outcome):
@@ -212,16 +290,7 @@ def _guard_inputs(score, treatment, outcome):
             "of them missing there is no incremental outcome to accumulate."
         )
 
-    nan_positions = np.flatnonzero(np.isnan(score))
-    if nan_positions.size:
-        raise ValueError(
-            f"`score` holds {nan_positions.size} nan value(s), the first at "
-            f"position {int(nan_positions[0])}. np.argsort places nan LAST "
-            "regardless of sign, so a nan score is silently ranked as the "
-            "worst prospect: a Phase 4 learner emitting nan on an unseen "
-            "category would sink those customers to the bottom of the "
-            "targeting list with no warning."
-        )
+    _guard_no_nan_scores(score)
 
     return score, treatment, outcome
 
@@ -345,3 +414,125 @@ def qini_coefficient(fraction, qini) -> float:
 
     chord = fraction * qini[-1]
     return float(np.trapezoid(qini - chord, fraction))
+
+
+def uplift_at_k(
+    score, treatment, outcome, k: float = 0.2, *, seed: int = 20260902
+) -> float:
+    """Average incremental outcome PER TARGETED CUSTOMER in the top `k`.
+
+    The `overall` strategy: rank the combined sample once, take the top
+    `int(n * k)` rows, and difference the treated and control mean outcomes
+    inside that selection. Not `by_group`, and the selection size is a
+    truncation rather than a rounding -- module docstring, decision (f),
+    which states why both of those are the convention this project picked.
+
+    Units are the outcome's own units per TARGETED customer, which is not
+    the unit `qini_curve` returns. The exact bridge is
+    `uplift_at_k(k) == Q(k) * N_t / n_t(k)`, dividing by the realized
+    treated count inside the top-k, and it is emphatically not `Q(k) / k`
+    -- module docstring, decision (g).
+
+    `_ranked_arrays` is called rather than a second sort being written
+    here. That identity holds only because this function and `qini_curve`
+    rank identically; two sorts would break it silently and make both
+    numbers wrong. The direct analogue of `ate._fit` centralizing
+    `cov_type` so the headline and the adjusted rows cannot drift onto
+    different covariance estimators.
+
+    `seed` is keyword-only, so no caller can positionally pass a seed into
+    the `k` slot, which would ask for the top 2,026,090,200% of a mailing
+    list and raise the `k` guard below rather than return a number.
+
+    Raises `ValueError` when the top-k selection is missing an arm. The
+    reference implementation carries this gap as a `# ToDo` and lets
+    `.mean()` on an empty slice return nan with only a RuntimeWarning,
+    which is exactly how a nan reaches a published business number
+    (PITFALLS.md Pitfall 8).
+    """
+    # `not 0 < k <= 1` rather than two comparisons, so a nan k raises here
+    # instead of slicing to an empty selection further down.
+    if not 0.0 < k <= 1.0:
+        raise ValueError(
+            f"`k` is {k!r}; the targeting fraction must satisfy 0 < k <= 1. "
+            "A k above 1 would silently clip to the whole population and a "
+            "k of 0 would select nobody, and both would be reported as an "
+            "uplift at a targeting depth that was never evaluated."
+        )
+
+    t, y = _ranked_arrays(score, treatment, outcome, seed)
+    n = t.size
+
+    # TRUNCATION, not rounding (module docstring, decision (f)).
+    n_size = int(n * k)
+    t_top, y_top = t[:n_size], y[:n_size]
+
+    treated = t_top == 1
+    n_treated = int(np.count_nonzero(treated))
+    n_control = int(n_size - n_treated)
+    if n_treated == 0 or n_control == 0:
+        raise ValueError(
+            f"the top-k selection at k={k!r} holds {n_size} of {n} rows, "
+            f"with {n_treated} treated and {n_control} control among them. "
+            "Uplift is a difference between two arms; with one of them "
+            "absent the mean of an empty slice would return nan under only "
+            "a RuntimeWarning, and that nan would propagate into a reported "
+            "business number."
+        )
+
+    return float(y_top[treated].mean() - y_top[~treated].mean())
+
+
+def tie_diagnostics(score) -> dict:
+    """Report the tie structure of `score` as five plain numbers.
+
+    A pure function of the ranking score alone -- no treatment, no outcome,
+    no seed, because ties are a property of the score and nothing else.
+
+    Returned keys, all coerced to plain `int`/`float` rather than NumPy
+    scalars, matching `ate.bootstrap_spend_ate`'s return idiom so the dict
+    serializes without a custom encoder:
+
+        n_scores              total rows
+        n_distinct            distinct score values
+        n_tie_groups          distinct values carrying more than one row
+        largest_tie_fraction  largest group count / n_scores
+        fraction_in_ties      share of rows sitting in a group of size > 1
+
+    Worked example from the real data: a Radcliffe-shaped 3-rule 0-3
+    indicator score on the mens frame (`recency <= 4` plus `history > 200`
+    plus `newbie`, summed) gives 4 groups of 8,248 / 16,624 / 12,404 /
+    5,337 at n = 42,613, so `largest_tie_fraction` is 0.390. That is the
+    number D-04 exists to make sayable: Phase 4 can state a tie fraction
+    instead of hand-waving when a learner's ranking looks coarse.
+
+    D-04 keeps this OUT of `qini_curve`'s return value deliberately.
+    Folding it in would widen a return type that every call site and every
+    band replicate has to unpack, to carry a diagnostic that most of them
+    never look at.
+    """
+    score = np.asarray(score, dtype=float)
+
+    if score.ndim != 1:
+        raise ValueError(
+            f"`score` has shape {score.shape}; it must be 1-D. np.unique "
+            "flattens silently, so a 2-D input would report a tie structure "
+            "for a population that is not one row per customer."
+        )
+    if score.size == 0:
+        raise ValueError(
+            "`score` is empty; there are no rows to have a tie structure."
+        )
+    _guard_no_nan_scores(score)
+
+    _, counts = np.unique(score, return_counts=True)
+    n_scores = int(score.size)
+    tied = counts > 1
+
+    return {
+        "n_scores": n_scores,
+        "n_distinct": int(counts.size),
+        "n_tie_groups": int(np.count_nonzero(tied)),
+        "largest_tie_fraction": float(counts.max() / n_scores),
+        "fraction_in_ties": float(counts[tied].sum() / n_scores),
+    }
