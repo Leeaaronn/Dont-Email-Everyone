@@ -265,11 +265,11 @@ def qini_plot(
     curve = qini * scale
     ate = float(qini[-1]) * scale
 
-    fig, ax = plt.subplots(figsize=(7.5, 5.5))
-
-    lows = [0.0, float(np.min(curve)), ate]
-    highs = [0.0, float(np.max(curve)), ate]
-
+    # Every guard fires BEFORE `plt.subplots`. A raise after the figure
+    # exists would leave it registered in pyplot's global state with no
+    # handle for the caller to close -- exactly the leak the module docstring
+    # says this module must not create, and a test that asserts a ValueError
+    # would silently accumulate one figure per run.
     if band is not None:
         grid, lo, hi = band
         grid = np.asarray(grid, dtype=float)
@@ -280,6 +280,20 @@ def qini_plot(
                 "band must be a (grid, lo, hi) triple of equal length; got "
                 f"{grid.size}, {lo.size} and {hi.size}."
             )
+
+    if highlight_k is not None:
+        highlight_k = float(highlight_k)
+        if not 0.0 <= highlight_k <= 1.0:
+            raise ValueError(
+                f"highlight_k must lie in [0, 1]; got {highlight_k}."
+            )
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+
+    lows = [0.0, float(np.min(curve)), ate]
+    highs = [0.0, float(np.max(curve)), ate]
+
+    if band is not None:
         ax.fill_between(
             grid,
             lo,
@@ -312,11 +326,6 @@ def qini_plot(
     )
 
     if highlight_k is not None:
-        highlight_k = float(highlight_k)
-        if not 0.0 <= highlight_k <= 1.0:
-            raise ValueError(
-                f"highlight_k must lie in [0, 1]; got {highlight_k}."
-            )
         # Read off the curve rather than recomputing anything: this marker has
         # to sit on the line that is drawn, not near it.
         marked = float(np.interp(highlight_k, fraction, curve))
