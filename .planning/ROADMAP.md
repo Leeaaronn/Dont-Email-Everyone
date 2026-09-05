@@ -7,6 +7,7 @@ The project moves from raw provenance to a defended dollar figure in a strict de
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
@@ -23,30 +24,38 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Data Foundation
+
 **Goal**: Anyone who clones the repo can reproduce a provenance-verified, schema-validated analysis table with no network access, and the pooled-control bug is structurally impossible.
 **Depends on**: Nothing (first phase)
 **Requirements**: DATA-01, DATA-02, DATA-03, DATA-04
 **Success Criteria** (what must be TRUE):
+
   1. Running ingest against a tampered copy of `data/raw/hillstrom.csv` aborts with a checksum-mismatch error, and no network-fetch code path exists anywhere in the repo to fall back to.
   2. A fresh clone on a second machine produces the identical SHA-256 (line endings pinned via `.gitattributes`), and ingest loads 64,000 x 12 rows into DuckDB.
   3. The Pandera schema rejects a deliberately corrupted fixture (wrong dtype, out-of-range `recency`, unexpected `segment` value, injected null) reporting all violations at once, and passes on the real file — proven by a negative test, not by having never failed.
   4. Two mutually exclusive analysis frames exist (mens-vs-control, womens-vs-control), each asserted by test to contain exactly two `segment` values with a control group of ~21,306 rows — not ~42,693.
   5. `pytest` passes on a clean checkout, and a test fails if any of `visit`, `conversion`, `spend`, or `segment` enters the pre-treatment feature allowlist.
+
 **Plans**: TBD
 
 ### Phase 2: Experiment Validity
+
 **Goal**: The claim "assignment was random, so these differences are causal" is demonstrated with the right statistics, not asserted.
 **Depends on**: Phase 1
 **Requirements**: VALID-01, VALID-02
 **Success Criteria** (what must be TRUE):
+
   1. A balance table and Love plot report standardized mean differences for every pre-treatment covariate across all three pairwise arm comparisons (including mens vs. womens), with the |SMD| < 0.1 acceptance criterion stated before the result and no post-treatment column anywhere in the table.
   2. One omnibus test (multinomial logit of arm on covariates, likelihood-ratio) yields a single p-value, and the write-up interprets a stray significant per-covariate p-value as expected rather than as evidence randomization failed.
      > *Planning note (2026-09-03, from 02-RESEARCH.md executed in-repo):* no stray significant covariate exists in this data — all 21 per-covariate p-values are >= 0.19377 and the omnibus p = 0.888753. This criterion is satisfied by stating the acceptance rule as a **pre-registered decision procedure** ("a single significant covariate among 21 tests would have been expected noise, not evidence of failed randomization — none occurred"), never by describing an observed significant result.
+
   3. The ATE table covers 2 arms x 3 outcomes with control base rate, absolute effect, 95% CI from HC-robust SEs, and both raw and Holm-adjusted p-values — and reproduces the published figures (Mens +7.66pp visit / +0.68pp conversion / +$0.77 spend; Womens +4.52pp / +0.31pp / +$0.42), which is the check that catches a grouping bug.
   4. A seeded bootstrap cross-check on the spend ATE agrees with the analytic interval, and a committed coverage-vs-cell-size table shows the cell size below which the Welch interval stops being trustworthy.
+
 **Plans:** 6/6 plans executed
 
 Plans:
+
 - [x] 02-01-PLAN.md — Foundation: REPORTS/FIGURES path constants, arm-vs-arm frame helper, estimation test fixtures
 - [x] 02-02-PLAN.md — balance.py: 33-row SMD table across 3 pairwise comparisons, per-covariate p-values, omnibus MNLogit LR test
 - [x] 02-03-PLAN.md — ate.py: six HC3 ATEs reproducing published figures, covariate-adjusted counterparts, Holm, bootstrap, winsorization
@@ -55,71 +64,100 @@ Plans:
 - [x] 02-06-PLAN.md — Generate and commit artifacts and figures, author reports/validity.md, update README
 
 ### Phase 3: Uplift Evaluation Metric
+
 **Goal**: A trustworthy hand-rolled Qini / uplift-at-k implementation exists and is proven correct before any model can bias how it was designed.
 **Depends on**: Phase 1 (repo skeleton only — built and tested against synthetic fixtures, not the real data)
 **Requirements**: UPLIFT-02
 **Success Criteria** (what must be TRUE):
+
   1. `evaluation.py` computes Qini curve points and uplift-at-k from `(score, treatment, outcome)` arrays using NumPy/Pandas only — no causalml, no scikit-uplift, no model dependency, no file I/O.
   2. Synthetic-data unit tests all pass: `Q(0) == 0`; the curve endpoint equals the independently computed ATE; a random score gives Qini within Monte-Carlo tolerance of zero; an oracle score (the true simulated individual effect) gives a strongly positive Qini; a negated score gives Qini <= 0; and the result is invariant to input row order.
   3. The chosen Qini normalization convention and the uplift-at-k convention ('overall' vs. 'by_group') are stated in the module docstring and pinned by a test, so the definition cannot silently drift later.
   4. A Matplotlib function returns a `Figure` (never calling `plt.show()`) showing the curve against a random-targeting chord computed from the data — not a bare y=x diagonal — with explicitly labeled axis units.
+
 **Plans:** 6 plans in 5 waves
 
 Plans:
+**Wave 1**
+
 - [ ] 03-01-PLAN.md — evaluation.py core: normalization-convention docstring, seeded `_ranked_arrays`, `qini_curve`, `qini_coefficient`, and the six-way endpoint cross-check against committed `ate.json` (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-02-PLAN.md — `uplift_at_k` ('overall', truncation, empty-arm raise) and `tie_diagnostics`, pinning the exact `uplift_at_k(k) == Q(k)*N_t/n_t(k)` identity (wave 2)
 - [ ] 03-03-PLAN.md — `plots.qini_plot` figure factory with a computed random-targeting chord, pinned limits and unit-bearing labels (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-04-PLAN.md — `synthetic_frame(hetero=...)` heterogeneous fixture plus the random / oracle / negated / tie-wobble statistical invariants (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 03-05-PLAN.md — `bootstrap_indices` resample engine and both confidence bands on a shared grid (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 03-06-PLAN.md — `reports/metric.md` write-up and its presence/tracking test (wave 5)
 
 ### Phase 4: Uplift Modeling
+
 **Goal**: Two honestly evaluated T-learners exist, and the project knows which of their signal is real and which is noise.
 **Depends on**: Phase 2, Phase 3
 **Requirements**: UPLIFT-01
 **Success Criteria** (what must be TRUE):
+
   1. A single seeded, arm-stratified train/holdout split is materialized as a column in the processed table, and the scored artifact contains holdout rows only — making an in-sample metric structurally impossible to report downstream.
   2. A T-learner per arm (mens, womens) predicts uplift from the pre-treatment allowlist only, with the encoder fit on the combined frame and `m0.feature_names_in_ == m1.feature_names_in_` asserted.
   3. Train and holdout Qini are plotted on the same axes for every model, and holdout Qini is compared against a permutation null of >=50 label shuffles — a model whose Qini sits inside the null distribution is reported as such rather than shipped as a result.
   4. Calibration diagnostics are recorded and pass: mean predicted uplift matches the measured ATE in sign and magnitude, and `corr(predicted uplift, base-model score)` is reported so a ranking that is secretly a propensity score is caught.
   5. Uplift ranking is compared against a response-model (propensity) baseline on the same Qini axes, and no accuracy or AUC figure appears as a headline result.
+
 **Plans**: TBD
 
 ### Phase 5: Business & Policy Layer
+
 **Goal**: The project can state, with an interval and an explicit assumption set, how much more revenue a targeted campaign generates than emailing everyone.
 **Depends on**: Phase 4
 **Requirements**: None directly — enabling layer consumed by APP-01 (see Coverage Notes)
 **Success Criteria** (what must be TRUE):
+
   1. The value of a top-k targeting policy is estimated from the actual randomization via known-propensity (1/3) IPW on the holdout — not by summing predicted uplift — and is differenced against both "email everyone" and "email nobody".
   2. Every headline policy number carries a bootstrap CI built from resample indices that resample the shared control group once per replicate, so the correlation between the two arms is preserved rather than ignored.
   3. Cost-per-email and gross-margin are explicit parameters of the economics functions, the optimal k demonstrably moves as cost changes, and a capacity framing ("if you can only send N emails") is available that requires no cost assumption at all.
   4. Committed artifacts (`scored_holdout.parquet`, precomputed bootstrap bands, `ate.json`, `manifest.json`) are small and format-stable, and are sufficient to reproduce every headline number with arithmetic alone — no model file required.
   5. `evaluation.py` and `economics.py` import neither Streamlit nor any file I/O, enforced by a test, so the README's numbers and the app's numbers can never come from different code.
+
 **Plans**: TBD
 
 ### Phase 6: Streamlit App & Deployment
+
 **Goal**: A reviewer clicks a link and, within ten seconds, understands the targeting recommendation and its dollar impact.
 **Depends on**: Phase 5
 **Requirements**: APP-01, APP-02
 **Success Criteria** (what must be TRUE):
+
   1. A threshold slider (top-k% by predicted uplift, shown as both a percentage and a customer count) updates the headline incremental-revenue-versus-emailing-everyone metric per treatment arm, with an arm/policy selector alongside it.
   2. The revenue/profit-versus-targeting curve marks the selected point and the "email everyone" reference point and shows a confidence band, with regions where the interval spans zero visibly annotated instead of shown as a confident point estimate.
   3. Cost-per-email and margin are on-screen inputs labeled as assumptions rather than data, the recommended k visibly moves as they change, and a plain-language caption sits under every number with data vintage and outcome window in the footer.
   4. The app loads only committed artifacts — no model file, no training, no network call — the serve-time `requirements.txt` excludes scikit-learn, statsmodels, DuckDB and Pandera, and every figure is closed after render.
   5. The app is live on Streamlit Community Cloud, opens successfully from a logged-out browser after 12+ hours of no traffic, and its link is in the README.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 7: Documentation & Delivery
+
 **Goal**: A non-technical reader finishes the README knowing who to email, how much more it is worth, and what would break the claim.
 **Depends on**: Phase 6
 **Requirements**: DOC-01
 **Success Criteria** (what must be TRUE):
+
   1. The business question and the headline dollar answer appear on the first screen alongside the live app link — before any mention of ATE, Qini, or T-learner, and understandable without knowing those terms.
   2. Every number in the README traces to a committed artifact from the finished pipeline (the `manifest.json` headline block), verified by regenerating artifacts and diffing rather than by hand-copying.
   3. A limitations section a skeptic would have written is present: 2008 vintage, single two-week window, one retailer, cost/margin as assumptions rather than data, the winner's-curse on threshold selection named explicitly, and the counterfactual caveat stated plainly.
   4. A repo-wide grep for `accuracy_score|roc_auc|\.score\(|classification_report` returns no hits in the README or the app, and a static screenshot of the app's key output is embedded so the result survives a cold app.
   5. `python -m dont_email_everyone.pipeline all` on a fresh clone reproduces every artifact and figure from the vendored CSV.
+
 **Plans**: TBD
 
 ## Coverage Notes
