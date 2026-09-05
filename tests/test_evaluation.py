@@ -1047,6 +1047,222 @@ def test_negated_score_qini_is_non_positive(hetero_case):
 
 
 # --------------------------------------------------------------------------
+# D-03 tier 2 -- tie-heavy row-order wobble
+# --------------------------------------------------------------------------
+
+# Tier 1 (`test_distinct_scores_are_exactly_row_order_invariant`, plan
+# 03-01) proves BIT-IDENTICAL equality when every score is distinct. This is
+# the other tier: with ties the coefficient genuinely moves, because a
+# seeded shuffle is positional and reorders each tie group differently when
+# the caller's rows arrive in a different order. The claim worth making is
+# therefore not "it does not move" but "it moves by less than the metric's
+# own noise floor, so the tie-breaking rule cannot manufacture a signal".
+#
+# Measured on the real mens frame, Radcliffe-shaped 3-rule score, 200
+# shuffles: tie-induced SD 3.27e-04 against a random-score noise floor of
+# SD 9.58e-04 on the same data -- about one third. Both quantities are
+# MEASURED IN THE SAME RUN below rather than compared against a magic
+# number; that is the substantive statement and it survives a change of
+# fixture, of n, or of score.
+#
+# PITFALL 7 -- why D-01's seeded pre-shuffle exists at all. This is not
+# hypothetical. With a plain descending stable argsort and NO pre-shuffle,
+# the same tie-heavy score on this same data gives a Qini coefficient of
+# +0.001890 in natural row order and -0.002051 once the frame is sorted by
+# `treatment`: a sign flip from row order alone. The seeded-shuffle version
+# returns +0.001699 on that same adversarial order, next to the 200-shuffle
+# mean of +0.002020 (reproduced here at +0.002045). The naive sort is
+# deliberately NOT re-implemented to assert on -- an evaluation module with
+# two ranking paths is the defect D-01 removes.
+TIE_SHUFFLES = 200
+SYNTHETIC_TIE_SHUFFLES = 100
+
+# Roughly 2x the observed full spread at R=200 (0.001578 here, 0.002098 in
+# RESEARCH's measurement). The safety factor is deliberate: the observed
+# range grows slowly with R, so a tolerance pinned at the observed value
+# would start failing the first time someone raised the replicate count.
+TIE_RANGE_TOL = 0.004
+
+# Any sentence in evaluation.py's docstring using the word "invariant" must
+# sit with one of these. PITFALLS Pitfall 6's failure mode is the
+# unqualified claim, which collapses the moment a Phase 4 model emits a
+# coarse score -- at exactly the moment the metric's credibility matters.
+INVARIANCE_QUALIFIERS = ("distinct", "tie", "exact")
+
+
+def _radcliffe_shaped_score(frame):
+    """The 3-rule 0-3 indicator score, the shape ties actually arrive in.
+
+    Radcliffe's own final Mens model was a 3-rule indicator and PITFALLS.md
+    Pitfall 4 finds the simplest learners win on holdout here, so this is
+    the realistic coarse score, not a strawman built to make ties.
+    """
+    return (
+        (frame["recency"] <= 4).astype(int)
+        + (frame["history"] > 200).astype(int)
+        + frame["newbie"]
+    ).to_numpy(dtype=float)
+
+
+def _coefficient(score, treatment, outcome):
+    return evaluation.qini_coefficient(
+        *evaluation.qini_curve(score, treatment, outcome)
+    )
+
+
+def _wobble_against_noise_floor(score, treatment, outcome, replicates, seed):
+    """Return `(Q across input-row shuffles, Q across random scores)`.
+
+    Both arrays come from one seeded stream and the same data, so the two
+    standard deviations below are directly comparable -- which is the whole
+    point of stating the guarantee this way instead of as a tolerance.
+    """
+    rng = np.random.default_rng(seed)
+    n = treatment.size
+
+    wobble = np.empty(replicates)
+    for i in range(replicates):
+        order = rng.permutation(n)
+        wobble[i] = _coefficient(
+            score[order], treatment[order], outcome[order]
+        )
+
+    floor = np.empty(replicates)
+    for i in range(replicates):
+        floor[i] = _coefficient(rng.normal(size=n), treatment, outcome)
+
+    return wobble, floor
+
+
+def _assert_wobble_below_floor(wobble, floor, where):
+    wobble_sd = float(wobble.std(ddof=1))
+    floor_sd = float(floor.std(ddof=1))
+
+    assert wobble_sd < floor_sd, (
+        f"on {where} the Qini coefficient moves by SD {wobble_sd:.3e} across "
+        f"{wobble.size} input-row shuffles, against a random-score noise "
+        f"floor of SD {floor_sd:.3e} on the same data. The tie-breaking rule "
+        "is now moving the number by more than the metric's own noise, which "
+        "means input row order is a signal source -- the exact defect D-01's "
+        "seeded pre-shuffle exists to remove, and the point at which D-03's "
+        "two-tier guarantee stops being true. Every draw is seeded, so this "
+        "is deterministic, not flaky."
+    )
+    return wobble_sd, floor_sd
+
+
+@pytest.mark.slow
+def test_tie_heavy_wobble_is_below_the_noise_floor(mens_frame):
+    """D-03 tier 2 at real scale, on a 39%-largest-tie-group score.
+
+    Slow-marked (about 2.4 s plus the frame load) with an unmarked
+    synthetic sibling below, matching 02-04's split: the R=4000 sweep is
+    slow while the oracle case runs every commit.
+    """
+    score = _radcliffe_shaped_score(mens_frame)
+    treatment = mens_frame["treatment"].to_numpy(dtype="int64")
+    outcome = mens_frame["visit"].to_numpy(dtype="float64")
+
+    # Cross-check the tie STRUCTURE, not just the wobble: a fixture change
+    # that quietly flattened these groups would otherwise show up as a
+    # mysteriously tight wobble and be read as good news.
+    ties = evaluation.tie_diagnostics(score)
+    assert ties["n_tie_groups"] == 4, (
+        f"the 0-3 indicator gives {ties['n_tie_groups']} tie groups, "
+        "expected 4; this test is no longer measuring a tie-heavy score."
+    )
+    assert ties["largest_tie_fraction"] == pytest.approx(0.390, abs=0.001), (
+        f"largest_tie_fraction is {ties['largest_tie_fraction']!r}, expected "
+        "0.390. The wobble measured below is only meaningful at that tie "
+        "density -- a flatter score would make this test pass for the wrong "
+        "reason."
+    )
+
+    wobble, floor = _wobble_against_noise_floor(
+        score, treatment, outcome, TIE_SHUFFLES, seed=20260904
+    )
+    _assert_wobble_below_floor(wobble, floor, "the real mens frame")
+
+    spread = float(wobble.max() - wobble.min())
+    assert spread < TIE_RANGE_TOL, (
+        f"the full spread of the coefficient across {TIE_SHUFFLES} input "
+        f"shuffles is {spread:.6f}, past the {TIE_RANGE_TOL} tolerance "
+        "(observed 0.001578 here, 0.002098 in RESEARCH's measurement). This "
+        "is the cruder secondary form of the assertion above; if it fires "
+        "while the SD comparison passes, the wobble has grown a tail rather "
+        "than a scale."
+    )
+
+
+def test_tie_heavy_wobble_is_bounded_at_synthetic_scale(synthetic_frame):
+    """The same comparison at n=8000, unmarked so it runs every commit.
+
+    A broken tie rule must fail on the fast loop, not only in the nightly
+    slow sweep -- the real-scale sibling above exists to prove the claim at
+    the tie density the committed data actually has.
+    """
+    frame = synthetic_frame(
+        n=HETERO_N, effect=HETERO_EFFECT, hetero=HETERO_SPREAD
+    )
+    score = _radcliffe_shaped_score(frame)
+    treatment = frame["treatment"].to_numpy(dtype="int64")
+    outcome = frame["spend"].to_numpy(dtype="float64")
+
+    ties = evaluation.tie_diagnostics(score)
+    assert ties["n_tie_groups"] == 4, (
+        f"the synthetic 0-3 indicator gives {ties['n_tie_groups']} tie "
+        "groups, expected 4."
+    )
+    assert ties["fraction_in_ties"] == 1.0, (
+        "with four distinct values over 8,000 rows every row sits in a tie "
+        "group; anything else means the score is not the 0-3 indicator."
+    )
+
+    wobble, floor = _wobble_against_noise_floor(
+        score, treatment, outcome, SYNTHETIC_TIE_SHUFFLES, seed=20260904
+    )
+    _assert_wobble_below_floor(wobble, floor, "the synthetic frame")
+
+
+def test_curve_docstring_does_not_overclaim_invariance():
+    """PITFALLS Pitfall 6, enforced instead of remembered.
+
+    Every paragraph of `evaluation.__doc__` that uses the word "invariant"
+    must carry a qualifier -- `distinct`, `tie` or `exact` -- either in that
+    paragraph or in the one immediately before it. The neighbour is allowed
+    because D-03's block states the two tiers first and the rule sentence
+    then refers back to them; the word must never appear as a bare claim
+    about the curve.
+    """
+    paragraphs = evaluation.__doc__.split("\n\n")
+    checked = 0
+
+    for index, paragraph in enumerate(paragraphs):
+        if "invariant" not in paragraph.lower():
+            continue
+        checked += 1
+        context = paragraph
+        if index:
+            context = paragraphs[index - 1] + paragraph
+        context = context.lower()
+        assert any(word in context for word in INVARIANCE_QUALIFIERS), (
+            "evaluation.py's docstring uses the word \"invariant\" without "
+            f"any of {INVARIANCE_QUALIFIERS} nearby, in:\n\n{paragraph}\n\n"
+            "Unqualified row-order invariance is FALSE under ties -- the "
+            "coefficient moves by SD 3.27e-04 at a 39% largest tie fraction "
+            "-- and the claim collapses the first time a Phase 4 model emits "
+            "a coarse score, which is exactly when the metric is being "
+            "relied on. State the tier."
+        )
+
+    assert checked, (
+        "no paragraph of evaluation.__doc__ mentions invariance at all. "
+        "D-03's two-tier row-order guarantee is a decision the module is "
+        "required to record; deleting it does not make it stop mattering."
+    )
+
+
+# --------------------------------------------------------------------------
 # Input guards
 # --------------------------------------------------------------------------
 
