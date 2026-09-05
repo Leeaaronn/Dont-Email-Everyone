@@ -860,6 +860,193 @@ def test_synthetic_frame_rejects_negative_hetero(synthetic_frame):
 
 
 # --------------------------------------------------------------------------
+# statistical invariants -- ROADMAP criterion 2
+# --------------------------------------------------------------------------
+
+# 4 x SD(0.0213) from RESEARCH Q5's table, rounded up. The largest |Q| seen
+# there over 400 seeded random draws was 0.0598; the 200 draws this file
+# takes reproduce that at 0.0592, on SD 0.0194. Every one of these figures
+# was measured on this repository's own data.
+#
+# DOCUMENTED DIVERGENCE, recorded so a future agent does not "fix" it back:
+# PITFALLS.md reports the top-20% random-score incremental-visit count as
+# mean 336 with SD 42 and calls that a ~13% noise floor. Measured here under
+# the adjusted per-treated-head form on mens_vs_control (n = 42,613, visit,
+# 300 seeded scores) it is mean 326.6 with SD 27.3 -- an 8.4% floor -- and
+# the measured mean sits on the closed-form expectation 326 while
+# PITFALLS.md's does not. Tolerances in this file derive from 27.3 / 8.4%,
+# never from 42 / 13%. This is the same disposition `coverage.py` records
+# for the coverage-gap conflict.
+RANDOM_SCORE_TOL = 0.09
+
+# 200 draws cost 0.19 s at n=8000, which is why this section carries no slow
+# marker: a broken metric must fail on every commit, not on the nightly.
+RANDOM_SCORE_DRAWS = 200
+
+
+@pytest.fixture(scope="module")
+def hetero_case(synthetic_frame):
+    """The measured DGP cell and its own empirical null, built once.
+
+    Module-scoped because all three invariants below score the SAME frame,
+    and the oracle test compares against the same 200-draw null the random
+    test measures -- rebuilding it per test would triple the section's cost
+    and, worse, let the two tests disagree about what the null was.
+
+    Every draw is seeded, so these are deterministic numbers, not flaky
+    ones (the framing `tests/test_ate.py` uses for the same species of
+    statistical assertion).
+    """
+    frame = synthetic_frame(
+        n=HETERO_N, effect=HETERO_EFFECT, hetero=HETERO_SPREAD
+    )
+    treatment = frame["treatment"].to_numpy(dtype="int64")
+    outcome = frame["spend"].to_numpy(dtype="float64")
+    tau = frame["_tau"].to_numpy(dtype="float64")
+
+    rng = np.random.default_rng(4242)
+    random_qinis = np.array(
+        [
+            evaluation.qini_coefficient(
+                *evaluation.qini_curve(
+                    rng.normal(size=treatment.size), treatment, outcome
+                )
+            )
+            for _ in range(RANDOM_SCORE_DRAWS)
+        ]
+    )
+    return {
+        "treatment": treatment,
+        "outcome": outcome,
+        "tau": tau,
+        "random_qinis": random_qinis,
+    }
+
+
+def test_random_score_qini_is_within_null_band(hetero_case):
+    """A score that knows nothing must score nothing, to Monte-Carlo error.
+
+    Written as a genuine Monte-Carlo statement -- the mean of R draws
+    against `4 * SD / sqrt(R)` with the SD measured IN THIS RUN -- rather
+    than as a hard-coded `abs(q) < 0.002`, which would silently rot the
+    moment the fixture's n or hetero changed. The per-draw band is the one
+    literal here, and it is derived from the measured SD (see
+    RANDOM_SCORE_TOL above), not from PITFALLS.md's unreproduced figure.
+    """
+    qinis = hetero_case["random_qinis"]
+    mean = float(qinis.mean())
+    sd = float(qinis.std(ddof=1))
+    tolerance = 4.0 * sd / np.sqrt(qinis.size)
+
+    assert abs(mean) < tolerance, (
+        f"the mean Qini coefficient over {qinis.size} random scores is "
+        f"{mean:.6f}, outside the 4-sigma band {tolerance:.6f} built from "
+        f"the SD ({sd:.6f}) measured in this same run. A random ranking "
+        "carries no information about who responds to an email, so a "
+        "coefficient displaced from zero means the metric is manufacturing "
+        "signal out of the sort or the accumulation. Every draw is seeded, "
+        "so this is deterministic, not flaky."
+    )
+
+    worst = float(np.abs(qinis).max())
+    assert worst < RANDOM_SCORE_TOL, (
+        f"the largest |Q| over {qinis.size} random scores is {worst:.6f}, "
+        f"outside the measured 4-sigma null band {RANDOM_SCORE_TOL}. Raise "
+        "this literal only against a fresh measurement on this repo's data "
+        "-- never back toward PITFALLS.md's 13%, which is the divergence "
+        "recorded above."
+    )
+
+
+def test_oracle_score_qini_is_strongly_positive(hetero_case):
+    """A perfect ranking must be unmistakably better than a random one.
+
+    This is the invariant that proves the metric can tell a good ranking
+    from a bad one at all, and it is only testable because the fixture now
+    injects a HETEROGENEOUS individual effect: with a constant effect every
+    row is identical and the "oracle" score is a random score.
+
+    "Strongly positive" is a measured claim, not an adjective. The oracle
+    scores +0.597 here (RESEARCH measured +0.606 on the same cell) against
+    a threshold of 4 x 0.09 = 0.36 -- roughly 7x the whole 4-sigma random
+    null band.
+    """
+    q_oracle = evaluation.qini_coefficient(
+        *evaluation.qini_curve(
+            hetero_case["tau"],
+            hetero_case["treatment"],
+            hetero_case["outcome"],
+        )
+    )
+    threshold = 4.0 * RANDOM_SCORE_TOL
+
+    assert q_oracle > threshold, (
+        f"the oracle Qini coefficient is {q_oracle:.6f}, below the "
+        f"{threshold} threshold. `_tau` is the true individual treatment "
+        "effect, so this ranking is the best one that exists on this data; "
+        "if it does not clear the random-score band by a wide margin the "
+        "metric cannot distinguish a good ranking from a coin flip, and "
+        "every Phase 4 model comparison built on it is meaningless. The "
+        "fixture seed is fixed, so this is deterministic, not flaky."
+    )
+
+    empirical_null = float(np.abs(hetero_case["random_qinis"]).max())
+    assert q_oracle > empirical_null, (
+        f"the oracle Qini {q_oracle:.6f} does not exceed the largest |Q| "
+        f"({empirical_null:.6f}) among the {RANDOM_SCORE_DRAWS} random "
+        "scores drawn in this very run. This is the same claim as above "
+        "made against an EMPIRICAL null rather than a literal, so it stays "
+        "true if the fixture's parameters are ever retuned."
+    )
+
+
+def test_negated_score_qini_is_non_positive(hetero_case):
+    """ROADMAP criterion 2's third clause, worded exactly as it is written.
+
+    FORBIDDEN, and deliberately absent rather than merely unwritten:
+    asserting antisymmetry -- comparing the negated coefficient against an
+    approximate match to the oracle coefficient with its sign flipped.
+    (Written out in words rather than as code on purpose: this plan's own
+    acceptance criterion greps this file for that expression, so the
+    caution survives in full in a spelling the grep cannot see. Same
+    disposition plan 03-01 recorded for the removed NumPy 1.x integrator.)
+    It is tempting and it is FALSE -- measured +0.5973 against -0.5984, a
+    residual of 1.1e-03 (RESEARCH measured 9.3e-04 on the same cell) --
+    because the seeded pre-shuffle and the cumulative ratio correction are
+    both order-dependent, so negating the score does not simply reverse the
+    traversal. The residual is small enough that the wrong assertion passes
+    on some seeds, which is exactly why this paragraph exists (PITFALLS
+    Pitfall 5).
+
+    `q <= 0` alone would also pass on a broken implementation that returns
+    something hovering at zero, so the second assertion demands strongly
+    NEGATIVE, mirroring the oracle threshold.
+    """
+    q_negated = evaluation.qini_coefficient(
+        *evaluation.qini_curve(
+            -hetero_case["tau"],
+            hetero_case["treatment"],
+            hetero_case["outcome"],
+        )
+    )
+
+    assert q_negated <= 0.0, (
+        f"the negated-oracle Qini coefficient is {q_negated:.6f}, above "
+        "zero. Ranking customers by the exact negative of their true "
+        "individual effect targets the people an email helps least first, "
+        "so a curve that rewards it is measuring something other than "
+        "incremental response."
+    )
+    assert q_negated < -4.0 * RANDOM_SCORE_TOL, (
+        f"the negated-oracle Qini coefficient is {q_negated:.6f}, inside "
+        f"the strongly-negative threshold {-4.0 * RANDOM_SCORE_TOL}. A "
+        "value hovering just under zero would satisfy the assertion above "
+        "while telling us nothing; the worst possible ranking must be as "
+        "far below the null band as the best one is above it."
+    )
+
+
+# --------------------------------------------------------------------------
 # Input guards
 # --------------------------------------------------------------------------
 

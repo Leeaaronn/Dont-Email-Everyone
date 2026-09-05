@@ -62,7 +62,12 @@ def womens_frame():
     return pd.read_parquet(config.PROCESSED / "womens_vs_control.parquet")
 
 
-@pytest.fixture
+# Session-scoped even though the three fixtures above are session-scoped
+# for a different reason: this one holds no data at all, only a pure
+# factory closure that builds a fresh frame on every call. Widening the
+# scope changes no caller behaviour and lets a test module derive a
+# module-scoped frame from it without a pytest ScopeMismatch.
+@pytest.fixture(scope="session")
 def synthetic_frame():
     """Factory fixture: `synthetic_frame(n, effect, imbalance, seed,
     hetero)` returns a fresh arm-vs-control-shaped frame with a known true
