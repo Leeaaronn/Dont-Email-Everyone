@@ -63,7 +63,15 @@ Plans:
   2. Synthetic-data unit tests all pass: `Q(0) == 0`; the curve endpoint equals the independently computed ATE; a random score gives Qini within Monte-Carlo tolerance of zero; an oracle score (the true simulated individual effect) gives a strongly positive Qini; a negated score gives Qini <= 0; and the result is invariant to input row order.
   3. The chosen Qini normalization convention and the uplift-at-k convention ('overall' vs. 'by_group') are stated in the module docstring and pinned by a test, so the definition cannot silently drift later.
   4. A Matplotlib function returns a `Figure` (never calling `plt.show()`) showing the curve against a random-targeting chord computed from the data — not a bare y=x diagonal — with explicitly labeled axis units.
-**Plans**: TBD
+**Plans:** 6 plans in 5 waves
+
+Plans:
+- [ ] 03-01-PLAN.md — evaluation.py core: normalization-convention docstring, seeded `_ranked_arrays`, `qini_curve`, `qini_coefficient`, and the six-way endpoint cross-check against committed `ate.json` (wave 1)
+- [ ] 03-02-PLAN.md — `uplift_at_k` ('overall', truncation, empty-arm raise) and `tie_diagnostics`, pinning the exact `uplift_at_k(k) == Q(k)*N_t/n_t(k)` identity (wave 2)
+- [ ] 03-03-PLAN.md — `plots.qini_plot` figure factory with a computed random-targeting chord, pinned limits and unit-bearing labels (wave 2)
+- [ ] 03-04-PLAN.md — `synthetic_frame(hetero=...)` heterogeneous fixture plus the random / oracle / negated / tie-wobble statistical invariants (wave 3)
+- [ ] 03-05-PLAN.md — `bootstrap_indices` resample engine and both confidence bands on a shared grid (wave 4)
+- [ ] 03-06-PLAN.md — `reports/metric.md` write-up and its presence/tracking test (wave 5)
 
 ### Phase 4: Uplift Modeling
 **Goal**: Two honestly evaluated T-learners exist, and the project knows which of their signal is real and which is noise.
@@ -131,7 +139,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 |-------|----------------|--------|-----------|
 | 1. Data Foundation | 5/5 | Complete   | 2026-09-02 |
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
-| 3. Uplift Evaluation Metric | 0/TBD | Not started | - |
+| 3. Uplift Evaluation Metric | 0/6 | Planned | - |
 | 4. Uplift Modeling | 0/TBD | Not started | - |
 | 5. Business & Policy Layer | 0/TBD | Not started | - |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |

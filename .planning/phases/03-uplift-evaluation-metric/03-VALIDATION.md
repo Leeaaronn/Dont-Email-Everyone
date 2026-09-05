@@ -1,9 +1,9 @@
 ---
 phase: 3
 slug: uplift-evaluation-metric
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: planned
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-09-05
 ---
 
@@ -38,35 +38,36 @@ created: 2026-09-05
 
 ## Per-Task Verification Map
 
-Task IDs are assigned by the planner. Rows below are keyed to the ROADMAP success criterion
-and locked decision each test discharges; the planner MUST attach each row to a task ID and
-the executor MUST keep the `Status` column current.
+Task IDs assigned by the planner on 2026-09-05. Rows are keyed to the ROADMAP success criterion
+and locked decision each test discharges. Task IDs read `{plan}-T{n}` and point at the `<task>`
+element in that plan's PLAN.md, in document order. The executor MUST keep the `Status` column
+current.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | UPLIFT-02 / C1 | — | N/A (pure compute, no I/O, no network) | unit (source-reading) | `pytest tests/test_evaluation.py::test_evaluation_module_is_pure -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C1 | — | N/A | unit | `pytest tests/test_evaluation.py::test_evaluation_module_writes_nothing -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C1 | — | No network egress from package modules | unit | `pytest tests/test_no_network.py -q` | ✅ (auto-covers new module via `rglob`) | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_starts_at_origin -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_endpoint_equals_difference_in_means -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | statistical (cross-impl) | `pytest tests/test_evaluation.py::test_endpoint_matches_committed_ate -x` | ❌ W0 — **highest value; build first** | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_random_score_qini_is_within_null_band -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_oracle_score_qini_is_strongly_positive -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_negated_score_qini_is_non_positive -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_distinct_scores_are_exactly_row_order_invariant -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 (D-03) | — | N/A | statistical | `pytest tests/test_evaluation.py::test_tie_heavy_wobble_is_below_the_noise_floor -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_is_not_forced_monotone -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C3 | — | N/A | unit (source-reading) | `pytest tests/test_evaluation.py::test_docstring_pins_the_normalization_convention -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C3 | — | N/A | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_matches_the_curve_identity -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C3 | — | Raises rather than silently returning NaN | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_raises_on_empty_arm -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C4 | — | Returns `Figure`, never calls `plt.show()` | unit | `pytest tests/test_plots.py -k qini -x` | ✅ file / ❌ W0 cases | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_chord_is_computed_not_diagonal -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_axis_labels_carry_units -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_saves_a_non_trivial_png -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / D-04 | — | N/A | unit | `pytest tests/test_evaluation.py::test_tie_diagnostics -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / D-07 | — | N/A | unit | `pytest tests/test_evaluation.py -k bootstrap_indices -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / D-06 | — | N/A | statistical | `pytest tests/test_evaluation.py -k bands -x` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | UPLIFT-02 / D-08 | — | N/A | unit | `pytest tests/test_reports.py -q` | ✅ file / ❌ W0 case | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C1 | — | N/A (pure compute, no I/O, no network) | unit (source-reading) | `pytest tests/test_evaluation.py::test_evaluation_module_is_pure -x` | ❌ W0 | ⬜ pending |
+| 03-01-T2 (extended 03-02-T2, 03-05-T3) | 03-01 | 1 | UPLIFT-02 / C1 | — | N/A | unit | `pytest tests/test_evaluation.py::test_evaluation_module_writes_nothing -x` | ❌ W0 | ⬜ pending |
+| 03-01-T1 (auto-covered) | 03-01 | 1 | UPLIFT-02 / C1 | — | No network egress from package modules | unit | `pytest tests/test_no_network.py -q` | ✅ (auto-covers new module via `rglob`) | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_starts_at_origin -x` | ❌ W0 | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_endpoint_equals_difference_in_means -x` | ❌ W0 | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | statistical (cross-impl) | `pytest tests/test_evaluation.py::test_endpoint_matches_committed_ate -x` | ❌ W0 — **highest value; build first** | ⬜ pending |
+| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_random_score_qini_is_within_null_band -x` | ❌ W0 | ⬜ pending |
+| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_oracle_score_qini_is_strongly_positive -x` | ❌ W0 | ⬜ pending |
+| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_negated_score_qini_is_non_positive -x` | ❌ W0 | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_distinct_scores_are_exactly_row_order_invariant -x` | ❌ W0 | ⬜ pending |
+| 03-04-T3 | 03-04 | 3 | UPLIFT-02 / C2 (D-03) | — | N/A | statistical | `pytest tests/test_evaluation.py::test_tie_heavy_wobble_is_below_the_noise_floor -x` | ❌ W0 | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_is_not_forced_monotone -x` | ❌ W0 | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C3 | — | N/A | unit (source-reading) | `pytest tests/test_evaluation.py::test_docstring_pins_the_normalization_convention -x` | ❌ W0 | ⬜ pending |
+| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | N/A | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_matches_the_curve_identity -x` | ❌ W0 | ⬜ pending |
+| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | Raises rather than silently returning NaN | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_raises_on_empty_arm -x` | ❌ W0 | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | Returns `Figure`, never calls `plt.show()` | unit | `pytest tests/test_plots.py -k qini -x` | ✅ file / ❌ W0 cases | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_chord_is_computed_not_diagonal -x` | ❌ W0 | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_axis_labels_carry_units -x` | ❌ W0 | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_saves_a_non_trivial_png -x` | ❌ W0 | ⬜ pending |
+| 03-02-T2 | 03-02 | 2 | UPLIFT-02 / D-04 | — | N/A | unit | `pytest tests/test_evaluation.py::test_tie_diagnostics -x` | ❌ W0 | ⬜ pending |
+| 03-05-T3 | 03-05 | 4 | UPLIFT-02 / D-07 | — | N/A | unit | `pytest tests/test_evaluation.py -k bootstrap_indices -x` | ❌ W0 | ⬜ pending |
+| 03-05-T3 | 03-05 | 4 | UPLIFT-02 / D-06 | — | N/A | statistical | `pytest tests/test_evaluation.py -k bands -x` | ❌ W0 | ⬜ pending |
+| 03-06-T2 | 03-06 | 5 | UPLIFT-02 / D-08 | — | N/A | unit | `pytest tests/test_reports.py -q` | ✅ file / ❌ W0 case | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -74,10 +75,10 @@ the executor MUST keep the `Status` column current.
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_evaluation.py` — new file; covers C1–C3, D-04, D-06, D-07
-- [ ] `tests/conftest.py` — extend `synthetic_frame` with a `hetero` parameter (RESEARCH §Q4). `hetero=0.0` MUST reproduce current behavior bit-for-bit so no Phase 2 test changes.
-- [ ] `tests/test_plots.py` — new section for `qini_plot` (C4)
-- [ ] `tests/test_reports.py` — add `metric.md` to the presence/tracking checks (D-08)
+- [ ] `tests/test_evaluation.py` — new file, created by **03-01-T2**; extended by 03-02-T2, 03-04-T1/T2/T3, 03-05-T3
+- [ ] `tests/conftest.py` — extend `synthetic_frame` with a `hetero` parameter (RESEARCH §Q4), owned by **03-04-T1**. `hetero=0.0` MUST reproduce current behavior bit-for-bit so no Phase 2 test changes; `u` is drawn from a separate `default_rng(seed + 1)` stream so the primary draw order is unshifted.
+- [ ] `tests/test_plots.py` — new section for `qini_plot` (C4), owned by **03-03-T2**
+- [ ] `tests/test_reports.py` — add `metric.md` to the presence/tracking checks (D-08), owned by **03-06-T2**
 - [ ] Framework install: **none needed** — pytest 9.1.1 present, `slow` marker already registered, `--strict-markers` already on
 
 ---
@@ -86,17 +87,21 @@ the executor MUST keep the `Status` column current.
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| `reports/metric.md` prose is accurate and readable to a non-author reviewer | D-08 | Prose quality is not machine-checkable; the automated test asserts presence, git-tracking and non-triviality only (matching `test_reports.py`'s existing pattern for `validity.md`) | Read `reports/metric.md`. Confirm it states: the Qini normalization convention, the uplift-at-k convention, the tie rule, both band definitions, and the synthetic-oracle results as evidence. |
+| `reports/metric.md` prose is accurate and readable to a non-author reviewer (discharged by **03-06-T3**, a blocking `checkpoint:human-verify`) | D-08 | Prose quality is not machine-checkable; the automated test asserts presence, git-tracking and non-triviality only (matching `test_reports.py`'s existing pattern for `validity.md`) | Read `reports/metric.md`. Confirm it states: the Qini normalization convention, the uplift-at-k convention, the tie rule, both band definitions, and the synthetic-oracle results as evidence. |
 
 ---
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 10s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify (every task in all six plans carries an `<automated>` command)
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 10s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Plan coverage:** every row above is attached to a task in one of
+`03-01-PLAN.md` .. `03-06-PLAN.md`. Wave order: 1 = 03-01; 2 = 03-02 and 03-03 (parallel, no file
+overlap); 3 = 03-04; 4 = 03-05; 5 = 03-06.
+
+**Approval:** planned 2026-09-05
