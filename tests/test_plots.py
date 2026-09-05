@@ -16,6 +16,16 @@ figure the caller never received registered in pyplot's global state, leaks
 handles: matplotlib warns after 20 open figures and the orchestrator's
 `close` cannot reach a figure it was never handed.
 
+The third is `test_qini_plot_chord_is_computed_not_diagonal`. The random-
+targeting baseline on a Qini plot is the chord from the origin to the
+curve's own endpoint `Q(1)`, which is the average treatment effect measured
+on the same data. Drawing `y = x` instead is a line with no relationship to
+the data, and on any outcome whose ATE is not 1.0 it turns an ordinary
+ranking into an apparent win over random targeting. That test reads the
+drawn Line2D's endpoints rather than trusting the image, and asserts up
+front that `Q(1)` is neither 1.0 nor 0.0 so a diagonal could not satisfy it
+by coincidence.
+
 Figure *content* is deliberately not asserted byte-wise. matplotlib embeds
 run-specific metadata in a PNG, so file bytes are not reproducible across
 runs -- these tests assert structure (limits, tick labels, legend entries,
@@ -29,8 +39,16 @@ import pytest
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+from matplotlib.collections import PolyCollection  # noqa: E402
 
-from dont_email_everyone import ate, balance, config, plots  # noqa: E402
+from dont_email_everyone import (  # noqa: E402
+    ate,
+    balance,
+    config,
+    evaluation,
+    plots,
+)
 
 
 @pytest.fixture(scope="module")
@@ -53,6 +71,62 @@ def _vertical_line_positions(ax):
         if len(xdata) == 2 and xdata[0] == xdata[1]:
             positions.append(round(float(xdata[0]), 8))
     return positions
+
+
+@pytest.fixture(scope="module")
+def qini_pair():
+    """A synthetic `(fraction, qini)` pair whose ranking genuinely lifts.
+
+    Synthetic on purpose: `tests/test_evaluation.py` owns whether the curve
+    is arithmetically right, on the real committed frames. What this module
+    needs is a curve whose endpoint is neither 0.0 nor 1.0, so the chord the
+    figure draws is distinguishable from both a flat line and a diagonal.
+    """
+    rng = np.random.default_rng(20260903)
+    n = 4000
+    treatment = (rng.random(n) < 0.5).astype(int)
+    score = rng.normal(size=n)
+    base = (rng.random(n) < 0.15).astype(int)
+    # Uplift rises with the score, so the curve bows above its own chord --
+    # which is what the figure is for.
+    lift = (rng.random(n) < 0.04 + 0.06 * (score > 0)).astype(int)
+    outcome = np.clip(base + treatment * lift, 0, 1)
+    return evaluation.qini_curve(score, treatment, outcome)
+
+
+@pytest.fixture(scope="module")
+def qini_band(qini_pair):
+    """A hand-built `(grid, lo, hi)` triple on the band functions' grid.
+
+    The real bands land in a later plan; what is fixed now is the *shape*
+    `qini_plot` has to accept -- a 101-point grid plus two envelopes -- not
+    the statistics, which this file does not test.
+    """
+    fraction, qini = qini_pair
+    grid = np.linspace(0.0, 1.0, 101)
+    centre = np.interp(grid, fraction, qini)
+    return grid, centre - 0.01, centre + 0.01
+
+
+def _two_point_segments(ax):
+    """Return [((x0, x1), (y0, y1)), ...] for every two-point Line2D on `ax`.
+
+    The sibling of `_vertical_line_positions`: the same Line2D introspection,
+    but it keeps both coordinates, because the Qini chord is a *sloped*
+    reference line and has to be checked endpoint by endpoint.
+    """
+    segments = []
+    for line in ax.lines:
+        xdata = np.asarray(line.get_xdata(), dtype=float)
+        ydata = np.asarray(line.get_ydata(), dtype=float)
+        if len(xdata) == 2:
+            segments.append(
+                (
+                    (float(xdata[0]), float(xdata[1])),
+                    (float(ydata[0]), float(ydata[1])),
+                )
+            )
+    return segments
 
 
 def _errorbar_spans(ax):
@@ -339,6 +413,221 @@ def test_ate_forest_saves_a_non_trivial_png(ate_df, tmp_path):
 
 
 # --------------------------------------------------------------------------
+# qini_plot
+# --------------------------------------------------------------------------
+
+
+def test_qini_plot_returns_a_figure(qini_pair):
+    fraction, qini = qini_pair
+    fig = plots.qini_plot(fraction, qini)
+    try:
+        assert isinstance(fig, matplotlib.figure.Figure)
+    finally:
+        plt.close(fig)
+
+
+def test_qini_plot_chord_is_computed_not_diagonal(qini_pair):
+    fraction, qini = qini_pair
+    scale = plots._UNIT_SCALE["pp"]
+    endpoint = float(qini[-1]) * scale
+
+    # Non-vacuity, asserted before the figure is built. If this curve's own
+    # endpoint were 1.0 a y = x diagonal would satisfy the assertion below,
+    # and if it were 0.0 the horizontal zero reference line would -- the
+    # test would then pass on exactly the bug it exists to catch.
+    assert endpoint != pytest.approx(1.0, abs=1e-9)
+    assert endpoint != pytest.approx(0.0, abs=1e-9)
+
+    fig = plots.qini_plot(fraction, qini, unit="pp")
+    try:
+        matches = [
+            segment
+            for segment in _two_point_segments(fig.axes[0])
+            if segment[0] == (0.0, 1.0)
+            and segment[1][0] == pytest.approx(0.0, abs=1e-12)
+            and segment[1][1] == pytest.approx(endpoint, rel=1e-9)
+        ]
+        assert len(matches) == 1, (
+            "the random-targeting baseline must be the chord from (0, 0) to "
+            f"(1, Q(1)) -- here (1, {endpoint}) -- computed from the curve's "
+            "own endpoint, which is the average treatment effect measured on "
+            "this same data. Radcliffe defines the baseline exactly that "
+            "way: mailing a random fraction phi of the list buys phi of the "
+            "ATE. A bare y = x diagonal is PITFALLS.md Pitfall 8.2 -- a line "
+            "with no relationship to the data, which on any outcome whose "
+            "ATE is not 1.0 manufactures an advantage over random targeting "
+            "that does not exist. Drawn two-point lines: "
+            f"{_two_point_segments(fig.axes[0])}"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_plot_x_limits_are_pinned(qini_pair):
+    fraction, qini = qini_pair
+    fig = plots.qini_plot(fraction, qini)
+    try:
+        assert fig.axes[0].get_xlim() == (0.0, 1.0), (
+            "the targeting fraction is [0, 1] by definition; auto-scaling it "
+            "lets the chord's endpoint at phi = 1 fall off the canvas"
+        )
+        low, high = fig.axes[0].get_ylim()
+        endpoint = float(qini[-1]) * plots._UNIT_SCALE["pp"]
+        assert low < 0.0 <= endpoint < high, (
+            "both the origin and Q(1) must be on the canvas with a margin, "
+            f"but the y limits are ({low}, {high}) and Q(1) is {endpoint}"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_plot_axis_labels_carry_units(qini_pair):
+    fraction, qini = qini_pair
+    for unit, expected in (("pp", "percentage point"), ("$", "dollar")):
+        fig = plots.qini_plot(fraction, qini, unit=unit)
+        try:
+            ylabel = fig.axes[0].get_ylabel().lower()
+            assert expected in ylabel, (
+                f"the y label for unit {unit!r} must name its unit; got "
+                f"{ylabel!r}"
+            )
+            assert "per treated customer" in ylabel, (
+                "Q(phi) is a cumulative incremental outcome per TREATED "
+                "customer in the full population; a y label that does not "
+                "say so is unreadable next to uplift-at-k"
+            )
+            assert "per targeted customer" not in ylabel, (
+                "'per targeted customer' is uplift-at-k's unit, not the "
+                "curve's. The two differ by the factor N_t / n_t(k) and "
+                "conflating them is PITFALLS.md Pitfall 8."
+            )
+            assert "fraction" in fig.axes[0].get_xlabel().lower(), (
+                "the x axis is a targeting fraction of the combined "
+                f"population; got {fig.axes[0].get_xlabel()!r}"
+            )
+        finally:
+            plt.close(fig)
+
+
+def test_qini_plot_draws_the_band_when_given_one(qini_pair, qini_band):
+    fraction, qini = qini_pair
+
+    bare = plots.qini_plot(fraction, qini)
+    try:
+        assert not [
+            c for c in bare.axes[0].collections if isinstance(c, PolyCollection)
+        ], "a figure built without a band must carry no fill_between artist"
+    finally:
+        plt.close(bare)
+
+    fig = plots.qini_plot(fraction, qini, band=qini_band)
+    try:
+        polys = [
+            c for c in fig.axes[0].collections if isinstance(c, PolyCollection)
+        ]
+        assert len(polys) == 1, (
+            f"expected exactly one fill_between band, found {len(polys)}"
+        )
+        drawn = np.concatenate(
+            [path.vertices[:, 1] for path in polys[0].get_paths()]
+        )
+        curve = qini * plots._UNIT_SCALE["pp"]
+        assert drawn.min() <= curve.min()
+        assert drawn.max() >= curve.max(), (
+            "the band is drawn on the same scaled axis as the curve; a band "
+            "that does not bracket the curve has been left in raw units"
+        )
+    finally:
+        plt.close(fig)
+
+    grid, lo, hi = qini_band
+    open_before = plt.get_fignums()
+    with pytest.raises(ValueError, match="equal length"):
+        plots.qini_plot(fraction, qini, band=(grid, lo[:-1], hi))
+    assert plt.get_fignums() == open_before, (
+        "the band length guard must fire before plt.subplots; raising after "
+        "the Figure exists leaks one the caller can never close"
+    )
+
+
+def test_qini_plot_marks_highlight_k(qini_pair):
+    fraction, qini = qini_pair
+    fig = plots.qini_plot(fraction, qini, highlight_k=0.2)
+    try:
+        assert 0.2 in _vertical_line_positions(fig.axes[0]), (
+            "highlight_k must be visible on the canvas -- an interactive "
+            "caller's selection has to render somewhere"
+        )
+    finally:
+        plt.close(fig)
+
+    fig = plots.qini_plot(fraction, qini)
+    try:
+        assert 0.2 not in _vertical_line_positions(fig.axes[0]), (
+            "an unrequested targeting depth must not be drawn"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_plot_does_not_mutate_input(qini_pair):
+    fraction, qini = qini_pair
+    fraction_before = fraction.copy()
+    qini_before = qini.copy()
+    fig = plots.qini_plot(fraction, qini, unit="pp")
+    plt.close(fig)
+    assert np.array_equal(fraction, fraction_before), (
+        "qini_plot scaled the caller's array in place; the pp scaling must "
+        "produce a new array, not multiply the input"
+    )
+    assert np.array_equal(qini, qini_before)
+
+
+def test_qini_plot_leaves_no_stray_figures(qini_pair):
+    fraction, qini = qini_pair
+    plt.close("all")
+    fig = plots.qini_plot(fraction, qini)
+    try:
+        assert plt.get_fignums() == [fig.number], (
+            "qini_plot registered a figure the caller was never handed; the "
+            "orchestrator cannot close what it did not receive"
+        )
+    finally:
+        plt.close(fig)
+    assert plt.get_fignums() == []
+
+
+def test_qini_plot_saves_a_non_trivial_png(qini_pair, tmp_path):
+    fraction, qini = qini_pair
+    # tmp_path only. No Qini figure is committed to reports/figures in this
+    # phase: a synthetic curve sitting beside Phase 2's real figures could be
+    # read as a result. The first committed one is drawn on holdout scores.
+    path = tmp_path / "qini_plot.png"
+    fig = plots.qini_plot(fraction, qini)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    assert path.is_file()
+    assert path.stat().st_size > 5000, (
+        f"{path.stat().st_size} bytes is too small to be a real figure -- a "
+        "blank canvas is a few hundred bytes"
+    )
+
+
+def test_qini_plot_rejects_a_curve_that_does_not_start_at_the_origin(qini_pair):
+    fraction, qini = qini_pair
+    open_before = plt.get_fignums()
+    # A shifted curve, not a sliced one: the head of this curve is genuinely
+    # flat at 0, so slicing it off would still start at 0 and the guard --
+    # which exists to catch a curve that has been shifted or re-based -- would
+    # not fire on the case it is named for.
+    with pytest.raises(ValueError, match=r"Q\(0\)"):
+        plots.qini_plot(fraction, qini + 0.5)
+    with pytest.raises(ValueError, match="same length"):
+        plots.qini_plot(fraction, qini[:-1])
+    assert plt.get_fignums() == open_before
+
+
+# --------------------------------------------------------------------------
 # Module boundary
 # --------------------------------------------------------------------------
 
@@ -375,9 +664,19 @@ def test_plots_module_selects_the_headless_backend_before_pyplot():
     )
 
 
-def test_plots_module_writes_nothing(balance_df, ate_df, tmp_path, monkeypatch):
+def test_plots_module_writes_nothing(
+    balance_df, ate_df, qini_pair, tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
-    for fig in (plots.love_plot(balance_df), plots.ate_forest(ate_df)):
+    # Every public factory, not a subset: the guarantee this test states is
+    # about the module, so a factory left out of this tuple quietly narrows
+    # it to the ones somebody remembered.
+    fraction, qini = qini_pair
+    for fig in (
+        plots.love_plot(balance_df),
+        plots.ate_forest(ate_df),
+        plots.qini_plot(fraction, qini),
+    ):
         plt.close(fig)
     assert list(tmp_path.iterdir()) == [], (
         "plots.py wrote to disk; only the orchestrator may touch the "
