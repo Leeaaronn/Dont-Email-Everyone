@@ -1,7 +1,8 @@
-"""Proof that Phase 2's reader-facing deliverables -- the two committed
-figures under `reports/figures/` and the write-up at `reports/validity.md`
--- are present in the working tree AND tracked by git, so a fresh clone gets
-them without running the pipeline.
+"""Proof that this project's reader-facing deliverables -- the two
+committed figures under `reports/figures/` and the write-ups at
+`reports/validity.md` and `reports/metric.md` -- are present in the working
+tree AND tracked by git, so a fresh clone gets them without running the
+pipeline.
 
 PNG files have exactly the non-determinism problem the Parquet artifacts
 have: matplotlib embeds run-specific metadata, so two runs of the same code
@@ -31,6 +32,23 @@ from dont_email_everyone import config
 FIGURE_NAMES = ["love_plot.png", "ate_forest.png"]
 
 MIN_FIGURE_BYTES = 5_000
+
+# A presence allowlist, not a glob over `reports/*.md`. 02-06 recorded why:
+# a write-up that was never committed, or that was deleted, still passes a
+# suite that only checks whatever files happen to be on disk. Naming them
+# here is what makes an absent report a failure. Adding a name is how a new
+# write-up becomes covered -- there is no other step. A tuple rather than a
+# list for the same reason as `config.PRE_TREATMENT_FEATURES` and
+# `coverage.CELL_SIZES`: a module constant a test can accidentally mutate is
+# a shared mutable, and `tests/test_ate.py` pins that convention with a
+# `pytest.raises(TypeError)`.
+REPORT_NAMES = ("validity.md", "metric.md")
+
+# In the spirit of MIN_FIGURE_BYTES above, and for the same failure mode: a
+# stub write-up -- a title and a TODO -- passes `.is_file()` and fails a
+# reader. `validity.md` is ~24 KB and `metric.md` ~21 KB, so 2,000 bytes is
+# a floor on triviality and not a length target.
+MIN_REPORT_BYTES = 2_000
 
 
 def _tracked_names(directory):
@@ -80,6 +98,44 @@ def test_validity_report_exists():
     assert "validity.md" in tracked_names, (
         "reports/validity.md is not tracked by git"
     )
+
+
+def test_metric_report_exists():
+    """Presence, git tracking and non-triviality for every named report.
+
+    Added for `reports/metric.md` (Phase 3's write-up), and written as a
+    loop over the REPORT_NAMES allowlist rather than as a one-off so the
+    next write-up needs a name and nothing else. `validity.md` rides along
+    and gains the byte floor its own test above does not apply.
+
+    Three assertions, and deliberately no fourth. The section-ordering,
+    forbidden-phrase and headline-number tests below apply to
+    `validity.md` alone, because their premise is that every number in
+    that document traces to a committed artifact under `data/processed/`.
+    Phase 3 commits no artifact by design (03-CONTEXT.md D-09) --
+    `metric.md`'s numbers trace to *tests* instead, so the tracing test has
+    no analogue here and asserting on this document's prose would be
+    asserting on wording. Its accuracy is a manual verification, recorded
+    as such in 03-VALIDATION.md.
+    """
+    tracked_names = _tracked_names(config.REPORTS)
+
+    for name in REPORT_NAMES:
+        path = config.REPORTS / name
+        assert path.is_file(), f"missing write-up: {path}"
+
+        assert name in tracked_names, (
+            f"reports/{name} is not tracked by git. A write-up that is "
+            "present here but uncommitted is missing from a fresh clone, "
+            "which is the only view a reviewer gets."
+        )
+
+        size = path.stat().st_size
+        assert size > MIN_REPORT_BYTES, (
+            f"reports/{name} is {size} bytes, expected more than "
+            f"{MIN_REPORT_BYTES}. A stub write-up passes a presence check "
+            "and fails a reader."
+        )
 
 
 def test_validity_report_states_acceptance_criteria_before_results():
