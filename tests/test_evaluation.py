@@ -155,14 +155,27 @@ def test_evaluation_module_is_pure():
         )
 
 
+# `uplift_at_k` and `tie_diagnostics` joined the call list below in plan
+# 03-02; `bootstrap_indices`, `qini_bootstrap_band` and `qini_random_band`
+# in plan 03-05. All seven public functions are called, so "every public
+# function" is literally true rather than a claim about whichever ones
+# happened to be here first.
+#
+# 03-05 is the last plan in this phase that adds public surface to
+# `evaluation.py`, so the list is complete as it stands. Any LATER plan
+# adding a function must still extend it -- a call list that quietly stops
+# growing turns this guarantee into a guarantee about history.
+#
+# The two bands run at R=4. The defaults would allocate a resample matrix
+# far larger than a boundary check needs, and the property under test here
+# is "no bytes reach the filesystem", not "the band is correct".
+#
+# This prose sits in a comment rather than in the docstring so the seven
+# calls stay inside a short grep window under the function signature.
 def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     """Call every public function from an empty directory; it stays empty.
 
-    `uplift_at_k` and `tie_diagnostics` were added to the call list by plan
-    03-02. Plan 03-05 adds `bootstrap_indices`, `qini_bootstrap_band` and
-    `qini_random_band` -- each MUST be added below when it lands, or the
-    guarantee this test states degrades into a guarantee about whichever
-    functions happened to be here first.
+    All seven are called below; the comment above records why each is here.
     """
     monkeypatch.chdir(tmp_path)
     score, treatment, outcome = _two_arm_arrays(n=500, seed=3)
@@ -170,6 +183,9 @@ def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     evaluation.qini_coefficient(fraction, qini)
     evaluation.uplift_at_k(score, treatment, outcome, 0.2)
     evaluation.tie_diagnostics(score)
+    evaluation.bootstrap_indices(treatment, 4)
+    evaluation.qini_bootstrap_band(score, treatment, outcome, n_resamples=4)
+    evaluation.qini_random_band(treatment, outcome, n_resamples=4)
 
     assert list(tmp_path.iterdir()) == [], (
         "evaluation.py wrote to disk. Only the orchestrator touches the "
@@ -1259,6 +1275,457 @@ def test_curve_docstring_does_not_overclaim_invariance():
         "no paragraph of evaluation.__doc__ mentions invariance at all. "
         "D-03's two-tier row-order guarantee is a decision the module is "
         "required to record; deleting it does not make it stop mattering."
+    )
+
+
+# --------------------------------------------------------------------------
+# bootstrap_indices -- D-07's shared resample engine
+# --------------------------------------------------------------------------
+
+# Small R on a small frame: every property below is a CONTRACT, not a
+# statistical estimate, so nothing here needs the replicate counts the real
+# bands run at. The whole section costs milliseconds and is unmarked,
+# because a resample matrix that stopped preserving arm membership would
+# make Phase 5's policy-value interval and Phase 6's revenue band wrong
+# without either of them raising.
+INDEX_REPLICATES = 20
+INDEX_N = 2000
+
+# n * (1 - 1/e) = 0.632n distinct positions per row is what sampling n
+# items with replacement from n gives. The window is deliberately wide
+# enough to cover Monte-Carlo wobble at n=2000 and deliberately far below
+# 1.0, which is what a lost `replace=True` would produce.
+DISTINCT_LOW, DISTINCT_HIGH = 0.60, 0.67
+
+# Replicates for the fast band cases. 30 is enough to make a percentile
+# well-defined and to prove the two code paths agree; it is not enough to
+# make the band's WIDTH meaningful, and no test below asserts on the width
+# at this count.
+BAND_REPLICATES = 30
+
+
+def _band_arrays(n=INDEX_N, seed=77):
+    """Return `(oracle_score, treatment, outcome)` with real heterogeneity.
+
+    The same centred DGP `tests/conftest.py`'s `synthetic_frame` uses, in
+    array form, so the band cases below can vary `n` freely without paying
+    for a DataFrame. `_tau` is the oracle score: an individual treatment
+    effect that genuinely differs between rows, which is what gives a
+    ranking something to be right about.
+    """
+    rng = np.random.default_rng(seed)
+    treatment = (rng.random(n) < 0.5).astype("int64")
+    u = rng.normal(size=n)
+    tau = 1.0 + 2.0 * (u - u.mean())
+    outcome = rng.gamma(2.0, 2.0, size=n) + treatment * tau
+    return tau, treatment, outcome
+
+
+def test_bootstrap_indices_shape_and_dtype():
+    """`(R, n)` and int32 -- the dtype is a memory decision, so pin it.
+
+    The platform default integer would double an 85 MB matrix at the R=500
+    default and n=42,613 to 170 MB, inside a Streamlit Community Cloud
+    container with a ~690 MB envelope. int32 addresses 2.1e9 rows against
+    a largest possible index of 42,612, so the halving is free.
+    """
+    _, treatment, _ = _band_arrays()
+    matrix = evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+
+    assert matrix.shape == (INDEX_REPLICATES, treatment.size), (
+        f"the resample matrix has shape {matrix.shape}, expected "
+        f"{(INDEX_REPLICATES, treatment.size)}. Row r must be one COMPLETE "
+        "resample of every row position, so a short row silently drops "
+        "customers from every replicate that uses it."
+    )
+    assert matrix.dtype == np.int32, (
+        f"the resample matrix has dtype {matrix.dtype}, expected int32. "
+        "The default integer dtype would double the 85 MB matrix at R=500 "
+        "and n=42,613 to 170 MB for no addressing benefit whatsoever."
+    )
+
+
+def test_bootstrap_indices_preserves_arm_membership():
+    """The invariant Phase 5 and Phase 6 both depend on, asserted exactly.
+
+    Column `j` is drawn from row `j`'s own arm, so indexing `treatment`
+    with any replicate row returns `treatment` unchanged. It is what lets a
+    downstream consumer index ANY per-row array with `matrix[r]` without
+    knowing a layout.
+    """
+    _, treatment, _ = _band_arrays()
+    matrix = evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+
+    for r, take in enumerate(matrix):
+        assert np.array_equal(treatment[take], treatment), (
+            f"replicate {r} does not reproduce the treatment vector when "
+            "used as an index. The resample has stopped being "
+            "arm-stratified and position-preserving, which means Phase 5's "
+            "policy-value interval and Phase 6's revenue band can no "
+            "longer index an arbitrary per-row array with `matrix[r]` -- "
+            "they would pair resampled treatments with unresampled "
+            "outcomes and report a number rather than raising."
+        )
+
+
+def test_bootstrap_indices_is_seed_reproducible():
+    """Same seed, identical matrix; different seed, different matrix.
+
+    The two-tier shape `tests/test_ate.py` uses for the same species of
+    claim: exact equality where it holds, and a companion assertion that
+    the equality is not vacuous because everything is constant.
+    """
+    _, treatment, _ = _band_arrays()
+    first = evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+    again = evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+    other = evaluation.bootstrap_indices(
+        treatment, INDEX_REPLICATES, seed=20260903
+    )
+
+    assert np.array_equal(first, again), (
+        "two calls at the same seed returned different matrices. Every "
+        "band, interval and dollar figure derived from these draws would "
+        "then move between runs of the same committed code, which is the "
+        "one thing a reviewer checking this repo cannot tolerate."
+    )
+    assert not np.array_equal(first, other), (
+        "two calls at DIFFERENT seeds returned the same matrix, so the "
+        "seed is not reaching the generator and the equality above is "
+        "vacuous -- it would pass on a function returning a constant."
+    )
+
+
+def test_bootstrap_indices_actually_resamples_with_replacement():
+    """~63% distinct positions per row, never 100%.
+
+    Sampling n items with replacement from n leaves `n * (1 - 1/e)`
+    distinct, about 63%. A row holding exactly n distinct indices means
+    `replace=True` was lost and the bootstrap has silently become a
+    within-arm permutation.
+    """
+    _, treatment, _ = _band_arrays()
+    matrix = evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+    n = treatment.size
+
+    fractions = np.array([np.unique(row).size / n for row in matrix])
+    worst_low, worst_high = float(fractions.min()), float(fractions.max())
+
+    assert DISTINCT_LOW < worst_low and worst_high < DISTINCT_HIGH, (
+        f"distinct-index fractions per replicate run from {worst_low:.4f} "
+        f"to {worst_high:.4f}, outside the window "
+        f"({DISTINCT_LOW}, {DISTINCT_HIGH}) around the expected "
+        f"{1.0 - 1.0 / np.e:.4f}. A fraction of exactly 1.0 means "
+        "`replace=True` was dropped: every replicate would then be the "
+        "original sample in a different order, and the band would collapse "
+        "toward zero width while still returning a plausible triple."
+    )
+
+
+def test_bootstrap_indices_rejects_a_degenerate_arm():
+    """An all-treated column has no control pool to draw from."""
+    treatment = np.ones(200, dtype="int64")
+
+    with pytest.raises(ValueError, match="control arm"):
+        evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+
+
+# --------------------------------------------------------------------------
+# bands -- D-06's two confidence bands
+# --------------------------------------------------------------------------
+
+# The top of the ranking, where the "beats random targeting in the top
+# ~20%" half of the claim has to hold. 0.2 is the depth Phase 6's slider
+# opens on and the depth `uplift_at_k` defaults to.
+TOP_FRACTION = 0.2
+
+# Q(0) == 0 exactly for every replicate, so both band envelopes are pinned
+# to the origin. The endpoint Q(1) is the ATE and does NOT depend on the
+# score at all, so the null band closes to a point there too -- which is
+# why the containment check below carries a floating-point tolerance
+# rather than comparing exactly.
+BAND_EDGE_TOL = 1e-9
+
+# At most this share of grid points may sit outside a 90% pointwise band.
+# Pointwise coverage is NOT simultaneous coverage: 101 correlated points
+# each covered with probability 0.90 will show excursions, so requiring
+# zero would be requiring the wrong property.
+MAX_EXCURSION_SHARE = 0.25
+
+
+@pytest.fixture(scope="module")
+def null_band_case(hetero_case):
+    """The random-score null band and the oracle curve on ONE frame.
+
+    Module-scoped for `hetero_case`'s reason: both band tests below read
+    the same 200-replicate null, and rebuilding it per test would double
+    the section's cost and let the two tests disagree about what the null
+    was. Every draw is seeded, so these are deterministic numbers.
+    """
+    grid, lo, hi = evaluation.qini_random_band(
+        hetero_case["treatment"],
+        hetero_case["outcome"],
+        n_resamples=evaluation.NULL_BAND_RESAMPLES,
+    )
+    fraction, qini = evaluation.qini_curve(
+        hetero_case["tau"], hetero_case["treatment"], hetero_case["outcome"]
+    )
+    return {
+        "grid": grid,
+        "lo": lo,
+        "hi": hi,
+        "oracle": np.interp(grid, fraction, qini),
+    }
+
+
+def test_bands_return_matching_grids():
+    """One band shape for `plots.qini_plot` to draw, at any `n_grid`."""
+    score, treatment, outcome = _band_arrays()
+    boot = evaluation.qini_bootstrap_band(
+        score, treatment, outcome, n_resamples=BAND_REPLICATES
+    )
+    null = evaluation.qini_random_band(
+        treatment, outcome, n_resamples=BAND_REPLICATES
+    )
+
+    for triple, label in ((boot, "bootstrap"), (null, "random-null")):
+        assert len(triple) == 3, (
+            f"the {label} band returned {len(triple)} values, expected the "
+            "(grid, lo, hi) triple plan 03-03's figure factory unpacks."
+        )
+        grid, lo, hi = triple
+        assert grid.shape == lo.shape == hi.shape, (
+            f"the {label} band returned shapes {grid.shape}, {lo.shape}, "
+            f"{hi.shape}; `qini_plot` fills between two envelopes on one "
+            "grid and a length mismatch raises there instead of here."
+        )
+        assert lo.dtype == hi.dtype == np.float64
+
+    assert np.array_equal(boot[0], null[0]), (
+        "the two bands returned different grids at the same n_grid, so a "
+        "figure drawing both would be plotting two different x axes on one "
+        "canvas."
+    )
+    assert np.array_equal(
+        boot[0], np.linspace(0.0, 1.0, evaluation.BAND_GRID_POINTS)
+    ), (
+        f"the default grid is not the pinned {evaluation.BAND_GRID_POINTS}-"
+        "point linspace over the unit interval. A targeting fraction runs "
+        "from 0 to 1 by definition; anything else silently rescales the x "
+        "axis of every band figure."
+    )
+
+    coarse = evaluation.qini_random_band(
+        treatment, outcome, n_resamples=BAND_REPLICATES, n_grid=21
+    )
+    assert coarse[0].size == 21, (
+        f"n_grid=21 produced {coarse[0].size} points. The resolution is a "
+        "parameter so Phase 6 can raise it; if it is ignored, the slider "
+        "cannot be made finer than the default."
+    )
+
+
+def test_bands_are_ordered():
+    """`lo <= hi` everywhere, and both bands are pinned to the origin."""
+    score, treatment, outcome = _band_arrays()
+    boot = evaluation.qini_bootstrap_band(
+        score, treatment, outcome, n_resamples=BAND_REPLICATES
+    )
+    null = evaluation.qini_random_band(
+        treatment, outcome, n_resamples=BAND_REPLICATES
+    )
+
+    for (grid, lo, hi), label in ((boot, "bootstrap"), (null, "random-null")):
+        breaches = int(np.count_nonzero(lo > hi))
+        assert breaches == 0, (
+            f"the {label} band has {breaches} grid points where lo > hi. "
+            "The two envelopes are the lower and upper percentiles of one "
+            "replicate stack, so an inversion means they were assigned the "
+            "wrong way round -- `qini_plot` would still fill between them "
+            "and the figure would show a band mirrored about the curve."
+        )
+        assert lo[0] == 0.0 and hi[0] == 0.0, (
+            f"the {label} band opens at ({lo[0]!r}, {hi[0]!r}) rather than "
+            "at exactly zero. Q(0) == 0 holds exactly for every replicate "
+            "-- targeting nobody delivers nothing -- so a band that does "
+            "not close at the origin means the interpolation onto the grid "
+            "has shifted the curves."
+        )
+        assert np.isfinite(lo).all() and np.isfinite(hi).all(), (
+            f"the {label} band carries a nan or an inf. A nan renders as a "
+            "gap in the ribbon rather than as an error."
+        )
+
+
+def test_bands_precomputed_indices_path_matches_self_generated():
+    """D-07's dual code path: both routes must give the same band.
+
+    `qini_bootstrap_band` either builds its own resample matrix or takes
+    one, and two code paths through one computation are exactly where a
+    silent divergence lives. Phase 5 will pass a shared matrix so its
+    policy-value interval, Phase 6's revenue band and this band rest on
+    the SAME draws; if the shared-matrix path disagreed with the internal
+    one, the band in the figure and the band behind the dollar figure
+    would be different bands with no symptom.
+    """
+    score, treatment, outcome = _band_arrays()
+    matrix = evaluation.bootstrap_indices(treatment, BAND_REPLICATES)
+
+    supplied = evaluation.qini_bootstrap_band(
+        score, treatment, outcome, indices=matrix
+    )
+    internal = evaluation.qini_bootstrap_band(
+        score, treatment, outcome, n_resamples=BAND_REPLICATES
+    )
+
+    for supplied_side, internal_side, edge in (
+        (supplied[1], internal[1], "lower"),
+        (supplied[2], internal[2], "upper"),
+    ):
+        gap = float(np.abs(supplied_side - internal_side).max())
+        assert np.allclose(supplied_side, internal_side), (
+            f"the {edge} envelope differs by up to {gap:.6g} between the "
+            "precomputed-matrix path and the self-generated path at the "
+            "same seed and replicate count. Both are supposed to be the "
+            "same computation over the same draws."
+        )
+
+
+def test_bootstrap_band_narrows_as_replicates_and_n_grow():
+    """More data, tighter precision interval -- the direction, not a value.
+
+    Compared on the MEAN width across the grid rather than pointwise: a
+    percentile band at a modest replicate count wobbles from point to
+    point, so a strict inequality at all 101 positions would be asserting
+    Monte-Carlo noise. Measured direction: the mean width at n=8000 is
+    roughly half the mean width at n=2000.
+    """
+    widths = {}
+    for n in (2000, 8000):
+        score, treatment, outcome = _band_arrays(n=n, seed=91)
+        _, lo, hi = evaluation.qini_bootstrap_band(
+            score, treatment, outcome, n_resamples=40
+        )
+        widths[n] = float(np.mean(hi - lo))
+
+    assert widths[8000] < widths[2000], (
+        f"the mean bootstrap band width is {widths[8000]:.6f} at n=8000 "
+        f"against {widths[2000]:.6f} at n=2000. A precision interval that "
+        "does not tighten with sample size is not measuring sampling "
+        "uncertainty -- the likeliest cause is that the replicates are not "
+        "actually varying, i.e. `replace=True` was lost upstream."
+    )
+
+
+def test_random_band_brackets_a_random_score_curve(
+    hetero_case, null_band_case
+):
+    """A random score's own curve mostly sits inside the null band.
+
+    Mostly, not always, and the difference matters. This is a 90%
+    POINTWISE band over 101 correlated grid points; pointwise coverage is
+    not simultaneous coverage, so a curve drawn from the same null will
+    show excursions near the edges of the interval. Requiring zero
+    excursions would be asserting a property the band does not claim.
+    """
+    grid, lo, hi = (
+        null_band_case["grid"],
+        null_band_case["lo"],
+        null_band_case["hi"],
+    )
+    rng = np.random.default_rng(515151)
+    fraction, qini = evaluation.qini_curve(
+        rng.normal(size=hetero_case["treatment"].size),
+        hetero_case["treatment"],
+        hetero_case["outcome"],
+    )
+    drawn = np.interp(grid, fraction, qini)
+
+    outside = (drawn < lo - BAND_EDGE_TOL) | (drawn > hi + BAND_EDGE_TOL)
+    share = float(outside.mean())
+
+    assert share <= MAX_EXCURSION_SHARE, (
+        f"{share:.3f} of the grid points of a freshly drawn RANDOM score "
+        f"fall outside the random-score null band, above the "
+        f"{MAX_EXCURSION_SHARE} allowance. The band is built from exactly "
+        "this population of curves, so a large share outside means the "
+        "band is far too narrow -- and a null band that is too narrow "
+        "makes every model look significantly better than random."
+    )
+
+
+def test_oracle_curve_escapes_the_random_null_band_in_the_top_decile(
+    null_band_case,
+):
+    """The D-06 payoff: a good ranking visibly beats random targeting.
+
+    This is the synthetic version of the sentence the whole phase exists
+    to make sayable -- "the model beats random targeting in the top ~20%".
+    The oracle score is the individual treatment effect itself, so if THAT
+    ranking cannot escape the null band, no Phase 4 model ever will and
+    the band is not measuring what it claims to.
+    """
+    grid = null_band_case["grid"]
+    hi = null_band_case["hi"]
+    oracle = null_band_case["oracle"]
+
+    head = (grid > 0.0) & (grid <= TOP_FRACTION)
+    margin = oracle[head] - hi[head]
+    best = float(margin.max())
+
+    assert best > 0.0, (
+        f"the oracle curve never rises above the upper edge of the "
+        f"random-score null band anywhere in the top "
+        f"{TOP_FRACTION:.0%} of the ranking; its best margin there is "
+        f"{best:.6f}. That is the 'beats random targeting in the top ~20%' "
+        "half of the claim this phase exists to support, measured on a "
+        "score that is the true individual treatment effect -- a failure "
+        "here means the metric cannot tell a perfect ranking from a coin "
+        "flip, and no Phase 4 result computed with it would mean anything."
+    )
+
+
+@pytest.mark.slow
+def test_bands_bootstrap_at_real_scale_is_ordered_and_finite(mens_frame):
+    """R=500 on the real 42,613-row frame -- measured 2.47 s.
+
+    Ordering and finiteness only. The phase's contract is synthetic-fixture
+    correctness; this case exists so the default replicate count is
+    exercised at the size Phase 4 will actually run it, where an int32
+    ceiling or a memory ceiling would show up.
+    """
+    treatment = mens_frame["treatment"].to_numpy(dtype="int64")
+    outcome = mens_frame["visit"].to_numpy(dtype="float64")
+    score = _radcliffe_shaped_score(mens_frame)
+
+    grid, lo, hi = evaluation.qini_bootstrap_band(score, treatment, outcome)
+
+    assert grid.size == evaluation.BAND_GRID_POINTS
+    assert np.all(lo <= hi), (
+        f"{int(np.count_nonzero(lo > hi))} inverted grid points in the "
+        "real-scale bootstrap band."
+    )
+    assert np.isfinite(lo).all() and np.isfinite(hi).all(), (
+        "the real-scale bootstrap band carries a non-finite value. The "
+        "head of the curve is where the cumulative control count is zero, "
+        "which is exactly where a lost `where=` clause writes nan."
+    )
+
+
+@pytest.mark.slow
+def test_bands_random_null_at_real_scale_is_ordered_and_finite(mens_frame):
+    """R=200 on the real frame -- measured ~1.1 s. Ordering and finiteness."""
+    treatment = mens_frame["treatment"].to_numpy(dtype="int64")
+    outcome = mens_frame["visit"].to_numpy(dtype="float64")
+
+    grid, lo, hi = evaluation.qini_random_band(treatment, outcome)
+
+    assert grid.size == evaluation.BAND_GRID_POINTS
+    assert np.all(lo <= hi), (
+        f"{int(np.count_nonzero(lo > hi))} inverted grid points in the "
+        "real-scale random-score null band."
+    )
+    assert np.isfinite(lo).all() and np.isfinite(hi).all(), (
+        "the real-scale null band carries a non-finite value."
     )
 
 
