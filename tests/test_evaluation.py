@@ -9,7 +9,9 @@ inferred rather than confirmed, so reproducing them is an explicit non-goal
 for this phase.
 """
 
+import io
 import json
+import tokenize
 
 import numpy as np
 import pytest
@@ -22,6 +24,20 @@ from dont_email_everyone import config, evaluation
 ATE_EFFECTS = tuple(
     json.loads((config.PROCESSED / "ate.json").read_text(encoding="utf-8"))["effects"]
 )
+
+# The four phrases ROADMAP criterion 3 requires for the SECOND convention it
+# names -- uplift-at-k. `overall` vs `by_group` is the strategy choice and
+# `truncation` is the selection-size rule; drop either and two call sites can
+# disagree about what "the top 20%" means without anything raising.
+UPLIFT_AT_K_PHRASES = (
+    "overall",
+    "by_group",
+    "per targeted customer",
+    "truncation",
+)
+
+# The five k values RESEARCH verified the curve identity at (to 1.4e-17).
+IDENTITY_K_VALUES = (0.05, 0.10, 0.20, 0.30, 0.50)
 
 # The six phrases ROADMAP criterion 3 requires the module docstring to carry.
 CONVENTION_PHRASES = (
@@ -110,21 +126,53 @@ def test_evaluation_module_is_pure():
 def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     """Call every public function from an empty directory; it stays empty.
 
-    Plans 03-02 and 03-05 add `uplift_at_k`, `tie_diagnostics`,
-    `bootstrap_indices`, `qini_bootstrap_band` and `qini_random_band` --
-    each MUST be added to the call list below when it lands, or the
-    guarantee this test states degrades into a guarantee about two
-    functions.
+    `uplift_at_k` and `tie_diagnostics` were added to the call list by plan
+    03-02. Plan 03-05 adds `bootstrap_indices`, `qini_bootstrap_band` and
+    `qini_random_band` -- each MUST be added below when it lands, or the
+    guarantee this test states degrades into a guarantee about whichever
+    functions happened to be here first.
     """
     monkeypatch.chdir(tmp_path)
     score, treatment, outcome = _two_arm_arrays(n=500, seed=3)
     fraction, qini = evaluation.qini_curve(score, treatment, outcome)
     evaluation.qini_coefficient(fraction, qini)
+    evaluation.uplift_at_k(score, treatment, outcome, 0.2)
+    evaluation.tie_diagnostics(score)
 
     assert list(tmp_path.iterdir()) == [], (
         "evaluation.py wrote to disk. Only the orchestrator touches the "
         "filesystem (PATTERNS.md); the analysis core must stay callable on "
         "arbitrary in-memory arrays so Phase 6's app can call it live."
+    )
+
+
+def test_evaluation_module_has_exactly_one_sort():
+    """T-03-09: `qini_curve` and `uplift_at_k` cannot rank differently.
+
+    Comments AND string literals are stripped with `tokenize` before
+    counting, because the module docstring discusses `np.argsort` five
+    times on purpose -- decision (b) explains the tie rule and names the
+    reversed-mergesort spelling a reader must not substitute. A plain
+    line-based grep counts those prose mentions and so cannot express the
+    property at all; this counts executable code.
+
+    The `uplift_at_k(k) == Q(k) * N_t / n_t(k)` identity below holds only
+    because both functions call `_ranked_arrays`. A second sort would break
+    it silently and make both published numbers wrong (T-03-09).
+    """
+    code = "".join(
+        token.string
+        for token in tokenize.generate_tokens(
+            io.StringIO(_evaluation_source()).readline
+        )
+        if token.type not in (tokenize.COMMENT, tokenize.STRING)
+    )
+
+    assert code.count("argsort") == 1, (
+        f"evaluation.py's executable code contains {code.count('argsort')} "
+        "calls to argsort, expected exactly 1. Every ranking in this module "
+        "must go through `_ranked_arrays`; a second sort makes the "
+        "uplift-at-k / Qini identity false without raising anything."
     )
 
 
@@ -369,6 +417,283 @@ def test_qini_coefficient_of_the_chord_is_zero():
         f"the chord integrates to {area!r} against its own baseline, not 0. "
         "The random-targeting line is the zero point of this scale; if it "
         "does not score zero, every reported coefficient carries an offset."
+    )
+
+
+# --------------------------------------------------------------------------
+# uplift_at_k
+# --------------------------------------------------------------------------
+
+
+def _realized_treated_in_top_k(score, treatment, outcome, k, seed=20260902):
+    """The REALIZED treated count inside the top-k, from the shared ranking.
+
+    Read through `_ranked_arrays` rather than recomputed with a fresh sort
+    here on purpose: a second sort written in the test would make the
+    identity below true against the test's own ranking, which is precisely
+    the drift the identity exists to catch.
+    """
+    ranked_treatment, _ = evaluation._ranked_arrays(score, treatment, outcome, seed)
+    n_k = int(ranked_treatment.size * k)
+    return n_k, float(ranked_treatment[:n_k].sum())
+
+
+def _assert_identity(score, treatment, outcome, k, label):
+    """Assert `uplift_at_k(k) == Q(k) * N_t / n_t(k)`; report on failure."""
+    _, qini = evaluation.qini_curve(score, treatment, outcome)
+    n_k, n_t_k = _realized_treated_in_top_k(score, treatment, outcome, k)
+    total_treated = float(np.asarray(treatment).sum())
+
+    measured = evaluation.uplift_at_k(score, treatment, outcome, k)
+    bridged = qini[n_k] * total_treated / n_t_k
+
+    assert measured == pytest.approx(bridged, rel=1e-12), (
+        f"{label}, k={k}: uplift_at_k gives {measured!r} while the curve "
+        f"bridge Q(k)*N_t/n_t(k) gives {bridged!r}. These are the same "
+        "number by algebra, so a disagreement means one of the two "
+        "functions has been 'simplified' into the wrong units, or that they "
+        "are no longer ranking through the same `_ranked_arrays` sort. "
+        "Under the wrong units the reported top-k figure is out by roughly "
+        "a factor of k (PITFALLS.md Pitfall 8)."
+    )
+    return measured, qini[n_k]
+
+
+@pytest.mark.parametrize("k", IDENTITY_K_VALUES)
+def test_uplift_at_k_matches_the_curve_identity(k):
+    """The exact bridge between the top-k number and the curve.
+
+    RESEARCH verified `uplift_at_k(k) == Q(k) * N_t / n_t(k)` to 1.4e-17 at
+    these five k. Pinning it turns PITFALLS.md Pitfall 8's factor-of-k
+    conflation from a documented warning into a structural impossibility.
+
+    The second assertion is the more valuable one: it pins `Q(k) / k` as
+    NOT the conversion. That near-miss is the actual trap -- on the real
+    mens frame under one arbitrary score RESEARCH measured 0.09384 for the
+    correct form against 0.09429 for `Q(k)/k`, a 0.5% gap nobody catches by
+    eye, because the realized treated count in the top-k fluctuates around
+    k*N_t instead of equalling it.
+    """
+    score, treatment, outcome = _two_arm_arrays(n=2000, seed=11)
+    measured, qini_at_k = _assert_identity(
+        score, treatment, outcome, k, "synthetic n=2000"
+    )
+
+    if k == 0.20:
+        near_miss = qini_at_k / k
+        assert measured != pytest.approx(near_miss, rel=1e-6), (
+            f"at k=0.20, uplift_at_k gives {measured!r} and Q(k)/k gives "
+            f"{near_miss!r}, which now agree to within 1e-6. Q(k)/k is a "
+            "NEAR-MISS, not the conversion: it divides by k*N_t instead of "
+            "by the realized n_t(k). If these two have become equal, either "
+            "the divisor was changed to k*N_t or the ranking degenerated, "
+            "and every reported top-k number is now in the wrong units."
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("k", IDENTITY_K_VALUES)
+def test_uplift_at_k_matches_the_curve_identity_on_the_real_frame(mens_frame, k):
+    """The same identity at real scale, where RESEARCH measured it to 1.4e-17.
+
+    Marked slow: n = 42,613 and every case builds a full-length curve. The
+    synthetic sibling above is unmarked, so a broken implementation fails
+    on every commit rather than waiting for this one.
+    """
+    treatment = mens_frame["treatment"].to_numpy()
+    outcome = mens_frame["visit"].to_numpy()
+    score = np.random.default_rng(1).normal(size=len(mens_frame))
+
+    _assert_identity(score, treatment, outcome, k, "mens frame, visit")
+
+
+def test_uplift_at_k_raises_on_empty_arm():
+    """An arm missing from the top-k must RAISE, never return a silent NaN.
+
+    scikit-uplift carries this exact gap as a `# ToDo` in its source: with
+    no control (or no treated) row in the selection, `.mean()` on an empty
+    slice returns nan under only a RuntimeWarning. That nan then reaches a
+    reported business number with nothing having failed (PITFALLS.md
+    Pitfall 8, threat T-03-06).
+    """
+    n = 100
+    treatment = np.zeros(n, dtype="int64")
+    treatment[: n // 2] = 1
+    # Every treated row outranks every control row, so a small k selects a
+    # single-arm slice. All scores are distinct, so the tie rule plays no
+    # part in the construction.
+    score = np.where(treatment == 1, 1.0, -1.0) + np.arange(n) * 1e-3
+    outcome = np.tile([0.0, 1.0], n // 2)
+
+    with pytest.raises(ValueError) as excinfo:
+        evaluation.uplift_at_k(score, treatment, outcome, 0.2)
+
+    message = str(excinfo.value)
+    for fragment in ("0.2", "20 treated", "0 control"):
+        assert fragment in message, (
+            f"the empty-arm ValueError reads {message!r} and is missing "
+            f"{fragment!r}. The message must name k and BOTH arm counts, or "
+            "a caller reading the traceback cannot tell whether the "
+            "targeting depth was too shallow or the holdout was built wrong."
+        )
+
+
+@pytest.mark.parametrize("bad_k", (0.0, -0.1, 1.5, np.nan))
+def test_uplift_at_k_rejects_a_k_outside_the_unit_interval(bad_k):
+    """T-03-07: `0 < k <= 1` is an if/raise, never an assert.
+
+    An assert is compiled out under `python -O`, at which point k=1.5
+    silently clips to the whole population and k=0 selects nobody.
+    """
+    score, treatment, outcome = _two_arm_arrays(n=400, seed=41)
+
+    with pytest.raises(ValueError, match="0 < k <= 1"):
+        evaluation.uplift_at_k(score, treatment, outcome, bad_k)
+
+
+def test_uplift_at_k_convention_is_pinned_in_the_docstring():
+    """ROADMAP criterion 3, second convention: `overall`, and truncation.
+
+    The strategy choice and the selection-size rule are both silent-wrong-
+    number decisions -- `by_group` and a rounded selection size each return
+    a number that looks entirely reasonable -- so the module states which
+    one it implements and this test makes that statement un-deletable.
+    """
+    doc = evaluation.__doc__
+    for phrase in UPLIFT_AT_K_PHRASES:
+        assert phrase in doc, (
+            f"the module docstring no longer contains {phrase!r}. "
+            "uplift-at-k has two conventions that change the answer without "
+            "raising: top-k of the combined sample (`overall`) versus top-k "
+            "within each arm (`by_group`), and `int(n * k)` truncation "
+            "versus rounding. A reader cannot tell which one produced a "
+            "number unless the module says so."
+        )
+
+
+# --------------------------------------------------------------------------
+# tie_diagnostics
+# --------------------------------------------------------------------------
+
+
+TIE_KEYS = {
+    "n_scores",
+    "n_distinct",
+    "n_tie_groups",
+    "largest_tie_fraction",
+    "fraction_in_ties",
+}
+
+
+def test_tie_diagnostics():
+    """D-04's five-key contract, on a hand-built tie structure.
+
+    Six rows in three distinct values, of which two carry more than one
+    row. The largest group holds 3 of 6 rows and 5 of the 6 rows sit in a
+    group of size above one -- every number here is countable by eye, which
+    is the point of a hand-built array rather than a draw.
+    """
+    result = evaluation.tie_diagnostics(np.array([1.0, 1.0, 2.0, 3.0, 3.0, 3.0]))
+
+    assert set(result) == TIE_KEYS, (
+        f"tie_diagnostics returned the keys {sorted(result)}, expected "
+        f"{sorted(TIE_KEYS)}. D-04 fixes this contract because Phase 4's "
+        "write-up quotes the tie fraction by name."
+    )
+
+    expected = {
+        "n_scores": 6,
+        "n_distinct": 3,
+        "n_tie_groups": 2,
+        "largest_tie_fraction": 0.5,
+        "fraction_in_ties": 5 / 6,
+    }
+    for key, want in expected.items():
+        assert result[key] == pytest.approx(want), (
+            f"tie_diagnostics()[{key!r}] is {result[key]!r}, expected "
+            f"{want!r} on the array [1, 1, 2, 3, 3, 3]. A wrong value here "
+            "means the tie structure Phase 4 reports is not the tie "
+            "structure the ranking actually has."
+        )
+
+    # Coerced primitives, following `ate.bootstrap_spend_ate`: a NumPy
+    # scalar leaking out serializes only under a custom encoder, and the
+    # Phase 5/6 consumers of this dict do not have one.
+    for key in ("n_scores", "n_distinct", "n_tie_groups"):
+        assert type(result[key]) is int, (
+            f"tie_diagnostics()[{key!r}] is a {type(result[key]).__name__}, "
+            "not a plain int."
+        )
+    for key in ("largest_tie_fraction", "fraction_in_ties"):
+        assert type(result[key]) is float, (
+            f"tie_diagnostics()[{key!r}] is a {type(result[key]).__name__}, "
+            "not a plain float."
+        )
+
+
+def test_tie_diagnostics_on_an_all_distinct_score():
+    """No ties at all: the degenerate end of the same contract.
+
+    `largest_tie_fraction` is 1/n rather than 0 -- every row is its own
+    group of one -- and `fraction_in_ties` is exactly 0.0. Returning 0.0
+    for the former would mean the largest group was being read as "largest
+    TIED group", which reports 0.0 for a perfectly ranked score and 0.39
+    for the coarse one: an inconsistent scale.
+    """
+    n = 50
+    result = evaluation.tie_diagnostics(np.arange(n, dtype=float))
+
+    assert result["n_distinct"] == n
+    assert result["n_tie_groups"] == 0, (
+        f"an all-distinct score reports {result['n_tie_groups']} tie "
+        "groups, expected 0. A group of size one is not a tie."
+    )
+    assert result["largest_tie_fraction"] == pytest.approx(1 / n), (
+        f"largest_tie_fraction is {result['largest_tie_fraction']!r} on an "
+        f"all-distinct score, expected {1 / n!r}. Every row is its own "
+        "group of one, so the largest group holds exactly one row."
+    )
+    assert result["fraction_in_ties"] == 0.0, (
+        f"fraction_in_ties is {result['fraction_in_ties']!r} on an "
+        "all-distinct score, expected exactly 0.0."
+    )
+
+
+@pytest.mark.slow
+def test_tie_diagnostics_on_the_real_radcliffe_shaped_score(mens_frame):
+    """The worked example the module docstring quotes, verified.
+
+    Radcliffe's own final Mens model was a 3-rule indicator scoring 0-3,
+    and PITFALLS.md Pitfall 4 finds the simplest learners win on holdout
+    for this dataset -- so this coarse shape is not a strawman, it is the
+    shape D-01's tie rule was measured against. Group counts are
+    8,248 / 16,624 / 12,404 / 5,337 at n = 42,613.
+    """
+    score = (
+        (mens_frame["recency"] <= 4).astype(int)
+        + (mens_frame["history"] > 200).astype(int)
+        + mens_frame["newbie"]
+    ).to_numpy(dtype=float)
+
+    result = evaluation.tie_diagnostics(score)
+
+    assert result["n_scores"] == 42613
+    assert result["n_tie_groups"] == 4, (
+        f"the 0-3 indicator score reports {result['n_tie_groups']} tie "
+        "groups, expected 4. All four score levels are occupied by "
+        "thousands of rows; a different count means the rule thresholds "
+        "moved or the frame is not the committed mens frame."
+    )
+    assert result["largest_tie_fraction"] == pytest.approx(0.390, abs=0.001), (
+        f"largest_tie_fraction is {result['largest_tie_fraction']!r}, "
+        "expected 0.390. This is the number the module docstring quotes as "
+        "the reason boundary-only curve points cannot answer a continuous "
+        "top-k question; if it has moved, that argument needs restating."
+    )
+    assert result["fraction_in_ties"] == 1.0, (
+        f"fraction_in_ties is {result['fraction_in_ties']!r}; with only 4 "
+        "distinct values across 42,613 rows every single row sits in a tie "
+        "group, so anything below 1.0 is arithmetically impossible."
     )
 
 
