@@ -91,8 +91,8 @@ completed: 2026-09-05
 
 ## Files Created/Modified
 
-- `dont_email_everyone/evaluation.py` (538 → 928 lines). Only import is still `numpy`. New public surface: `bootstrap_indices`, `qini_bootstrap_band`, `qini_random_band`, and the five pinned band constants. New private `_guard_treatment` and `_guard_band_grid`. Module docstring gained block **(h)**, continuing the existing (a)–(g) lettering.
-- `tests/test_evaluation.py` (1338 → ~1810 lines, 54 → 67 tests). Two new banner sections (`bootstrap_indices`, `bands`), a module-scoped `null_band_case` fixture derived from 03-04's `hetero_case`, a `_band_arrays` helper, and six new module constants. `test_evaluation_module_writes_nothing` now calls all seven public functions.
+- `dont_email_everyone/evaluation.py` (538 → 914 lines). Only import is still `numpy`. New public surface: `bootstrap_indices`, `qini_bootstrap_band`, `qini_random_band`, and the five pinned band constants. New private `_guard_treatment` and `_guard_band_grid`. Module docstring gained block **(h)**, continuing the existing (a)–(g) lettering.
+- `tests/test_evaluation.py` (1338 → 1805 lines, 54 → 67 tests). Two new banner sections (`bootstrap_indices`, `bands`), a module-scoped `null_band_case` fixture derived from 03-04's `hetero_case`, a `_band_arrays` helper, and six new module constants. `test_evaluation_module_writes_nothing` now calls all seven public functions.
 - `.planning/phases/03-uplift-evaluation-metric/03-VALIDATION.md` — the two plan-named 03-05 rows moved to ✅ green, and eleven rows added for the cases the task list did not enumerate, so every `mitigate` disposition in the threat register has a row.
 
 ## Key Implementation Notes
@@ -211,7 +211,7 @@ Phase 4 is the first consumer with a real score. It should reuse `bootstrap_indi
 
 ## Self-Check: PASSED
 
-- `dont_email_everyone/evaluation.py` — FOUND (928 lines; `def bootstrap_indices(`, `def qini_bootstrap_band(`, `def qini_random_band(` all present)
+- `dont_email_everyone/evaluation.py` — FOUND (914 lines; `def bootstrap_indices(`, `def qini_bootstrap_band(`, `def qini_random_band(` all present)
 - `tests/test_evaluation.py` — FOUND (67 tests collected; `def test_bootstrap_indices_preserves_arm_membership(` present)
 - `.planning/phases/03-uplift-evaluation-metric/03-VALIDATION.md` — FOUND (13 rows for 03-05, all ✅ green)
 - Commit `ed5cd5e` — FOUND
