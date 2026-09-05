@@ -51,11 +51,18 @@ current.
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_starts_at_origin -x` | ✅ | ✅ green |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_endpoint_equals_difference_in_means -x` | ✅ | ✅ green |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | statistical (cross-impl) | `pytest tests/test_evaluation.py::test_endpoint_matches_committed_ate -x` | ✅ — **highest value; build first** | ✅ green |
-| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_random_score_qini_is_within_null_band -x` | ❌ W0 | ⬜ pending |
-| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_oracle_score_qini_is_strongly_positive -x` | ❌ W0 | ⬜ pending |
-| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_negated_score_qini_is_non_positive -x` | ❌ W0 | ⬜ pending |
+| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_random_score_qini_is_within_null_band -x` | ✅ | ✅ green |
+| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_oracle_score_qini_is_strongly_positive -x` | ✅ | ✅ green |
+| 03-04-T2 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | statistical | `pytest tests/test_evaluation.py::test_negated_score_qini_is_non_positive -x` | ✅ | ✅ green |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_distinct_scores_are_exactly_row_order_invariant -x` | ✅ | ✅ green |
-| 03-04-T3 | 03-04 | 3 | UPLIFT-02 / C2 (D-03) | — | N/A | statistical | `pytest tests/test_evaluation.py::test_tie_heavy_wobble_is_below_the_noise_floor -x` | ❌ W0 | ⬜ pending |
+| 03-04-T3 | 03-04 | 3 | UPLIFT-02 / C2 (D-03) | — | N/A | statistical | `pytest tests/test_evaluation.py::test_tie_heavy_wobble_is_below_the_noise_floor -x` | ✅ | ✅ green |
+| 03-04-T1 | 03-04 | 3 | UPLIFT-02 / C2 | T-03-14 | Fixture RNG draw order cannot shift silently | unit | `pytest tests/test_evaluation.py::test_synthetic_frame_hetero_default_is_bit_for_bit_backward_compatible -x` | ✅ | ✅ green |
+| 03-04-T1 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_synthetic_frame_hetero_leaves_the_true_ate_exact -x` | ✅ | ✅ green |
+| 03-04-T1 | 03-04 | 3 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_synthetic_frame_hetero_actually_varies -x` | ✅ | ✅ green |
+| 03-04-T1 | 03-04 | 3 | UPLIFT-02 / C2 | T-03-15 | Oracle columns cannot reach the feature allowlist | unit | `pytest tests/test_evaluation.py::test_oracle_columns_are_not_pre_treatment_features -x` | ✅ | ✅ green |
+| 03-04-T1 | 03-04 | 3 | UPLIFT-02 / C2 | — | `if`/`raise` on a negative `hetero`, message names the value | unit | `pytest tests/test_evaluation.py::test_synthetic_frame_rejects_negative_hetero -x` | ✅ | ✅ green |
+| 03-04-T3 | 03-04 | 3 | UPLIFT-02 / C2 (D-03) | — | N/A | statistical (unmarked sibling) | `pytest tests/test_evaluation.py::test_tie_heavy_wobble_is_bounded_at_synthetic_scale -x` | ✅ | ✅ green |
+| 03-04-T3 | 03-04 | 3 | UPLIFT-02 / C3 | T-03-16 | Docstring cannot claim unqualified row-order invariance | unit (source-reading) | `pytest tests/test_evaluation.py::test_curve_docstring_does_not_overclaim_invariance -x` | ✅ | ✅ green |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C2 | — | N/A | unit | `pytest tests/test_evaluation.py::test_curve_is_not_forced_monotone -x` | ✅ | ✅ green |
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C3 | — | N/A | unit (source-reading) | `pytest tests/test_evaluation.py::test_docstring_pins_the_normalization_convention -x` | ✅ | ✅ green |
 | 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | N/A | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_matches_the_curve_identity -x` | ✅ | ✅ green |
@@ -80,7 +87,7 @@ current.
 ## Wave 0 Requirements
 
 - [x] `tests/test_evaluation.py` — new file, created by **03-01-T2**; extended by 03-02-T2, 03-04-T1/T2/T3, 03-05-T3
-- [ ] `tests/conftest.py` — extend `synthetic_frame` with a `hetero` parameter (RESEARCH §Q4), owned by **03-04-T1**. `hetero=0.0` MUST reproduce current behavior bit-for-bit so no Phase 2 test changes; `u` is drawn from a separate `default_rng(seed + 1)` stream so the primary draw order is unshifted.
+- [x] `tests/conftest.py` — extend `synthetic_frame` with a `hetero` parameter (RESEARCH §Q4), owned by **03-04-T1**. `hetero=0.0` MUST reproduce current behavior bit-for-bit so no Phase 2 test changes; `u` is drawn from a separate `default_rng(seed + 1)` stream so the primary draw order is unshifted.
 - [x] `tests/test_plots.py` — new section for `qini_plot` (C4), owned by **03-03-T2**
 - [ ] `tests/test_reports.py` — add `metric.md` to the presence/tracking checks (D-08), owned by **03-06-T2**
 - [ ] Framework install: **none needed** — pytest 9.1.1 present, `slow` marker already registered, `--strict-markers` already on

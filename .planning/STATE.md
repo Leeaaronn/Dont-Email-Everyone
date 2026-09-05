@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-09-05T19:28:55.005Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-09-05T19:56:02.254Z"
 last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 17
-  completed_plans: 14
+  completed_plans: 15
   percent: 29
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 03 (uplift-evaluation-metric) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-09-05
 
-Progress: [████████░░] 82%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [████████░░] 82%
 | Phase 03 P01 | 26min | 2 tasks | 2 files |
 | Phase 03 P02 | 22min | 2 tasks | 3 files |
 | Phase 03 P03 | 13min | 2 tasks | 3 files |
+| Phase 03 P04 | 25min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,11 @@ Recent decisions affecting current work:
 - [Phase 03-03]: the horizontal zero reference line is kept despite being a decoy for the chord introspection (its x endpoints are also (0,1)); the chord test is hardened by asserting Q(1) is neither 0.0 nor 1.0 before the figure is built, rather than by removing a line that makes negative-uplift regions readable
 - [Phase 03-03]: the Q(0)==0 guard is provoked with a shifted curve, not a sliced one -- the head of a real Qini curve is genuinely flat at zero, so qini[1:] still starts at 0 and the guard correctly did not fire
 - [Phase 03-03]: UPLIFT-02 left Pending for the fourth time -- the Matplotlib figure now exists, but the requirement also demands 03-05's confidence bands and 03-06's metric.md narration
+- [Phase 03-04]: synthetic_frame draws its uplift-driver covariate u from a SEPARATE default_rng(seed + 1) stream, never mid-sequence in the primary one -- a draw inserted anywhere in the existing order would shift mens/womens/newbie/visit/conversion in every Phase 1 and Phase 2 test with nothing raising (T-03-14); hetero=0.0 is proven bit-for-bit identical across three parameter cells
+- [Phase 03-04]: tolerances derive from this repo's measured noise floor (SD 0.0194 on the fixture cell, 27.3 / 8.4% on the real frame), never from PITFALLS.md's unreproduced 42 / 13% -- both numbers are named in the test file so a future agent reading a failure does not restore the wrong one
+- [Phase 03-04]: the random-score null is a Monte-Carlo statement with the SD measured in the same run, and the oracle is compared against BOTH a derived literal (0.36) and the empirical maximum of those same 200 draws, so the invariant survives a retuning of the fixture
+- [Phase 03-04]: D-03 tier 2 is asserted as SD(tie wobble) < SD(random-score noise floor) on the same data -- two measured quantities, not a magic tolerance -- and synthetic_frame was widened to session scope so a module-scoped fixture could hold one frame plus its own 200-draw null
+- [Phase 03-04]: UPLIFT-02 left Pending for the fifth time -- the oracle invariants now exist, but the requirement also demands 03-05's confidence bands and 03-06's metric.md narration
 
 ### Pending Todos
 
@@ -144,6 +150,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-05T19:28:54.993Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-09-05T19:54:08.932Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
