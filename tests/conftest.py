@@ -64,8 +64,9 @@ def womens_frame():
 
 @pytest.fixture
 def synthetic_frame():
-    """Factory fixture: `synthetic_frame(n, effect, imbalance, seed)` returns
-    a fresh arm-vs-control-shaped frame with a known true ATE.
+    """Factory fixture: `synthetic_frame(n, effect, imbalance, seed,
+    hetero)` returns a fresh arm-vs-control-shaped frame with a known true
+    ATE.
 
     Nothing is mutated and no file is read -- a new frame is drawn from a
     seeded `numpy.random.default_rng` on every call, so two calls with the
@@ -76,16 +77,45 @@ def synthetic_frame():
 
     Every covariate is drawn identically in both arms, so the default frame
     is balanced by construction and a balance check that flags it is wrong.
-    `effect` is added to treated `spend`, so the true ATE on spend equals
-    `effect` exactly. `imbalance` names one covariate to shift in the
-    treated arm, which is how a balance check is proven to *fire* rather
-    than merely to pass -- the same idea as the `corrupt` factory above.
+    `effect + hetero * (u - u.mean())` is added to treated `spend`, so the
+    true ATE on spend STILL equals `effect` exactly -- *because* the
+    heterogeneous part is mean-centered, its sample mean is 0 to machine
+    precision, so only the *individual* effects move. `hetero` controls how
+    far those individual effects vary around that sample-average effect;
+    `hetero=0.0` is the constant-effect frame in which every row has the
+    same individual effect and there is nothing for a ranking to discover.
+
+    `_tau` is the per-row individual treatment effect, and it is the oracle
+    score the Qini oracle-ranking invariant needs. `_u` is the single
+    legitimate uplift-driver covariate behind it, exposed so a later phase
+    can check that a learner recovers something real. Both are
+    underscore-prefixed deliberately: `config.PRE_TREATMENT_FEATURES` is a
+    hard-coded allowlist and neither column may ever enter it. `_tau` IS
+    the treatment effect and is post-treatment by construction, so a leak
+    would defeat ROADMAP Phase 1 criterion 5's leak guard.
+
+    Backward-compatibility contract: `hetero=0.0` reproduces the
+    constant-effect frame bit-for-bit on all twelve original columns,
+    because `u` is drawn from a SEPARATE seeded stream
+    (`default_rng(seed + 1)`) and the primary stream's draw order therefore
+    does not depend on `hetero` at all.
+
+    `imbalance` names one covariate to shift in the treated arm, which is
+    how a balance check is proven to *fire* rather than merely to pass --
+    the same idea as the `corrupt` factory above.
 
     `zip_code` uses the source data's real misspelling "Surburban". The
     Pandera schema asserts that literal spelling; never "fix" it here.
     """
 
-    def _synthetic_frame(n=4000, effect=0.0, imbalance=None, seed=20260902):
+    def _synthetic_frame(
+        n=4000, effect=0.0, imbalance=None, seed=20260902, hetero=0.0
+    ):
+        # if/raise, never assert: a bare assert vanishes under -O and this
+        # guard protects a fixture contract, not a debugging assumption.
+        if float(hetero) < 0.0:
+            raise ValueError(f"hetero must be non-negative, got: {hetero!r}")
+
         rng = np.random.default_rng(seed)
 
         treatment = np.zeros(n, dtype="int64")
@@ -120,7 +150,24 @@ def synthetic_frame():
         # recoverable at n=4000, and the source column's std of ~15 would put
         # the sampling error of the difference above any useful tolerance.
         spend = rng.gamma(shape=2.0, scale=2.0, size=n).astype("float64")
-        spend = spend + treatment * float(effect)
+        # `u` comes from a SECOND, independent stream (`seed + 1`), so
+        # adding it shifts no draw in the primary one: treatment, recency,
+        # history, zip_code, channel, the spend base, visit, conversion and
+        # the three `rng.binomial` calls inside the DataFrame constructor
+        # below all keep their positions. That is what makes `hetero=0.0`
+        # bit-for-bit identical to the constant-effect frame every Phase 1
+        # and Phase 2 test already depends on.
+        u = np.random.default_rng(seed + 1).normal(size=n).astype("float64")
+        # The centering is the whole trick: `hetero * (u - u.mean())` has
+        # sample mean exactly 0, so the INDIVIDUAL effects vary while the
+        # SAMPLE-AVERAGE effect stays the injected `effect` to machine
+        # precision. Without it `tau.mean()` wanders and this fixture's
+        # "known true ATE" contract degrades from an exact statement into a
+        # sampling statement.
+        # `u` is already float64 and both scalars are coerced with
+        # `float()`, so `tau` is float64 without an explicit astype.
+        tau = float(effect) + float(hetero) * (u - u.mean())
+        spend = spend + treatment * tau
 
         visit = rng.binomial(1, 0.15, size=n).astype("int64")
         conversion = (visit * rng.binomial(1, 0.06, size=n)).astype("int64")
@@ -142,6 +189,13 @@ def synthetic_frame():
                 "visit": visit,
                 "conversion": conversion,
                 "spend": spend,
+                # Underscore-prefixed on purpose. `PRE_TREATMENT_FEATURES`
+                # in config.py is a hard-coded allowlist and neither of
+                # these may ever enter it: `_tau` IS the treatment effect,
+                # post-treatment by construction, so leaking it would
+                # defeat ROADMAP Phase 1 criterion 5's leak guard.
+                "_tau": tau,
+                "_u": u,
             }
         )
 

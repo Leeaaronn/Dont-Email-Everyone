@@ -14,6 +14,7 @@ import json
 import tokenize
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from dont_email_everyone import config, evaluation
@@ -35,6 +36,37 @@ UPLIFT_AT_K_PHRASES = (
     "per targeted customer",
     "truncation",
 )
+
+# The twelve columns `synthetic_frame` returned before this phase added the
+# oracle pair. Written out literally, never derived from a frame, so a
+# column that silently disappears fails the backward-compatibility check
+# instead of quietly shortening it.
+ORIGINAL_SYNTHETIC_COLUMNS = (
+    "recency",
+    "history",
+    "mens",
+    "womens",
+    "zip_code",
+    "newbie",
+    "channel",
+    "segment",
+    "treatment",
+    "visit",
+    "conversion",
+    "spend",
+)
+
+# The two columns plan 03-04 added. `_tau` is the per-row individual
+# treatment effect (the oracle score); `_u` is the covariate driving it.
+ORACLE_COLUMNS = ("_tau", "_u")
+
+# RESEARCH Q4's recommended DGP cell, chosen from a measured table: at
+# n=8000 with a continuous outcome the oracle Qini (+0.606) clears the
+# 4-sigma random-score band (0.085) by roughly 7x. n=4000 gives only 5x and
+# the binary variants 2-3x, so this cell is not arbitrary.
+HETERO_N = 8000
+HETERO_EFFECT = 1.0
+HETERO_SPREAD = 2.0
 
 # The five k values RESEARCH verified the curve identity at (to 1.4e-17).
 IDENTITY_K_VALUES = (0.05, 0.10, 0.20, 0.30, 0.50)
@@ -694,6 +726,136 @@ def test_tie_diagnostics_on_the_real_radcliffe_shaped_score(mens_frame):
         f"fraction_in_ties is {result['fraction_in_ties']!r}; with only 4 "
         "distinct values across 42,613 rows every single row sits in a tie "
         "group, so anything below 1.0 is arithmetically impossible."
+    )
+
+
+# --------------------------------------------------------------------------
+# synthetic fixture contract
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {},
+        {"n": 1000, "effect": 1.5, "seed": 7},
+        {"imbalance": "recency"},
+    ),
+)
+def test_synthetic_frame_hetero_default_is_bit_for_bit_backward_compatible(
+    synthetic_frame, kwargs
+):
+    """`hetero=0.0` must reproduce today's frame exactly, not approximately.
+
+    `synthetic_frame` consumes ONE `default_rng` stream in strict draw
+    order, and three of those draws happen inside the `pd.DataFrame(...)`
+    constructor itself. `u` is therefore drawn from a second, independent
+    stream (`seed + 1`); this test is the proof that the primary stream was
+    left alone. The `imbalance` case is included because that branch
+    consumes a draw of its own on one path only.
+    """
+    columns = list(ORIGINAL_SYNTHETIC_COLUMNS)
+    default = synthetic_frame(**kwargs)[columns]
+    explicit = synthetic_frame(hetero=0.0, **kwargs)[columns]
+
+    try:
+        pd.testing.assert_frame_equal(default, explicit, check_exact=True)
+    except AssertionError as exc:
+        raise AssertionError(
+            f"synthetic_frame(**{kwargs}) and the same call with "
+            "hetero=0.0 differ on the twelve original columns. That means a "
+            "new RNG draw was inserted into the PRIMARY stream, shifting "
+            "every later draw: mens, womens, newbie, visit and conversion "
+            "have silently changed in every Phase 1 and Phase 2 test that "
+            "uses this fixture, with nothing raising anywhere. Draw `u` "
+            "from a separate default_rng(seed + 1) instead."
+        ) from exc
+
+
+def test_synthetic_frame_hetero_leaves_the_true_ate_exact(synthetic_frame):
+    """The centering trick, asserted at machine precision.
+
+    `tau = effect + hetero * (u - u.mean())` and the second term has sample
+    mean exactly 0, so the fixture's "known true ATE" contract survives
+    heterogeneity as an EXACT statement. Without the centering `tau.mean()`
+    wanders with the draw and the contract degrades into a sampling
+    statement -- the kind of quiet weakening that only shows up later as an
+    estimator test with a mysteriously loose tolerance.
+    """
+    frame = synthetic_frame(
+        n=HETERO_N, effect=HETERO_EFFECT, hetero=HETERO_SPREAD
+    )
+    mean_tau = float(frame["_tau"].mean())
+
+    assert mean_tau == pytest.approx(HETERO_EFFECT, abs=1e-12), (
+        f"_tau.mean() is {mean_tau!r} against an injected effect of "
+        f"{HETERO_EFFECT}. The heterogeneous term is no longer mean-centred, "
+        "so the true ATE this fixture advertises is not the number it "
+        "injects. The fixture seed is fixed, so this is deterministic, not "
+        "flaky."
+    )
+
+
+def test_synthetic_frame_hetero_actually_varies(synthetic_frame):
+    """A fixture that stopped injecting heterogeneity must fail HERE.
+
+    Otherwise the symptom surfaces two tests later as a mysteriously weak
+    oracle Qini, which reads like a metric bug rather than a fixture bug.
+    """
+    varying = synthetic_frame(
+        n=HETERO_N, effect=HETERO_EFFECT, hetero=HETERO_SPREAD
+    )
+    constant = synthetic_frame(n=HETERO_N, effect=HETERO_EFFECT, hetero=0.0)
+
+    spread = float(varying["_tau"].std())
+    assert spread > 1.0, (
+        f"_tau varies by only {spread!r} at hetero={HETERO_SPREAD}. With "
+        "`u` standard normal the spread should sit near hetero itself; a "
+        "flat _tau means every row has the same individual effect and there "
+        "is nothing for a ranking to discover, so the oracle invariant "
+        "below would be testing a random score."
+    )
+    assert float(constant["_tau"].std()) == 0.0, (
+        f"_tau varies by {float(constant['_tau'].std())!r} at hetero=0.0, "
+        "where every individual effect must be the injected constant."
+    )
+
+
+def test_oracle_columns_are_not_pre_treatment_features(synthetic_frame):
+    """`_tau` IS the treatment effect: post-treatment by construction.
+
+    `config.PRE_TREATMENT_FEATURES` is a hard-coded allowlist precisely so
+    a feature matrix cannot be built by dropping columns (ROADMAP Phase 1
+    criterion 5). A Phase 4 learner handed `_tau` would be trained on the
+    answer, and its Qini would look spectacular for the worst reason.
+    """
+    frame = synthetic_frame(n=200, effect=1.0, hetero=1.0)
+
+    for column in ORACLE_COLUMNS:
+        assert column in frame.columns, (
+            f"{column!r} is missing from the synthetic frame; the oracle "
+            "invariants below have no score to rank by."
+        )
+        assert column.startswith("_"), (
+            f"{column!r} does not start with an underscore. The prefix is "
+            "the visible marker that this column is not a feature."
+        )
+        assert column not in config.PRE_TREATMENT_FEATURES, (
+            f"{column!r} appears in config.PRE_TREATMENT_FEATURES, which is "
+            "ROADMAP Phase 1 criterion 5's leak guard. `_tau` is the "
+            "treatment effect itself, so admitting it lets a model train on "
+            "the outcome it is supposed to predict."
+        )
+
+
+def test_synthetic_frame_rejects_negative_hetero(synthetic_frame):
+    """if/raise, never assert, and the message names what it received."""
+    with pytest.raises(ValueError) as excinfo:
+        synthetic_frame(hetero=-0.5)
+
+    assert "-0.5" in str(excinfo.value), (
+        f"the rejection message is {str(excinfo.value)!r} and does not "
+        "quote the received value, so a caller cannot see what it passed."
     )
 
 
