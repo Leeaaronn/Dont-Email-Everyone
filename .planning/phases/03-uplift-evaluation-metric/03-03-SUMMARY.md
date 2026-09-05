@@ -170,3 +170,14 @@ Plan 03-05 adds `qini_bootstrap_band` and `qini_random_band`. Two contracts it i
 2. `test_plots_module_writes_nothing`'s factory tuple must keep growing with every new public factory — the comment added there says so.
 
 Plan 03-06's `reports/metric.md` is the first place a Qini figure could legitimately be committed; D-09 says it is not committed in this phase, and Phase 4 draws the first one on real holdout scores.
+
+## Self-Check: PASSED
+
+- `dont_email_everyone/plots.py` — FOUND (367 lines)
+- `tests/test_plots.py` — FOUND (684 lines, 34 tests collected)
+- `.planning/phases/03-uplift-evaluation-metric/03-03-SUMMARY.md` — FOUND
+- Commit `7e0f3fa` — FOUND
+- Commit `00c0708` — FOUND
+- Commit `9b4b2e2` — FOUND
+- Commit `b76a201` — FOUND
+- Working tree clean apart from the state files updated below

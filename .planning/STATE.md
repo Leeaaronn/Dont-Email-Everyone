@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-09-05T19:14:18.960Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-09-05T19:28:55.005Z"
 last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 17
-  completed_plans: 13
+  completed_plans: 14
   percent: 29
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 03 (uplift-evaluation-metric) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-09-05
 
-Progress: [████████░░] 76%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [████████░░] 76%
 | Phase 02 P06 | 97min | 3 tasks | 10 files |
 | Phase 03 P01 | 26min | 2 tasks | 2 files |
 | Phase 03 P02 | 22min | 2 tasks | 3 files |
+| Phase 03 P03 | 13min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,10 @@ Recent decisions affecting current work:
 - [Phase 03-02]: the one-executable-sort check is enforced by tokenize (comments AND string literals stripped), not by the plan's line-based grep -- five of evaluation.py's six argsort occurrences are load-bearing docstring prose predating this plan, so the literal criterion was unsatisfiable while the property T-03-09 names is true and now permanently tested
 - [Phase 03-02]: the docstring's 0.09384 vs 0.09429 Q(k)/k gap is attributed to one arbitrary ranking score and paired with a second measurement (0.07776 vs 0.07673, 1.3%) -- the gap's existence is a property of the arithmetic, its size is not, so no later phase can load 0.5% as a tolerance
 - [Phase 03-02]: UPLIFT-02 left Pending for the third time -- uplift-at-k now exists, but the requirement also demands the Matplotlib figure (03-03) and the confidence bands (03-05)
+- [Phase 03-03]: qini_plot's band and highlight_k guards raise BEFORE plt.subplots -- a ValueError after the figure exists leaks a Figure the caller has no handle to close (T-03-10); three tests assert plt.get_fignums() is unchanged across the raise
+- [Phase 03-03]: the horizontal zero reference line is kept despite being a decoy for the chord introspection (its x endpoints are also (0,1)); the chord test is hardened by asserting Q(1) is neither 0.0 nor 1.0 before the figure is built, rather than by removing a line that makes negative-uplift regions readable
+- [Phase 03-03]: the Q(0)==0 guard is provoked with a shifted curve, not a sliced one -- the head of a real Qini curve is genuinely flat at zero, so qini[1:] still starts at 0 and the guard correctly did not fire
+- [Phase 03-03]: UPLIFT-02 left Pending for the fourth time -- the Matplotlib figure now exists, but the requirement also demands 03-05's confidence bands and 03-06's metric.md narration
 
 ### Pending Todos
 
@@ -139,6 +144,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-05T19:14:18.950Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-09-05T19:28:54.993Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
