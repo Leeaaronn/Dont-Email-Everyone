@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-09-05T18:58:47.850Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-09-05T19:14:18.960Z"
 last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 17
-  completed_plans: 12
+  completed_plans: 13
   percent: 29
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 03 (uplift-evaluation-metric) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-09-05
 
-Progress: [███████░░░] 71%
+Progress: [████████░░] 76%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [███████░░░] 71%
 | Phase 02 P05 | 44min | 2 tasks | 4 files |
 | Phase 02 P06 | 97min | 3 tasks | 10 files |
 | Phase 03 P01 | 26min | 2 tasks | 2 files |
+| Phase 03 P02 | 22min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,9 @@ Recent decisions affecting current work:
 - [Phase 03-01]: qini_coefficient is a separate module-level function taking (fraction, qini), not a field on qini_curve's return -- the band functions recompute it on resampled curves, so a baked-in field would be redundant, and the area definition stays independently testable against a hand-written polyline
 - [Phase 03-01]: the np.trapezoid warning is written non-greppably ('the name without the ezoid on the end') because the plan's own acceptance criterion greps evaluation.py for the dead NumPy 1.x spelling -- same rephrase-rather-than-drop disposition as 02-03's three forbidden tokens
 - [Phase 03-01]: UPLIFT-02 left Pending despite appearing in this plan's requirements frontmatter -- plan 03-01 delivers the curve and coefficient only; uplift-at-k, the Matplotlib figure and both confidence bands land in plans 03-02 through 03-05, and the requirement is not satisfied until they do
+- [Phase 03-02]: the one-executable-sort check is enforced by tokenize (comments AND string literals stripped), not by the plan's line-based grep -- five of evaluation.py's six argsort occurrences are load-bearing docstring prose predating this plan, so the literal criterion was unsatisfiable while the property T-03-09 names is true and now permanently tested
+- [Phase 03-02]: the docstring's 0.09384 vs 0.09429 Q(k)/k gap is attributed to one arbitrary ranking score and paired with a second measurement (0.07776 vs 0.07673, 1.3%) -- the gap's existence is a property of the arithmetic, its size is not, so no later phase can load 0.5% as a tolerance
+- [Phase 03-02]: UPLIFT-02 left Pending for the third time -- uplift-at-k now exists, but the requirement also demands the Matplotlib figure (03-03) and the confidence bands (03-05)
 
 ### Pending Todos
 
@@ -135,6 +139,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-05T18:57:07.248Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-09-05T19:14:18.950Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None

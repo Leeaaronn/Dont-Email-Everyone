@@ -75,7 +75,7 @@ Plans:
   3. The chosen Qini normalization convention and the uplift-at-k convention ('overall' vs. 'by_group') are stated in the module docstring and pinned by a test, so the definition cannot silently drift later.
   4. A Matplotlib function returns a `Figure` (never calling `plt.show()`) showing the curve against a random-targeting chord computed from the data — not a bare y=x diagonal — with explicitly labeled axis units.
 
-**Plans:** 1/6 plans executed
+**Plans:** 2/6 plans executed
 
 Plans:
 **Wave 1**
@@ -84,7 +84,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md — `uplift_at_k` ('overall', truncation, empty-arm raise) and `tie_diagnostics`, pinning the exact `uplift_at_k(k) == Q(k)*N_t/n_t(k)` identity (wave 2)
+- [x] 03-02-PLAN.md — `uplift_at_k` ('overall', truncation, empty-arm raise) and `tie_diagnostics`, pinning the exact `uplift_at_k(k) == Q(k)*N_t/n_t(k)` identity (wave 2)
 - [ ] 03-03-PLAN.md — `plots.qini_plot` figure factory with a computed random-targeting chord, pinned limits and unit-bearing labels (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -177,7 +177,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 |-------|----------------|--------|-----------|
 | 1. Data Foundation | 5/5 | Complete   | 2026-09-02 |
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
-| 3. Uplift Evaluation Metric | 1/6 | In Progress|  |
+| 3. Uplift Evaluation Metric | 2/6 | In Progress|  |
 | 4. Uplift Modeling | 0/TBD | Not started | - |
 | 5. Business & Policy Layer | 0/TBD | Not started | - |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |
