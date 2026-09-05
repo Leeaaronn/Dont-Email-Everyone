@@ -13,7 +13,7 @@ The project moves from raw provenance to a defended dollar figure in a strict de
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data Foundation** - Vendored, checksummed, schema-validated ingest and two mutually exclusive arm-vs-control analysis frames (completed 2026-09-02)
-- [ ] **Phase 2: Experiment Validity** - Balance check and ATE with intervals, proving randomization held before any modeling
+- [x] **Phase 2: Experiment Validity** - Balance check and ATE with intervals, proving randomization held before any modeling (completed 2026-09-05)
 - [ ] **Phase 3: Uplift Evaluation Metric** - Hand-rolled Qini / uplift-at-k, unit-tested against synthetic oracles before any model exists
 - [ ] **Phase 4: Uplift Modeling** - T-learner per arm, evaluated honestly on holdout against a permutation null and a response-model baseline
 - [ ] **Phase 5: Business & Policy Layer** - Policy-value estimate with intervals, cost/margin framing, and the committed artifacts the app reads
@@ -44,7 +44,7 @@ Decimal phases appear between their surrounding integers in numeric order.
      > *Planning note (2026-09-03, from 02-RESEARCH.md executed in-repo):* no stray significant covariate exists in this data — all 21 per-covariate p-values are >= 0.19377 and the omnibus p = 0.888753. This criterion is satisfied by stating the acceptance rule as a **pre-registered decision procedure** ("a single significant covariate among 21 tests would have been expected noise, not evidence of failed randomization — none occurred"), never by describing an observed significant result.
   3. The ATE table covers 2 arms x 3 outcomes with control base rate, absolute effect, 95% CI from HC-robust SEs, and both raw and Holm-adjusted p-values — and reproduces the published figures (Mens +7.66pp visit / +0.68pp conversion / +$0.77 spend; Womens +4.52pp / +0.31pp / +$0.42), which is the check that catches a grouping bug.
   4. A seeded bootstrap cross-check on the spend ATE agrees with the analytic interval, and a committed coverage-vs-cell-size table shows the cell size below which the Welch interval stops being trustworthy.
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans executed
 
 Plans:
 - [x] 02-01-PLAN.md — Foundation: REPORTS/FIGURES path constants, arm-vs-arm frame helper, estimation test fixtures
@@ -52,7 +52,7 @@ Plans:
 - [x] 02-03-PLAN.md — ate.py: six HC3 ATEs reproducing published figures, covariate-adjusted counterparts, Holm, bootstrap, winsorization
 - [x] 02-04-PLAN.md — coverage.py: two-DGP Welch coverage simulation over the D-08 cell-size grid with degenerate-cell accounting
 - [x] 02-05-PLAN.md — plots.py figure factories and pipeline.py argparse orchestrator (the only component that writes)
-- [ ] 02-06-PLAN.md — Generate and commit artifacts and figures, author reports/validity.md, update README
+- [x] 02-06-PLAN.md — Generate and commit artifacts and figures, author reports/validity.md, update README
 
 ### Phase 3: Uplift Evaluation Metric
 **Goal**: A trustworthy hand-rolled Qini / uplift-at-k implementation exists and is proven correct before any model can bias how it was designed.
@@ -130,7 +130,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data Foundation | 5/5 | Complete   | 2026-09-02 |
-| 2. Experiment Validity | 5/6 | In Progress|  |
+| 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
 | 3. Uplift Evaluation Metric | 0/TBD | Not started | - |
 | 4. Uplift Modeling | 0/TBD | Not started | - |
 | 5. Business & Policy Layer | 0/TBD | Not started | - |

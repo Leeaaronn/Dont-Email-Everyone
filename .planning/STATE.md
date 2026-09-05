@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-09-03T22:31:40.362Z"
-last_activity: 2026-09-03
+stopped_at: Completed 02-06-PLAN.md — Phase 02 complete
+last_updated: "2026-09-05T00:00:00.000Z"
+last_activity: 2026-09-05
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 11
-  completed_plans: 10
-  percent: 14
+  completed_plans: 11
+  percent: 29
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 02 — experiment-validity
+**Current focus:** Phase 03 — uplift-evaluation-metric (not started)
 
 ## Current Position
 
-Phase: 02 (experiment-validity) — EXECUTING
+Phase: 02 (experiment-validity) — COMPLETE (2026-09-05)
 Plan: 6 of 6
-Status: Ready to execute
-Last activity: 2026-09-03
+Status: Phase 02 closed; Phase 03 (uplift-evaluation-metric) not yet planned
+Last activity: 2026-09-05
 
-Progress: [█████████░] 91%
+Progress: [███░░░░░░░] 29% (2 of 7 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5
+- Total plans completed: 11
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -45,6 +45,7 @@ Progress: [█████████░] 91%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 5 | - | - |
+| 02 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -61,6 +62,7 @@ Progress: [█████████░] 91%
 | Phase 02 P03 | 43min | 3 tasks | 2 files |
 | Phase 02 P04 | 22min | 2 tasks | 2 files |
 | Phase 02 P05 | 44min | 2 tasks | 4 files |
+| Phase 02 P06 | 97min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -101,6 +103,10 @@ Recent decisions affecting current work:
 - [Phase 02-05]: pipeline.py is the only Phase 2 module that touches the filesystem; plots.py returns Figure objects and the orchestrator owns both the write and the close, so a later phase can reuse the same figure in a different output context
 - [Phase 02-05]: The ATE forest plot panels by the table's unit column rather than by an outcome-name list, giving spend its own dollar axis -- a shared numeric axis would draw the +$0.77 spend effect as +76.98pp
 - [Phase 02-05]: ingest.build_all() was left byte-identical and the ingest subcommand delegates to it, so its four-gate/three-artifact contract and tests/test_build_all.py stay intact
+- [Phase 02-06]: ARTIFACT_NAMES extended to all six Parquet artifacts -- it is a presence allowlist, not a glob, so an analysis artifact that was deleted or left untracked would otherwise still pass the suite
+- [Phase 02-06]: Committed-artifact freshness is asserted on content (shapes, dtypes, and a canary pinning the mens visit effect at 0.076590), never on bytes or a checksum; Parquet and PNG both embed run-specific metadata, so a byte assertion fails on a correct regeneration while a stale-but-valid file passes
+- [Phase 02-06]: reports/validity.md quotes 38.05% as this repo's zero-variance-arm rate at cell 400 and cites the research note's 37.4% as a separately generated number, rather than claiming to have reproduced it -- same disposition as the 1-2pp coverage gap
+- [Phase 02-06]: reports/validity.md is the technical evidence document, deliberately not reader-facing; Phase 7's README links to it rather than re-deriving it, and quotes ate.json's scalar block
 
 ### Pending Todos
 
@@ -126,6 +132,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-03T22:31:40.355Z
-Stopped at: Completed 02-05-PLAN.md
+Last session: 2026-09-05
+Stopped at: Completed 02-06-PLAN.md — Phase 02 complete, all 6 plans executed and the human-verify gate approved
 Resume file: None
