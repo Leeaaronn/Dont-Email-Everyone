@@ -224,6 +224,36 @@ def _guard_no_nan_scores(score) -> None:
         )
 
 
+def _guard_treatment(treatment) -> None:
+    """Raise unless `treatment` is a two-armed 0/1 column with both arms.
+
+    Its own function because `bootstrap_indices` takes `treatment` alone
+    and has no score or outcome array to hand to `_guard_inputs`, and
+    because a second hand-written copy of these two checks is how one
+    entry point ends up admitting an arm the others reject. Same reasoning
+    `_guard_no_nan_scores` records for itself.
+    """
+    distinct = np.unique(treatment)
+    if not np.isin(distinct, (0, 1)).all():
+        raise ValueError(
+            f"`treatment` holds the distinct values {distinct.tolist()}; "
+            "only 0 and 1 are admissible. A three-valued column means the "
+            "full analysis table was handed in and the control arm is "
+            "contaminated (PITFALLS.md Pitfall 1)."
+        )
+
+    n_treated = int(np.count_nonzero(treatment == 1))
+    n_control = int(np.count_nonzero(treatment == 0))
+    if n_treated == 0 or n_control == 0:
+        empty_arm = "control" if n_control == 0 else "treated"
+        raise ValueError(
+            f"one arm is empty: {n_treated} treated and {n_control} control "
+            f"rows, so the missing one is the {empty_arm} arm. The Qini "
+            "curve is a difference between two arms; with one of them "
+            "absent there is no incremental outcome to accumulate."
+        )
+
+
 def _guard_inputs(score, treatment, outcome):
     """Validate the three input arrays and return them as NumPy arrays.
 
@@ -272,23 +302,7 @@ def _guard_inputs(score, treatment, outcome):
             "rank and no curve to compute."
         )
 
-    distinct = np.unique(treatment)
-    if not np.isin(distinct, (0, 1)).all():
-        raise ValueError(
-            f"`treatment` holds the distinct values {distinct.tolist()}; "
-            "only 0 and 1 are admissible. A three-valued column means the "
-            "full analysis table was handed in and the control arm is "
-            "contaminated (PITFALLS.md Pitfall 1)."
-        )
-
-    n_treated = int(np.count_nonzero(treatment == 1))
-    n_control = int(np.count_nonzero(treatment == 0))
-    if n_treated == 0 or n_control == 0:
-        raise ValueError(
-            f"one arm is empty: {n_treated} treated and {n_control} control "
-            "rows. The Qini curve is a difference between two arms; with one "
-            "of them missing there is no incremental outcome to accumulate."
-        )
+    _guard_treatment(treatment)
 
     _guard_no_nan_scores(score)
 
@@ -536,3 +550,113 @@ def tie_diagnostics(score) -> dict:
         "largest_tie_fraction": float(counts.max() / n_scores),
         "fraction_in_ties": float(counts[tied].sum() / n_scores),
     }
+
+
+def bootstrap_indices(treatment, n_resamples: int = 500, seed: int = 20260902):
+    """Return an `(n_resamples, n)` int32 matrix of arm-stratified positions.
+
+    Row `r` is one complete resample, drawn WITH REPLACEMENT, of the row
+    positions `0 .. n - 1`. The draws are taken separately within each arm,
+    so every replicate carries exactly the treated and control counts the
+    randomized design produced -- an unstratified bootstrap would let a
+    replicate drift toward one arm and widen the band for a reason that has
+    nothing to do with the model being evaluated.
+
+    D-07 puts the draws in their own function rather than inside a band, so
+    Phase 5's policy-value confidence interval and Phase 6's revenue band
+    can share ONE matrix with the Qini band. Three intervals built from the
+    same draws are jointly valid; three independently drawn intervals
+    quietly disagree with each other.
+
+    POSITION-PRESERVING, NOT BLOCK-LAYOUT. Each column is filled from its
+    own arm's index pool, so column `j` always resamples from the same arm
+    as row `j`, and therefore
+
+        np.array_equal(treatment[out[r]], treatment)
+
+    holds for every `r`. That invariant -- exact, not statistical -- is
+    what lets a downstream consumer index ANY per-row array with `out[r]`
+    (the score, the outcome, a spend column, a per-customer margin)
+    without knowing anything about how the draws were laid out.
+
+    The rejected alternative is to write every treated draw into the first
+    `N_t` columns and every control draw after them. It stratifies just as
+    correctly, but it imposes a column layout that every downstream
+    consumer then has to know and honour, and a consumer that forgets it
+    pairs resampled treatments with unresampled outcomes and reports a
+    number instead of raising. Measured build time is identical either
+    way, so position-preservation is free.
+
+    `int32` IS DELIBERATE, AND CHECKED RATHER THAN ASSUMED. At R=1000 and
+    n=42,613 the matrix is 170 MB where the platform default integer would
+    take 341 MB; at the R=500 default it is 85 MB and builds in 0.16 s.
+    The ceiling is `np.iinfo(np.int32).max` = 2,147,483,647 against a
+    largest possible index of 42,612, on a fixed 64,000-row vendored CSV
+    that will never grow -- five orders of magnitude of headroom. The
+    guard below raises anyway, because a dtype defended only in prose is a
+    dtype nobody re-checks.
+
+    THIS MATRIX IS IN-PROCESS REUSE INFRASTRUCTURE AND IS NEVER PERSISTED.
+    FEATURES.md says "compute the resample indices once, persist them,
+    reuse", which reads as an instruction to write the array to disk;
+    committing an 85-170 MB binary blob to git would be a serious
+    repo-hygiene error, in a repository whose data provenance story is one
+    of its selling points. The correct reading is to persist the DERIVED
+    band columns -- a `(grid, lo, hi)` triple is a few kilobytes -- and to
+    rebuild the draws in memory whenever they are wanted. For the same
+    reason the Phase 6 app must never call this function: it consumes
+    precomputed band columns, because 170 MB is a material fraction of
+    Streamlit Community Cloud's ~690 MB envelope.
+
+    `seed` carries D-02's project-wide default and the whole matrix comes
+    from a single stream seeded once, `coverage.empirical_coverage_table`'s
+    precedent, so adding a replicate cannot silently re-use another
+    replicate's draws.
+    """
+    treatment = np.asarray(treatment)
+
+    if treatment.ndim != 1:
+        raise ValueError(
+            f"`treatment` has shape {treatment.shape}; it must be 1-D. A 2-D "
+            "array would be flattened by np.flatnonzero and the resulting "
+            "index matrix would address a population that is not one row per "
+            "customer."
+        )
+    if treatment.size == 0:
+        raise ValueError(
+            "`treatment` is empty; there are no row positions to resample."
+        )
+    if not isinstance(n_resamples, (int, np.integer)) or n_resamples < 1:
+        raise ValueError(
+            f"`n_resamples` is {n_resamples!r}; it must be an integer of at "
+            "least 1. A zero or negative count returns a matrix with no "
+            "rows, and the percentile of an empty replicate stack is nan -- "
+            "a band that renders as nothing rather than as an error."
+        )
+    if treatment.size > np.iinfo(np.int32).max:
+        raise ValueError(
+            f"`treatment` holds {treatment.size} rows, above the int32 index "
+            f"ceiling of {np.iinfo(np.int32).max}. The matrix dtype is int32 "
+            "to halve its memory; addressing this many rows would wrap "
+            "around to negative positions and silently resample the wrong "
+            "customers."
+        )
+
+    _guard_treatment(treatment)
+
+    n_resamples = int(n_resamples)
+    # Seeded ONCE outside the loop, not per arm and not per replicate: the
+    # whole matrix is then a single reproducible stream
+    # (coverage.py's empirical_coverage_table, same reasoning).
+    rng = np.random.default_rng(seed)
+    out = np.empty((n_resamples, treatment.size), dtype=np.int32)
+    for value in (1, 0):
+        pos = np.flatnonzero(treatment == value)
+        # `replace=True` is the bootstrap. Without it this becomes a
+        # within-arm permutation, every replicate is the original sample in
+        # a different order, and the band collapses to zero width while
+        # still returning a plausible-looking triple.
+        out[:, pos] = rng.choice(
+            pos, size=(n_resamples, pos.size), replace=True
+        )
+    return out
