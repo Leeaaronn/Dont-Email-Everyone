@@ -60,10 +60,12 @@ current.
 | 03-01-T2 | 03-01 | 1 | UPLIFT-02 / C3 | — | N/A | unit (source-reading) | `pytest tests/test_evaluation.py::test_docstring_pins_the_normalization_convention -x` | ✅ | ✅ green |
 | 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | N/A | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_matches_the_curve_identity -x` | ✅ | ✅ green |
 | 03-02-T2 | 03-02 | 2 | UPLIFT-02 / C3 | — | Raises rather than silently returning NaN | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_raises_on_empty_arm -x` | ✅ | ✅ green |
-| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | Returns `Figure`, never calls `plt.show()` | unit | `pytest tests/test_plots.py -k qini -x` | ✅ file / ❌ W0 cases | ⬜ pending |
-| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_chord_is_computed_not_diagonal -x` | ❌ W0 | ⬜ pending |
-| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_axis_labels_carry_units -x` | ❌ W0 | ⬜ pending |
-| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | N/A | unit | `pytest tests/test_plots.py::test_qini_plot_saves_a_non_trivial_png -x` | ❌ W0 | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | T-03-10, T-03-11 | Returns `Figure`, renders nothing, writes nothing, leaves no stray figure | unit | `pytest tests/test_plots.py -k qini -x` | ✅ (10 cases) | ✅ green |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | T-03-12 | Baseline is the computed chord to Q(1), asserted from the drawn Line2D | unit | `pytest tests/test_plots.py::test_qini_plot_chord_is_computed_not_diagonal -x` | ✅ | ✅ green |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | T-03-13 | Labels say 'per treated customer', never 'per targeted customer' | unit | `pytest tests/test_plots.py::test_qini_plot_axis_labels_carry_units -x` | ✅ | ✅ green |
+| 03-03-T2 | 03-03 | 2 | UPLIFT-02 / C4 | — | PNG written to `tmp_path` only; nothing committed (D-09) | unit | `pytest tests/test_plots.py::test_qini_plot_saves_a_non_trivial_png -x` | ✅ | ✅ green |
+| 03-03-T2 (added) | 03-03 | 2 | UPLIFT-02 / C4 | T-03-10 | Band and `highlight_k` guards raise before the Figure exists, so no error path leaks a figure | unit | `pytest tests/test_plots.py::test_qini_plot_draws_the_band_when_given_one tests/test_plots.py::test_qini_plot_rejects_a_curve_that_does_not_start_at_the_origin -x` | ✅ | ✅ green |
+| 03-03-T2 (added) | 03-03 | 2 | UPLIFT-02 / C4 | — | Axis limits pinned so both the origin and Q(1) stay on canvas | unit | `pytest tests/test_plots.py::test_qini_plot_x_limits_are_pinned -x` | ✅ | ✅ green |
 | 03-02-T2 | 03-02 | 2 | UPLIFT-02 / D-04 | — | N/A | unit | `pytest tests/test_evaluation.py::test_tie_diagnostics -x` | ✅ | ✅ green |
 | 03-02-T2 (added) | 03-02 | 2 | UPLIFT-02 / C3 | T-03-07 | `0 < k <= 1` guarded by if/raise, never assert | unit | `pytest tests/test_evaluation.py::test_uplift_at_k_rejects_a_k_outside_the_unit_interval -x` | ✅ | ✅ green |
 | 03-02-T2 (added) | 03-02 | 2 | UPLIFT-02 / C3 | T-03-09 | Exactly one executable sort, so the two functions cannot rank differently | unit (source-reading) | `pytest tests/test_evaluation.py::test_evaluation_module_has_exactly_one_sort -x` | ✅ | ✅ green |
@@ -79,7 +81,7 @@ current.
 
 - [x] `tests/test_evaluation.py` — new file, created by **03-01-T2**; extended by 03-02-T2, 03-04-T1/T2/T3, 03-05-T3
 - [ ] `tests/conftest.py` — extend `synthetic_frame` with a `hetero` parameter (RESEARCH §Q4), owned by **03-04-T1**. `hetero=0.0` MUST reproduce current behavior bit-for-bit so no Phase 2 test changes; `u` is drawn from a separate `default_rng(seed + 1)` stream so the primary draw order is unshifted.
-- [ ] `tests/test_plots.py` — new section for `qini_plot` (C4), owned by **03-03-T2**
+- [x] `tests/test_plots.py` — new section for `qini_plot` (C4), owned by **03-03-T2**
 - [ ] `tests/test_reports.py` — add `metric.md` to the presence/tracking checks (D-08), owned by **03-06-T2**
 - [ ] Framework install: **none needed** — pytest 9.1.1 present, `slow` marker already registered, `--strict-markers` already on
 
