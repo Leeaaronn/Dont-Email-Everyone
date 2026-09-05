@@ -1,5 +1,6 @@
-"""Figure factories for the Phase 2 validity report: the covariate Love plot
-and the average-treatment-effect forest plot.
+"""Figure factories for the analysis reports: the covariate Love plot and
+the average-treatment-effect forest plot of the Phase 2 validity report, and
+the Phase 3 Qini curve that evaluates an uplift ranking.
 
 Every function in this module returns a `matplotlib.figure.Figure` and calls
 no rendering or display function of any kind. The caller owns both the write
@@ -56,6 +57,25 @@ _UNIT_AXIS_LABEL = {
     "pp": "Effect on the outcome rate (percentage points)",
     "$": "Effect on spend per customer (dollars)",
 }
+
+# The Qini curve's y axis is keyed by unit in exactly the same way, but its
+# wording deliberately differs from `_UNIT_AXIS_LABEL` above and is a separate
+# dict rather than an edit to it. The two say different things. `Q(phi)` is a
+# CUMULATIVE incremental outcome per *treated customer in the full
+# population*, while `uplift_at_k(k)` is an incremental outcome per *targeted
+# customer*; the two differ by the factor `N_t / n_t(k)` and are constantly
+# conflated (RESEARCH.md Q3, PITFALLS.md Pitfall 8). The existing strings say
+# neither, so the label has to say which one is on the canvas.
+_QINI_AXIS_LABEL = {
+    "pp": "Cumulative incremental visits (percentage points, per treated customer)",
+    "$": "Cumulative incremental spend (dollars, per treated customer)",
+}
+
+# The x axis is the same quantity whatever the outcome's unit is: how far down
+# the ranked list the campaign mails. It is a fraction of the COMBINED
+# population (treated and control together), because that is the population
+# the curve is cumulated over.
+_QINI_X_LABEL = "Targeted fraction of the combined population (ranked by score)"
 
 
 def love_plot(balance_df, threshold: float = balance.SMD_THRESHOLD):
@@ -182,5 +202,157 @@ def ate_forest(ate_df):
         ax.set_xlabel(_UNIT_AXIS_LABEL.get(unit, f"Effect ({unit})"))
 
     fig.suptitle("Average treatment effects with 95% confidence intervals")
+    fig.tight_layout()
+    return fig
+
+
+def qini_plot(
+    fraction,
+    qini,
+    *,
+    band=None,
+    highlight_k=None,
+    unit="pp",
+    title=None,
+):
+    """Return a Qini curve Figure for an `evaluation.qini_curve` result.
+
+    Takes the `(fraction, qini)` pair that `evaluation.qini_curve` returns --
+    arrays, not a frame and not the module, so this factory stays usable on a
+    curve that was resampled, sliced, or read back from an artifact.
+
+    The dashed reference line is the *computed* random-targeting chord, from
+    `(0, 0)` to `(1, Q(1))`. It is the single thing this figure has to get
+    right: `y = x` is not the baseline, and drawing it as one makes an
+    ordinary ranking look like it beats random targeting by whatever the gap
+    happens to be.
+
+    `band` takes the `(grid, lo, hi)` triple that the bootstrap and
+    random-ranking band functions both return; both use the same grid
+    semantics so there is one shape to draw. `highlight_k` marks a single
+    targeting depth, which is where an interactive caller renders its
+    selection.
+
+    Renders nothing and writes nothing: the returned Figure is the caller's
+    to save and to close. The inputs are not mutated -- values are read out
+    of the passed arrays and no array is assigned into.
+    """
+    fraction = np.asarray(fraction, dtype=float)
+    qini = np.asarray(qini, dtype=float)
+
+    # Plain if/raise, never `assert`: assertions are compiled out under
+    # `python -O`, and a figure whose guards vanished draws a curve rather
+    # than failing.
+    if fraction.size != qini.size:
+        raise ValueError(
+            "fraction and qini must have the same length; got "
+            f"{fraction.size} and {qini.size}."
+        )
+    if qini.size == 0:
+        raise ValueError("fraction and qini are empty; there is no curve to draw.")
+    if qini[0] != 0.0:
+        raise ValueError(
+            "a Qini curve starts at the origin: Q(0) must be exactly 0.0, but "
+            f"qini[0] is {qini[0]!r}. A curve that does not start at 0 has "
+            "been shifted or sliced, and the chord drawn below would no "
+            "longer be the random-targeting baseline for it."
+        )
+
+    # Both the curve and the chord are scaled by the SAME factor. This is the
+    # reason `ate_forest` panels by unit at all: a shared numeric axis would
+    # draw a +$0.77 spend effect as +76.98pp.
+    scale = _UNIT_SCALE.get(unit, 1.0)
+    curve = qini * scale
+    ate = float(qini[-1]) * scale
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+
+    lows = [0.0, float(np.min(curve)), ate]
+    highs = [0.0, float(np.max(curve)), ate]
+
+    if band is not None:
+        grid, lo, hi = band
+        grid = np.asarray(grid, dtype=float)
+        lo = np.asarray(lo, dtype=float) * scale
+        hi = np.asarray(hi, dtype=float) * scale
+        if not (grid.size == lo.size == hi.size):
+            raise ValueError(
+                "band must be a (grid, lo, hi) triple of equal length; got "
+                f"{grid.size}, {lo.size} and {hi.size}."
+            )
+        ax.fill_between(
+            grid,
+            lo,
+            hi,
+            alpha=0.18,
+            color="#1f4e79",
+            linewidth=0,
+            label="Confidence band",
+        )
+        lows.append(float(np.min(lo)))
+        highs.append(float(np.max(hi)))
+
+    ax.plot(fraction, curve, color="#1f4e79", lw=1.6, label="Qini curve")
+
+    # The random-targeting baseline is the CHORD from the origin to the
+    # curve's own endpoint, not a diagonal. `qini[-1]` is Q(1) -- the average
+    # treatment effect measured on this same data -- and mailing a random
+    # fraction phi of the list buys phi of that effect, so the baseline is the
+    # straight line through (0, 0) and (1, Q(1)). Radcliffe defines it exactly
+    # that way. Drawing `y = x` instead is PITFALLS.md Pitfall 8.2: it is a
+    # line with no relationship to the data, and on any outcome whose ATE is
+    # not 1.0 it makes the model's advantage over random targeting a fiction.
+    ax.plot(
+        [0.0, 1.0],
+        [0.0, ate],
+        ls="--",
+        color="crimson",
+        lw=1,
+        label="Random targeting (chord to Q(1))",
+    )
+
+    if highlight_k is not None:
+        highlight_k = float(highlight_k)
+        if not 0.0 <= highlight_k <= 1.0:
+            raise ValueError(
+                f"highlight_k must lie in [0, 1]; got {highlight_k}."
+            )
+        # Read off the curve rather than recomputing anything: this marker has
+        # to sit on the line that is drawn, not near it.
+        marked = float(np.interp(highlight_k, fraction, curve))
+        ax.axvline(highlight_k, color="0.4", lw=0.8, ls=":")
+        ax.plot(
+            [highlight_k],
+            [marked],
+            marker="o",
+            markersize=6,
+            color="#1f4e79",
+            linestyle="none",
+            label=f"Selected depth k = {highlight_k:g}",
+        )
+
+    # Pinned, never auto-scaled (the same rule as the Love plot's x limits).
+    # The x axis is a targeting fraction and is therefore [0, 1] by
+    # definition; the y limits are taken from the data so that both the origin
+    # and Q(1) are on the canvas with a margin. Letting autoscale decide would
+    # let the chord's endpoint or the origin drift off the canvas, and a Qini
+    # figure that does not show the baseline it is judged against shows
+    # nothing a reader can act on.
+    ax.set_xlim(0.0, 1.0)
+    span = max(highs) - min(lows)
+    margin = 0.08 * span if span > 0.0 else 1.0
+    ax.set_ylim(min(lows) - margin, max(highs) + margin)
+
+    ax.axhline(0.0, color="0.5", lw=0.8)
+    ax.set_xlabel(_QINI_X_LABEL)
+    ax.set_ylabel(
+        _QINI_AXIS_LABEL.get(
+            unit,
+            f"Cumulative incremental outcome ({unit}, per treated customer)",
+        )
+    )
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(loc="lower right", fontsize=8)
     fig.tight_layout()
     return fig
