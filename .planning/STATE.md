@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-09-05T19:56:02.254Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-09-05T20:19:24.733Z"
 last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 16
   percent: 29
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 03 (uplift-evaluation-metric) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-09-05
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 88%
 | Phase 03 P02 | 22min | 2 tasks | 3 files |
 | Phase 03 P03 | 13min | 2 tasks | 3 files |
 | Phase 03 P04 | 25min | 3 tasks | 3 files |
+| Phase 03 P05 | 22min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -126,6 +127,10 @@ Recent decisions affecting current work:
 - [Phase 03-04]: the random-score null is a Monte-Carlo statement with the SD measured in the same run, and the oracle is compared against BOTH a derived literal (0.36) and the empirical maximum of those same 200 draws, so the invariant survives a retuning of the fixture
 - [Phase 03-04]: D-03 tier 2 is asserted as SD(tie wobble) < SD(random-score noise floor) on the same data -- two measured quantities, not a magic tolerance -- and synthetic_frame was widened to session scope so a module-scoped fixture could hold one frame plus its own 200-draw null
 - [Phase 03-04]: UPLIFT-02 left Pending for the fifth time -- the oracle invariants now exist, but the requirement also demands 03-05's confidence bands and 03-06's metric.md narration
+- [Phase 03-05]: both Qini confidence bands share one resampling engine and one 101-point grid; bands return raw curve units because plots.qini_plot applies unit scaling itself
+- [Phase 03-05]: bootstrap_indices returns a position-preserving int32 matrix that is in-process reuse infrastructure and is never persisted to git
+- [Phase 03-05]: qini_random_band takes no score parameter -- the signature is the guard against passing a model score into a null band
+- [Phase 03-05]: UPLIFT-02 left Pending for the sixth time -- both bands now exist, but the requirement also demands 03-06's metric.md narration
 
 ### Pending Todos
 
@@ -150,6 +155,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-05T19:54:08.932Z
+Last session: 2026-09-05T20:17:55.278Z
 Stopped at: Completed 03-04-PLAN.md
 Resume file: None

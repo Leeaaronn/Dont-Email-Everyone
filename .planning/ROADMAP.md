@@ -75,7 +75,7 @@ Plans:
   3. The chosen Qini normalization convention and the uplift-at-k convention ('overall' vs. 'by_group') are stated in the module docstring and pinned by a test, so the definition cannot silently drift later.
   4. A Matplotlib function returns a `Figure` (never calling `plt.show()`) showing the curve against a random-targeting chord computed from the data — not a bare y=x diagonal — with explicitly labeled axis units.
 
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -93,7 +93,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 03-05-PLAN.md — `bootstrap_indices` resample engine and both confidence bands on a shared grid (wave 4)
+- [x] 03-05-PLAN.md — `bootstrap_indices` resample engine and both confidence bands on a shared grid (wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -177,7 +177,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 |-------|----------------|--------|-----------|
 | 1. Data Foundation | 5/5 | Complete   | 2026-09-02 |
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
-| 3. Uplift Evaluation Metric | 4/6 | In Progress|  |
+| 3. Uplift Evaluation Metric | 5/6 | In Progress|  |
 | 4. Uplift Modeling | 0/TBD | Not started | - |
 | 5. Business & Policy Layer | 0/TBD | Not started | - |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |
