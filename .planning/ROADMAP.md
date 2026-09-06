@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data Foundation** - Vendored, checksummed, schema-validated ingest and two mutually exclusive arm-vs-control analysis frames (completed 2026-09-02)
 - [x] **Phase 2: Experiment Validity** - Balance check and ATE with intervals, proving randomization held before any modeling (completed 2026-09-05)
-- [ ] **Phase 3: Uplift Evaluation Metric** - Hand-rolled Qini / uplift-at-k, unit-tested against synthetic oracles before any model exists
+- [x] **Phase 3: Uplift Evaluation Metric** - Hand-rolled Qini / uplift-at-k, unit-tested against synthetic oracles before any model exists (completed 2026-09-06)
 - [ ] **Phase 4: Uplift Modeling** - T-learner per arm, evaluated honestly on holdout against a permutation null and a response-model baseline
 - [ ] **Phase 5: Business & Policy Layer** - Policy-value estimate with intervals, cost/margin framing, and the committed artifacts the app reads
 - [ ] **Phase 6: Streamlit App & Deployment** - Thin read-only threshold app, live on Community Cloud
@@ -75,7 +75,7 @@ Plans:
   3. The chosen Qini normalization convention and the uplift-at-k convention ('overall' vs. 'by_group') are stated in the module docstring and pinned by a test, so the definition cannot silently drift later.
   4. A Matplotlib function returns a `Figure` (never calling `plt.show()`) showing the curve against a random-targeting chord computed from the data — not a bare y=x diagonal — with explicitly labeled axis units.
 
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 **Wave 1**
@@ -97,7 +97,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 03-06-PLAN.md — `reports/metric.md` write-up and its presence/tracking test (wave 5)
+- [x] 03-06-PLAN.md — `reports/metric.md` write-up and its presence/tracking test (wave 5)
 
 ### Phase 4: Uplift Modeling
 
@@ -177,7 +177,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 |-------|----------------|--------|-----------|
 | 1. Data Foundation | 5/5 | Complete   | 2026-09-02 |
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
-| 3. Uplift Evaluation Metric | 5/6 | In Progress|  |
+| 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 0/TBD | Not started | - |
 | 5. Business & Policy Layer | 0/TBD | Not started | - |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |

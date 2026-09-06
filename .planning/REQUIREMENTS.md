@@ -22,7 +22,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Uplift Modeling
 
 - [ ] **UPLIFT-01**: Individual-level uplift models using a two-model (T-learner) approach built from scikit-learn base learners — one model per treatment arm (mens vs. control, womens vs. control)
-- [ ] **UPLIFT-02**: Uplift model evaluation via Qini curve and uplift-at-k (not accuracy/AUC) — implemented directly (no causalml/scikit-uplift), plotted with Matplotlib
+- [x] **UPLIFT-02**: Uplift model evaluation via Qini curve and uplift-at-k (not accuracy/AUC) — implemented directly (no causalml/scikit-uplift), plotted with Matplotlib
 
 ### Streamlit App
 
@@ -59,7 +59,7 @@ Roadmap note: Phase 5 (Business & Policy Layer) is the phase where these quality
 | DATA-04 | Phase 1 — Data Foundation | Complete |
 | VALID-01 | Phase 2 — Experiment Validity | Complete |
 | VALID-02 | Phase 2 — Experiment Validity | Complete |
-| UPLIFT-02 | Phase 3 — Uplift Evaluation Metric | Pending |
+| UPLIFT-02 | Phase 3 — Uplift Evaluation Metric | Complete |
 | UPLIFT-01 | Phase 4 — Uplift Modeling | Pending |
 | APP-01 | Phase 6 — Streamlit App & Deployment | Pending |
 | APP-02 | Phase 6 — Streamlit App & Deployment | Pending |
