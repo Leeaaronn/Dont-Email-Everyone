@@ -89,7 +89,7 @@ current.
 | 03-05-T3 (added) | 03-05 | 4 | UPLIFT-02 / D-06 | — | A freshly drawn random score sits inside its own 90% pointwise null band at most grid points | statistical | `pytest tests/test_evaluation.py::test_random_band_brackets_a_random_score_curve -x` | ✅ | ✅ green |
 | 03-05-T3 (added) | 03-05 | 4 | UPLIFT-02 / D-06 | — | The precision band tightens with sample size (mean width, not pointwise) | statistical | `pytest tests/test_evaluation.py::test_bootstrap_band_narrows_as_replicates_and_n_grow -x` | ✅ | ✅ green |
 | 03-05-T3 (added) | 03-05 | 4 | UPLIFT-02 / D-06 | T-03-18 | Real-scale bands at their default replicate counts, `slow`-marked; ordering and finiteness only | integration | `pytest tests/test_evaluation.py -k "bands and real_scale" -x` | ✅ | ✅ green |
-| 03-06-T2 | 03-06 | 5 | UPLIFT-02 / D-08 | — | N/A | unit | `pytest tests/test_reports.py -q` | ✅ file / ❌ W0 case | ⬜ pending |
+| 03-06-T2 | 03-06 | 5 | UPLIFT-02 / D-08 | — | N/A | unit | `pytest tests/test_reports.py -q` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -100,16 +100,23 @@ current.
 - [x] `tests/test_evaluation.py` — new file, created by **03-01-T2**; extended by 03-02-T2, 03-04-T1/T2/T3, 03-05-T3
 - [x] `tests/conftest.py` — extend `synthetic_frame` with a `hetero` parameter (RESEARCH §Q4), owned by **03-04-T1**. `hetero=0.0` MUST reproduce current behavior bit-for-bit so no Phase 2 test changes; `u` is drawn from a separate `default_rng(seed + 1)` stream so the primary draw order is unshifted.
 - [x] `tests/test_plots.py` — new section for `qini_plot` (C4), owned by **03-03-T2**
-- [ ] `tests/test_reports.py` — add `metric.md` to the presence/tracking checks (D-08), owned by **03-06-T2**
-- [ ] Framework install: **none needed** — pytest 9.1.1 present, `slow` marker already registered, `--strict-markers` already on
+- [x] `tests/test_reports.py` — add `metric.md` to the presence/tracking checks (D-08), owned by **03-06-T2**
+- [x] Framework install: **none needed** — pytest 9.1.1 present, `slow` marker already registered, `--strict-markers` already on
 
 ---
 
 ## Manual-Only Verifications
 
-| Behavior | Requirement | Why Manual | Test Instructions |
-|----------|-------------|------------|-------------------|
-| `reports/metric.md` prose is accurate and readable to a non-author reviewer (discharged by **03-06-T3**, a blocking `checkpoint:human-verify`) | D-08 | Prose quality is not machine-checkable; the automated test asserts presence, git-tracking and non-triviality only (matching `test_reports.py`'s existing pattern for `validity.md`) | Read `reports/metric.md`. Confirm it states: the Qini normalization convention, the uplift-at-k convention, the tie rule, both band definitions, and the synthetic-oracle results as evidence. |
+| Behavior | Requirement | Why Manual | Test Instructions | Status |
+|----------|-------------|------------|-------------------|--------|
+| `reports/metric.md` prose is accurate and readable to a non-author reviewer (discharged by **03-06-T3**, a blocking `checkpoint:human-verify`) | D-08 | Prose quality is not machine-checkable; the automated test asserts presence, git-tracking and non-triviality only (matching `test_reports.py`'s existing pattern for `validity.md`) | Read `reports/metric.md`. Confirm it states: the Qini normalization convention, the uplift-at-k convention, the tie rule, both band definitions, and the synthetic-oracle results as evidence. | ✅ green — reviewed and approved by the user 2026-09-05 |
+
+This is the phase's only manual-only row, and it is now discharged. The approval is the evidence:
+no automated check stands behind it by design, because the property under review is whether the
+prose reads as accurate to someone who did not write it. The mechanically checkable parts of the
+same document — required substrings, `##` section ordering, per-section pytest source citations,
+git-tracking and a byte floor — are asserted by `tests/test_reports.py::test_metric_report_exists`
+and by 03-06-T1's substring check, and those remain the regression gate.
 
 ---
 
@@ -127,3 +134,6 @@ current.
 overlap); 3 = 03-04; 4 = 03-05; 5 = 03-06.
 
 **Approval:** planned 2026-09-05
+
+**Execution close-out:** all rows green 2026-09-05. Full suite 266 passed (pre-phase baseline 188); `-m slow` 14 passed, 252 deselected. The single manual-only
+row was approved by the user at 03-06-T3.
