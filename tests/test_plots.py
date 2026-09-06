@@ -627,6 +627,48 @@ def test_qini_plot_rejects_a_curve_that_does_not_start_at_the_origin(qini_pair):
     assert plt.get_fignums() == open_before
 
 
+@pytest.mark.parametrize("bad_unit", ("PP", "pct", "usd", "percentage points", ""))
+def test_qini_plot_rejects_an_unrecognized_unit(qini_pair, bad_unit):
+    """An unknown unit used to mislabel the scale rather than raise.
+
+    `unit` is the one string argument deciding whether a value is drawn as
+    0.08 or as 8. It used to be read through `_UNIT_SCALE.get(unit, 1.0)`
+    with a matching generic-label fallback, so a plausible caller typo drew
+    the curve in raw fractional units under a still-plausible label, with
+    no error and no warning.
+    """
+    fraction, qini = qini_pair
+    open_before = plt.get_fignums()
+
+    with pytest.raises(ValueError, match="unit"):
+        plots.qini_plot(fraction, qini, unit=bad_unit)
+
+    assert plt.get_fignums() == open_before, (
+        "the unit guard must fire before plt.subplots; a raise afterwards "
+        "leaves a figure in pyplot's global state with no handle to close"
+    )
+
+
+def test_ate_forest_rejects_an_unrecognized_unit_in_the_column(ate_df):
+    """Here the unit comes from the frame, not from the caller.
+
+    A later phase adding an outcome with a typo'd `unit` string is the
+    reachable case: the panel would render at an unscaled magnitude under a
+    generic axis label rather than failing.
+    """
+    typo = ate_df.copy()
+    typo.loc[typo.index[0], "unit"] = "USD"
+    open_before = plt.get_fignums()
+
+    with pytest.raises(ValueError, match="unit"):
+        plots.ate_forest(typo)
+
+    assert plt.get_fignums() == open_before, (
+        "the unit guard must fire before plt.subplots; a raise afterwards "
+        "leaves a figure in pyplot's global state with no handle to close"
+    )
+
+
 # --------------------------------------------------------------------------
 # Module boundary
 # --------------------------------------------------------------------------

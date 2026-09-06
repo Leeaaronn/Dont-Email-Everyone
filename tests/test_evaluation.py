@@ -1780,6 +1780,133 @@ def test_qini_coefficient_rejects_a_mismatched_polyline():
         evaluation.qini_coefficient(fraction, fraction[:-1])
 
 
+def test_qini_curve_rejects_a_nan_outcome():
+    """A nan outcome poisons BOTH arms, so it must raise rather than spread.
+
+    `qini_curve` accumulates `y * t` and `y * (1.0 - t)` to avoid
+    branching, and IEEE 754 makes `0 * nan` a nan rather than a 0. A nan
+    outcome in a TREATED row therefore corrupts the CONTROL arm's
+    cumulative sum too, from that row onward, and the published Qini
+    coefficient comes back nan with nothing raised -- the same
+    silent-wrong-number failure `test_qini_curve_rejects_a_nan_score`
+    covers for the other array. A spend column carrying a null for a
+    customer who never visited is the reachable case.
+    """
+    score, treatment, outcome = _two_arm_arrays(n=200, seed=31)
+    outcome = outcome.copy()
+    outcome[7] = np.nan
+
+    with pytest.raises(ValueError, match="nan"):
+        evaluation.qini_curve(score, treatment, outcome)
+
+
+def test_uplift_at_k_rejects_a_nan_outcome():
+    """The sibling entry point shares `_guard_inputs`, so it must agree.
+
+    Asserted rather than assumed: the two functions sharing one validator
+    is the property that keeps them from drifting onto different
+    admissibility rules, and it is only a property while a test says so.
+    """
+    score, treatment, outcome = _two_arm_arrays(n=200, seed=31)
+    outcome = outcome.copy()
+    outcome[7] = np.nan
+
+    with pytest.raises(ValueError, match="nan"):
+        evaluation.uplift_at_k(score, treatment, outcome, 0.5)
+
+
+def test_the_nan_outcome_message_names_the_count_and_the_position():
+    """Diagnosable from the traceback alone, which is this module's rule."""
+    score, treatment, outcome = _two_arm_arrays(n=200, seed=31)
+    outcome = outcome.copy()
+    outcome[7] = np.nan
+    outcome[19] = np.nan
+
+    with pytest.raises(ValueError) as excinfo:
+        evaluation.qini_curve(score, treatment, outcome)
+
+    message = str(excinfo.value)
+    assert "2 nan value(s)" in message and "position 7" in message, (
+        "the nan-outcome guard must name how many nans it found and where "
+        f"the first one sits; got {message!r}"
+    )
+
+
+@pytest.mark.parametrize("bad_n", (0, -3, 200.5))
+def test_qini_random_band_rejects_a_bad_n_resamples(bad_n):
+    """The one band that builds its own replicate stack needs its own guard.
+
+    `bootstrap_indices` validates `n_resamples` and `qini_bootstrap_band`
+    inherits that guard by routing through it, but `qini_random_band`
+    fills its `curves` array directly. Unguarded, `n_resamples=0` raised an
+    IndexError from inside numpy's `_quantile` -- the percentile of an
+    empty replicate stack -- and a float raised a bare TypeError from
+    `np.empty`. Neither names the argument at fault.
+    """
+    _, treatment, outcome = _band_arrays(n=200)
+
+    with pytest.raises(ValueError, match="n_resamples"):
+        evaluation.qini_random_band(treatment, outcome, n_resamples=bad_n)
+
+
+@pytest.mark.parametrize("bad_n", (0, -3, 200.5))
+def test_qini_bootstrap_band_rejects_a_bad_n_resamples(bad_n):
+    """The inherited guard is asserted, not assumed.
+
+    This band reaches the same check through `bootstrap_indices`. Pinning
+    it here is what keeps the two bands from drifting apart if either one
+    ever stops routing through that function.
+    """
+    score, treatment, outcome = _band_arrays(n=200)
+
+    with pytest.raises(ValueError, match="n_resamples"):
+        evaluation.qini_bootstrap_band(
+            score, treatment, outcome, n_resamples=bad_n
+        )
+
+
+@pytest.mark.parametrize("bad_grid", (0, 1, -2, 10.5))
+def test_both_bands_reject_a_bad_n_grid(bad_grid):
+    """A one-point band is a pair of numbers `qini_plot` would fill between.
+
+    Both bands share `_guard_band_grid`; parametrizing them together is
+    what makes "one shared validator" a tested claim rather than a comment.
+    """
+    score, treatment, outcome = _band_arrays(n=200)
+
+    with pytest.raises(ValueError, match="n_grid"):
+        evaluation.qini_random_band(
+            treatment, outcome, n_resamples=4, n_grid=bad_grid
+        )
+    with pytest.raises(ValueError, match="n_grid"):
+        evaluation.qini_bootstrap_band(
+            score, treatment, outcome, n_resamples=4, n_grid=bad_grid
+        )
+
+
+def test_qini_random_band_validates_its_arrays_before_the_replicate_loop():
+    """Eager validation, for symmetry with `qini_bootstrap_band`.
+
+    This band has no `score` parameter -- it generates one per replicate,
+    deliberately -- so it cannot call `_guard_inputs`, and its array checks
+    used to happen only inside the loop on the first `qini_curve` call.
+    That reported them from a frame the caller never wrote, and a
+    degenerate `n_resamples` skipped them altogether because the loop body
+    never ran at all.
+    """
+    _, treatment, outcome = _band_arrays(n=200)
+    poisoned = outcome.copy()
+    poisoned[3] = np.nan
+
+    with pytest.raises(ValueError, match="nan"):
+        evaluation.qini_random_band(treatment, poisoned, n_resamples=4)
+
+    with pytest.raises(ValueError, match="one arm is empty"):
+        evaluation.qini_random_band(
+            np.ones_like(treatment), outcome, n_resamples=4
+        )
+
+
 # --------------------------------------------------------------------------
 # Artifact wiring
 # --------------------------------------------------------------------------
