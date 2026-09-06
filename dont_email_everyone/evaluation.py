@@ -298,6 +298,33 @@ def _guard_no_nan_scores(score) -> None:
         )
 
 
+def _guard_no_nan_outcome(outcome) -> None:
+    """Raise if `outcome` holds any nan value.
+
+    Its own function for the same reason `_guard_no_nan_scores` is one:
+    `qini_random_band` takes `treatment` and `outcome` without a `score`
+    (it generates its own ranking) and so has no three-array call to hand
+    to `_guard_inputs`. A second hand-written copy of this check is how
+    one entry point ends up admitting a nan that the others reject.
+
+    `outcome` must already be float for `np.isnan` to be meaningful; both
+    callers convert with `dtype=float` first.
+    """
+    nan_positions = np.flatnonzero(np.isnan(outcome))
+    if nan_positions.size:
+        raise ValueError(
+            f"`outcome` holds {nan_positions.size} nan value(s), the first "
+            f"at position {int(nan_positions[0])}. `qini_curve` accumulates "
+            "`y * t` and `y * (1.0 - t)`, and IEEE 754 makes 0 * nan a nan "
+            "rather than a 0, so one nan outcome poisons BOTH arms' "
+            "cumulative sums from that row onward -- not just the arm the "
+            "row belongs to. The published Qini coefficient and "
+            "uplift-at-k then silently become nan with nothing raised. A "
+            "spend column carrying a null for a customer who never "
+            "visited is the reachable case; fill it before ranking."
+        )
+
+
 def _guard_treatment(treatment) -> None:
     """Raise unless `treatment` is a two-armed 0/1 column with both arms.
 
@@ -379,6 +406,7 @@ def _guard_inputs(score, treatment, outcome):
     _guard_treatment(treatment)
 
     _guard_no_nan_scores(score)
+    _guard_no_nan_outcome(outcome)
 
     return score, treatment, outcome
 
