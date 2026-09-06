@@ -922,8 +922,34 @@ def qini_random_band(
     (h) states; a curve that stays inside it further along is the
     "indistinguishable from random beyond that" half.
     """
+    if not isinstance(n_resamples, (int, np.integer)) or n_resamples < 1:
+        raise ValueError(
+            f"`n_resamples` is {n_resamples!r}; it must be an integer of at "
+            "least 1. A zero or negative count builds a replicate stack "
+            "with no rows, and np.percentile of an empty stack raises an "
+            "opaque IndexError from inside NumPy rather than naming the "
+            "argument at fault. `bootstrap_indices` carries this identical "
+            "guard, and `qini_bootstrap_band` inherits it by routing "
+            "through that function; this band builds its own stack and so "
+            "needs its own copy."
+        )
     _guard_band_grid(n_grid, level)
-    n = np.asarray(treatment).size
+
+    # Validated EAGERLY, for symmetry with `qini_bootstrap_band`, which
+    # opens with `_guard_inputs`. Deferring the array checks to the first
+    # `qini_curve` call inside the replicate loop reports them from a
+    # frame the caller did not write, and a degenerate `n_resamples` used
+    # to skip them altogether because the loop body never ran. There is no
+    # `score` to hand to `_guard_inputs` -- this function generates one per
+    # replicate, deliberately -- so the two array guards it would have run
+    # are called directly here instead of hand-copied.
+    treatment = np.asarray(treatment)
+    outcome = np.asarray(outcome, dtype=float)
+    _guard_treatment(treatment)
+    _guard_no_nan_outcome(outcome)
+
+    n_resamples = int(n_resamples)
+    n = treatment.size
 
     grid = np.linspace(0.0, 1.0, n_grid)
     # Seeded ONCE outside the loop (coverage.py's precedent), so the whole
