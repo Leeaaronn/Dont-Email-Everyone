@@ -77,6 +77,40 @@ _QINI_AXIS_LABEL = {
 # the curve is cumulated over.
 _QINI_X_LABEL = "Targeted fraction of the combined population (ranked by score)"
 
+# `_UNIT_SCALE` is the source of truth for which units exist. A unit with a
+# label but no scale would draw at the wrong magnitude, which is the failure
+# `_guard_unit` exists to stop; a unit with a scale but no label is merely
+# untidy. Both label dicts are keyed by exactly these units.
+_KNOWN_UNITS = frozenset(_UNIT_SCALE)
+
+
+def _guard_unit(unit, source: str) -> None:
+    """Raise unless `unit` is one both the scale and the label lookups know.
+
+    Both figure factories used to reach those lookups through
+    `.get(unit, <default>)`, so an unrecognized unit -- a caller typo like
+    "PP" or "pct", or a later phase adding an outcome with a typo'd unit
+    string -- silently fell back to an unscaled axis and a generic label.
+    The figure then drew a proportion as 0.077 while still plausibly
+    labelled: a wrong number on a published chart with nothing raised,
+    which is the failure class `evaluation.py` is emphatic about avoiding
+    for the statistics underneath it.
+
+    Plain if/raise, never `assert`, for the reason `qini_plot` records: an
+    assertion is compiled out under `python -O` and the guard would vanish
+    from exactly the build that renders the report.
+
+    `source` names where the value came from, because one caller passes it
+    as an argument and the other reads it out of a frame column.
+    """
+    if unit not in _KNOWN_UNITS:
+        raise ValueError(
+            f"{source} is {unit!r}; it must be one of "
+            f"{sorted(_KNOWN_UNITS)}. An unrecognized unit would fall back "
+            "to an unscaled axis carrying a generic label, which mislabels "
+            "the magnitude drawn on the canvas without raising."
+        )
+
 
 def love_plot(balance_df, threshold: float = balance.SMD_THRESHOLD):
     """Return a Love plot Figure for a `balance.balance_table` frame.
@@ -157,6 +191,12 @@ def ate_forest(ate_df):
     Renders nothing and writes nothing; the input frame is not mutated.
     """
     units = list(dict.fromkeys(ate_df["unit"]))
+    # Before `plt.subplots`, like every other guard in this module: a raise
+    # after the figure exists leaks it into pyplot's global state with no
+    # handle for the caller to close.
+    for unit in units:
+        _guard_unit(unit, "the `unit` column of `ate_df`")
+
     groups = [ate_df.loc[ate_df["unit"] == unit] for unit in units]
 
     fig, axes = plt.subplots(
@@ -168,7 +208,7 @@ def ate_forest(ate_df):
     axes = np.atleast_1d(axes)
 
     for ax, unit, group in zip(axes, units, groups):
-        scale = _UNIT_SCALE.get(unit, 1.0)
+        scale = _UNIT_SCALE[unit]
         effect = group["effect"].to_numpy() * scale
         ci_low = group["ci_low"].to_numpy() * scale
         ci_high = group["ci_high"].to_numpy() * scale
@@ -199,7 +239,7 @@ def ate_forest(ate_df):
         )
         ax.set_ylim(-0.7, len(group) - 0.3)
         ax.invert_yaxis()
-        ax.set_xlabel(_UNIT_AXIS_LABEL.get(unit, f"Effect ({unit})"))
+        ax.set_xlabel(_UNIT_AXIS_LABEL[unit])
 
     fig.suptitle("Average treatment effects with 95% confidence intervals")
     fig.tight_layout()
@@ -250,6 +290,7 @@ def qini_plot(
         )
     if qini.size == 0:
         raise ValueError("fraction and qini are empty; there is no curve to draw.")
+    _guard_unit(unit, "`unit`")
     if qini[0] != 0.0:
         raise ValueError(
             "a Qini curve starts at the origin: Q(0) must be exactly 0.0, but "
@@ -261,7 +302,7 @@ def qini_plot(
     # Both the curve and the chord are scaled by the SAME factor. This is the
     # reason `ate_forest` panels by unit at all: a shared numeric axis would
     # draw a +$0.77 spend effect as +76.98pp.
-    scale = _UNIT_SCALE.get(unit, 1.0)
+    scale = _UNIT_SCALE[unit]
     curve = qini * scale
     ate = float(qini[-1]) * scale
 
@@ -354,12 +395,7 @@ def qini_plot(
 
     ax.axhline(0.0, color="0.5", lw=0.8)
     ax.set_xlabel(_QINI_X_LABEL)
-    ax.set_ylabel(
-        _QINI_AXIS_LABEL.get(
-            unit,
-            f"Cumulative incremental outcome ({unit}, per treated customer)",
-        )
-    )
+    ax.set_ylabel(_QINI_AXIS_LABEL[unit])
     if title is not None:
         ax.set_title(title)
     ax.legend(loc="lower right", fontsize=8)
