@@ -308,7 +308,7 @@ def _guard_no_nan_outcome(outcome) -> None:
     one entry point ends up admitting a nan that the others reject.
 
     `outcome` must already be float for `np.isnan` to be meaningful; both
-    callers convert with `dtype=float` first.
+    callers convert it with `dtype=float` beforehand.
     """
     nan_positions = np.flatnonzero(np.isnan(outcome))
     if nan_positions.size:
