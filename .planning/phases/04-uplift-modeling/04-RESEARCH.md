@@ -1813,9 +1813,13 @@ the Qini gate. These are different failure reasons and the artifact should recor
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **How many figures to commit, and at what granularity**
+> All four were resolved during planning on 2026-09-07; each item below carries the plan that
+> adopted its recommendation. Nothing in this section is still open.
+
+1. **How many figures to commit, and at what granularity** — RESOLVED (adopted by `04-08`: curated
+   figure set plus a `checkpoint:human-verify`, with the curation rule stated in `reports/model.md`)
    - What we know: D-23 names five kinds of figure; the CONTEXT wants them separate rather than
      composite so Phase 7's README can embed one alone; `FIGURE_NAMES` is a presence allowlist.
    - What's unclear: whether all 18 cells get a train-vs-holdout figure (72 PNGs across four kinds)
@@ -1826,7 +1830,8 @@ the Qini gate. These are different failure reasons and the artifact should recor
      the absent figures read as a decision. Worth a `checkpoint:human-verify` at the plan that
      writes them.
 
-2. **Whether `analyze()` and `train()` share the artifact-set assertion, or get separate ones**
+2. **Whether `analyze()` and `train()` share the artifact-set assertion, or get separate ones** —
+   RESOLVED (adopted by `04-07`: a parallel `trained` fixture with its own exact-artifact-set assertion)
    - What we know: `test_analyze_writes_exactly_the_expected_artifact_set` asserts an **exact** set
      over `processed/`. Once `train()` writes four more artifacts into the same directory, running
      `analyze()` alone in a tmp dir still writes only its own four — but running `all` writes
@@ -1838,7 +1843,8 @@ the Qini gate. These are different failure reasons and the artifact should recor
      survives untouched and a **parallel** `trained` fixture with its own exact-set assertion is the
      clean addition. Flagged as a small but real integration risk.
 
-3. **Whether `pipeline train` should depend on `analyze` having run**
+3. **Whether `pipeline train` should depend on `analyze` having run** — RESOLVED (adopted by `04-07`:
+   `train` reads `ate.parquet` and raises explicitly when it is absent, rather than silently re-deriving it)
    - What we know: D-22 compares mean predicted uplift against the **committed** `ate.parquet`.
    - What's unclear: whether `train()` reads `ate.parquet` (creating an ordering dependency
      `ingest → analyze → train`) or recomputes the ATE.
@@ -1847,7 +1853,8 @@ the Qini gate. These are different failure reasons and the artifact should recor
      precisely so the committed value can be trusted. Make `all` run `ingest → analyze → train` and
      have `train()` raise a clear error if `ate.parquet` is absent.
 
-4. **Whether the split seed should differ from 20260902**
+4. **Whether the split seed should differ from 20260902** — RESOLVED (adopted by `04-01` and `04-06`:
+   the seed stays 20260902 per D-08, and each seeded function documents its independent NumPy stream)
    - What we know: D-08 mandates `seed: int = 20260902` as the convention; every seeded function in
      the repo already uses it.
    - What's unclear: nothing, really — but note that using the *same* literal for the split, the
