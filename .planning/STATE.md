@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-09-09T19:03:51.516Z"
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-09-09T21:59:15.093Z"
 last_activity: 2026-09-09
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 26
-  completed_plans: 24
+  completed_plans: 25
   percent: 43
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 04 (uplift-modeling) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
 Last activity: 2026-09-09
 
-Progress: [█████████░] 92%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -76,6 +76,7 @@ Progress: [█████████░] 92%
 | Phase 04 P05 | 18min | 2 tasks | 2 files |
 | Phase 04 P06 | 21min | 2 tasks | 2 files |
 | Phase 04 P07 | 71min | 3 tasks | 8 files |
+| Phase 04 P08 | 214min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -171,6 +172,11 @@ Recent decisions affecting current work:
 - [Phase 04-06]: the refit null measures 1.32x the score-shuffle null's SD on mens/visit at R=30 (0.001928 against 0.001459, same centre) -- a NEW measurement nothing quotes, so the test asserts >1.1 and carries the measured value rather than pinning it
 - [Phase 04-06]: the observed mens/visit holdout Qini +0.003069 DOES reproduce 04-RESEARCH to the digit, unlike 04-04's and 04-05's stale figures -- the figures that moved are the ones sensitive to which rows land in the training half
 - [Phase 04-06]: UPLIFT-01 left Pending for the fifth time -- this plan ships the null generator and persists no per-arm model; pipeline.train() does that in 04-07
+- [Phase 04-08]: THIRTEEN figures committed, not the plan's 'roughly eight to ten' — the plan's own per-kind spec yields 3 + 4x2 + 1 = 13 once TWO cells ship; the 8-10 target and both acceptance-criteria range literals were computed for a one-shipping-cell outcome, and dropping a figure would present the secondary shipping cell as under-evidenced
+- [Phase 04-08]: every figure CORRECTION is the orchestrator's, not plots.py's — the legend that says Train on two holdout curves, the axis noun that says visits over conversions, and the symlog scale are all applied from pipeline.py, so plots.py keeps the factory signatures plan 04-02 pinned
+- [Phase 04-08]: three render defects (a title clipped at both ends, three conversion figures labelled 'visits', and the corrected label then clipped itself) were found by LOOKING at the PNGs — the 5,000-byte floor proves a figure is not blank and proves nothing about whether it is readable or true
+- [Phase 04-08]: monotonicity_womens_conversion is symlog at linthresh 1.0 pp (97.90% of its points within +/-1 pp, minimum -22.93 pp) and monotonicity_womens_visit stays LINEAR (only 5.97% within +/-1 pp, range -7.10 to +11.83, no tail) — two scales for one figure kind is the smaller cost; clipping was rejected because it hides real outlier customers
+- [Phase 04-08]: 03-06's decision not to extend FIGURE_NAMES is REVERSED — these are the first uplift figures drawn on real holdout scores rather than synthetic data; VALIDITY_FIGURES was split out because validity.md's tracing test asserts it references every figure named
 
 ### Pending Todos
 
@@ -195,6 +201,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T19:03:46.063Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-09-09T21:59:15.085Z
+Stopped at: Completed 04-08-PLAN.md
 Resume file: None
