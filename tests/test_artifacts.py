@@ -39,7 +39,10 @@ ARTIFACT_NAMES = [
     "coverage.parquet",
 ]
 
-STRING_COLUMNS = ["history_segment", "zip_code", "channel", "segment"]
+# `split` joins the four original string columns for the same pandas 3.0
+# `str`-dtype reason: it is written by ingest.build_all's gate 4 and must
+# survive the Parquet round trip as `str`, never `object`.
+STRING_COLUMNS = ["history_segment", "zip_code", "channel", "segment", "split"]
 
 
 def test_artifacts_exist():
@@ -63,9 +66,9 @@ def test_artifact_shapes():
     analysis = pd.read_parquet(config.PROCESSED / "analysis_table.parquet")
     mens = pd.read_parquet(config.PROCESSED / "mens_vs_control.parquet")
     womens = pd.read_parquet(config.PROCESSED / "womens_vs_control.parquet")
-    assert analysis.shape == (64000, 12)
-    assert mens.shape == (42613, 13)
-    assert womens.shape == (42693, 13)
+    assert analysis.shape == (64000, 13)
+    assert mens.shape == (42613, 14)
+    assert womens.shape == (42693, 14)
 
 
 def test_analysis_artifact_shapes():
@@ -237,3 +240,37 @@ def test_committed_control_counts():
     womens = pd.read_parquet(config.PROCESSED / "womens_vs_control.parquet")
     assert int((mens["treatment"] == 0).sum()) == 21306
     assert int((womens["treatment"] == 0).sum()) == 21306
+
+
+def test_committed_artifacts_carry_the_split_column():
+    # Reads the three committed input artifacts as they sit on disk. This
+    # is what makes an un-regenerated artifact a FAILURE rather than a
+    # silent inconsistency between five-gate code and twelve-column data:
+    # `ingest.build_all` writing `split` proves nothing about the file a
+    # fresh clone actually reads.
+    for name in (
+        "analysis_table.parquet",
+        "mens_vs_control.parquet",
+        "womens_vs_control.parquet",
+    ):
+        frame = pd.read_parquet(config.PROCESSED / name)
+        assert "split" in frame.columns, (
+            f"{name} has no `split` column -- the committed artifact is "
+            "stale. Re-run `python -m dont_email_everyone.pipeline ingest`."
+        )
+        assert frame["split"].dtype == "str", (
+            f"{name}.split round-tripped as {frame['split'].dtype}, "
+            "expected the pandas 3.0 `str` dtype, not `object`"
+        )
+        assert int(frame["split"].isna().sum()) == 0, (
+            f"{name}.split has missing labels; an unlabelled row belongs "
+            "to neither half and would be dropped from both."
+        )
+        assert sorted(frame["split"].unique().tolist()) == [
+            "holdout",
+            "train",
+        ], (
+            f"{name}.split holds "
+            f"{sorted(frame['split'].unique().tolist())}, expected exactly "
+            "['holdout', 'train']"
+        )
