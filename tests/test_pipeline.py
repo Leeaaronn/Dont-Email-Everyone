@@ -40,6 +40,7 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 
 import matplotlib
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -53,6 +54,7 @@ from dont_email_everyone import (  # noqa: E402
     ingest,
     models,
     pipeline,
+    plots,
 )
 
 INPUT_ARTIFACTS = (
@@ -351,10 +353,11 @@ def trained(tmp_path_factory):
     inputs, `test_analyze_writes_exactly_the_expected_artifact_set` is
     unaffected by it and stays untouched.
 
-    `reports/` and `reports/figures/` deliberately do not exist beforehand.
-    train() writes no figure in this plan, so they must still not exist
-    afterwards -- which is what `test_train_leaves_no_open_figures` and the
-    directory assertion below turn into a cheap forward guard.
+    `reports/` and `reports/figures/` deliberately do not exist beforehand,
+    so the figure assertions below are proof that THIS run wrote them rather
+    than that a previous one left them lying around. `train()` creates
+    `config.FIGURES` (and `config.REPORTS` as its parent) itself, exactly as
+    `analyze()` does.
 
     train() takes several MINUTES, dominated by the eight refit permutation
     nulls at 200 shuffles each, so it runs exactly ONCE per module in the
@@ -744,8 +747,8 @@ def test_model_json_carries_the_cross_arm_block_and_tie_diagnostics(trained):
 
 @pytest.mark.slow
 def test_train_prints_numbered_progress(trained):
-    for marker in ("[1/6]", "[2/6]", "[3/6]", "[4/6]", "[5/6]", "[6/6]",
-                   "[done]"):
+    for marker in ("[1/7]", "[2/7]", "[3/7]", "[4/7]", "[5/7]", "[6/7]",
+                   "[7/7]", "[done]"):
         assert marker in trained.stdout, (
             f"{marker} missing from the run output; the repo's only "
             "user-facing progress convention is numbered stage prints, and "
@@ -755,13 +758,108 @@ def test_train_prints_numbered_progress(trained):
 
 @pytest.mark.slow
 def test_train_leaves_no_open_figures(trained):
+    # Inverted from plan 04-07's version, which asserted the directory did
+    # NOT exist because train() wrote no figure yet. It now writes thirteen,
+    # so the load-bearing half of this test is the one that survived: every
+    # one of them must be closed. Thirteen here plus analyze()'s two is close
+    # to matplotlib's twenty-figure warning threshold, and an unclosed figure
+    # stays registered in pyplot's global state for the life of the process.
     assert trained.open_figures == [], (
-        "train() writes no figure in this plan, so it must leave none open; "
-        "this is the forward guard the figure plan leans on"
+        "train() left matplotlib figures open; every write must be paired "
+        "with a close or a long run accumulates handles"
     )
-    assert not trained.figures.exists(), (
-        "train() created reports/figures/ without writing a figure into it"
+    assert trained.figures.is_dir(), (
+        "train() did not create reports/figures/; it writes the curated "
+        "Phase 4 figure set there"
     )
+
+
+@pytest.mark.slow
+def test_train_writes_non_trivial_figures(trained):
+    written = sorted(trained.figures.glob("*.png"))
+    assert written, "train() wrote no figure at all"
+    for path in written:
+        assert path.stat().st_size > 5000, (
+            f"{path.name} is {path.stat().st_size} bytes -- a blank canvas "
+            "is a few hundred, so this figure is empty"
+        )
+
+
+@pytest.mark.slow
+def test_train_writes_exactly_the_expected_figure_set(trained):
+    # An EXACT set, the same disposition the artifact-set assertion takes: a
+    # figure nobody listed is a figure no test asserts on and no line of
+    # reports/model.md references, and a listed figure that stopped being
+    # written is a broken reference in a committed report. Equality catches
+    # both directions; a subset check catches neither.
+    written = {path.name for path in trained.figures.glob("*.png")}
+    expected = {f"{stem}.png" for stem in pipeline.FIGURE_STEMS}
+    assert written == expected, (
+        f"written but unlisted: {sorted(written - expected)}; "
+        f"listed but not written: {sorted(expected - written)}"
+    )
+    # The curated set covers all five kinds CONTEXT.md D-23 names, and the
+    # flagship exhibit is present by name: the default forest's null on
+    # mens/visit is the one figure Phase 7's README embeds on its own.
+    assert len(set(pipeline.FIGURE_STEMS.values())) == 5
+    assert f"{pipeline.FLAGSHIP_FIGURE}.png" in written
+    assert pipeline.FLAGSHIP_FIGURE == "permutation_null_mens_visit_rf_default"
+
+
+def test_figure_stems_cover_every_d23_kind_and_both_shipping_cells():
+    # Structural, unmarked, and therefore fails in a second rather than in
+    # six minutes if the curated set is edited without being re-thought.
+    kinds = set(pipeline.FIGURE_STEMS.values())
+    assert len(pipeline.FIGURE_STEMS) == 13
+    assert len(kinds) == 5
+    for arm, outcome in pipeline.FIGURE_SHIPPING_CELLS:
+        for kind in ("qini_train_holdout", "permutation_null",
+                     "uplift_vs_baseline", "monotonicity"):
+            stem = f"{kind}_{arm}_{outcome}_{models.PRIMARY_CONFIG}"
+            assert stem in pipeline.FIGURE_STEMS, (
+                f"{stem} is absent; every shipping cell carries all four of "
+                "its per-cell figure kinds so the two are presented "
+                "symmetrically"
+            )
+    # The divergence exhibit needs all three learners or it is not a
+    # progression, which is the entire argument the figure makes.
+    for learner in pipeline.FIGURE_DIVERGENCE_LEARNERS:
+        assert f"qini_train_holdout_mens_visit_{learner}" in (
+            pipeline.FIGURE_STEMS
+        )
+
+
+def test_relabel_curve_legend_renames_all_four_entries():
+    # The uplift-vs-baseline figure reuses qini_train_holdout_plot, whose
+    # legend hard-codes "Train" and "Holdout". Both of its curves are drawn
+    # on the SAME holdout rows, so an unrelabelled legend would publish a
+    # false claim beside each line. Checked here rather than by parsing the
+    # committed PNG, where it is not inspectable.
+    fraction = np.linspace(0.0, 1.0, 11)
+    figure = plots.qini_train_holdout_plot(
+        (fraction, fraction * 0.01), (fraction, fraction * 0.004)
+    )
+    try:
+        pipeline._relabel_curve_legend(figure, "Uplift ranking", "Baseline")
+        labels = [line.get_label() for line in figure.axes[0].get_lines()]
+        assert not any("Train" in label for label in labels), labels
+        assert not any("Holdout" in label for label in labels), labels
+        assert sum("Uplift ranking" in label for label in labels) == 2
+        assert sum("Baseline" in label for label in labels) == 2
+    finally:
+        plt.close(figure)
+
+
+def test_relabel_curve_legend_raises_on_an_unexpected_legend():
+    # A later edit to the factory's legend wording must surface as a raise
+    # here, not as a silently unrelabelled published figure.
+    figure = plt.figure()
+    figure.add_subplot(111).plot([0, 1], [0, 1], label="something else")
+    try:
+        with pytest.raises(ValueError, match="renamed 0"):
+            pipeline._relabel_curve_legend(figure, "a", "b")
+    finally:
+        plt.close(figure)
 
 
 def test_train_raises_when_the_committed_ate_is_absent(tmp_path):
@@ -891,9 +989,18 @@ def test_pipeline_paths_all_come_from_config():
         )
 
 
+# 15 = analyze()'s love_plot and ate_forest (2) plus the thirteen Phase 4
+# figures train() writes: 5 train-vs-holdout Qini pairs (the three mens/visit
+# learners plus both shipping cells) + 3 permutation-null histograms (the
+# flagship default forest plus both shipping cells) + 2 uplift-vs-baseline
+# comparisons + 1 six-cell calibration plot + 2 monotonicity scatters.
+# 2 + 5 + 3 + 2 + 1 + 2 = 15. Each write is an explicit statement pair rather
+# than a loop precisely so this count means something, and neither counted
+# token appears in a comment anywhere in pipeline.py -- a comment naming one
+# inflates its own count by one and the equality stops proving pairing.
 def test_pipeline_pairs_every_savefig_with_a_close():
     body = _pipeline_body()
-    assert body.count("savefig(") == body.count("plt.close(") == 2
+    assert body.count("savefig(") == body.count("plt.close(") == 15
 
 
 # 6 = analyze()'s balance/ate/coverage plus train()'s model_results,
