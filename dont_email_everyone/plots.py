@@ -733,3 +733,273 @@ def permutation_null_plot(
     ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     return fig
+
+
+# The predicted-uplift axis is a THIRD label dict, added beside the other two
+# rather than folded into either, for the reason `_QINI_AXIS_LABEL` records
+# at the top of this module: the three say different things. `_UNIT_AXIS_LABEL`
+# describes an effect measured on an experiment, `_QINI_AXIS_LABEL` describes a
+# cumulative incremental outcome per treated customer, and this one describes a
+# model's per-customer PREDICTION -- an estimate for one individual, not a
+# measured quantity for any group. Editing an existing dict to serve a new
+# figure is how a label stops matching the figure it was written for, and
+# `tests/test_plots.py` pins the existing strings for exactly that reason.
+_UPLIFT_AXIS_LABEL = {
+    "pp": "Predicted individual uplift (percentage points)",
+    "$": "Predicted individual uplift (dollars)",
+}
+
+# The columns `calibration_plot` reads. Named as a constant so the guard's
+# error message and the code that unpacks the frame cannot disagree about
+# what the contract is.
+_CALIBRATION_COLUMNS = (
+    "arm",
+    "outcome",
+    "unit",
+    "mean_predicted_uplift",
+    "committed_ate",
+    "calibration_band",
+)
+
+
+def calibration_plot(rows, *, title=None):
+    """Return a Figure comparing mean predicted uplift against committed ATE.
+
+    `rows` is a frame carrying `arm`, `outcome`, `unit`,
+    `mean_predicted_uplift`, `committed_ate` and `calibration_band`. The band
+    is the per-cell ABSOLUTE tolerance computed upstream in `models.py`; this
+    factory draws the tolerance it is handed and derives none of its own, so
+    the band on the canvas and the band the shipping gate applies are the
+    same number by construction rather than by coincidence.
+
+    Read it as: does each cell's predicted marker sit inside the band drawn
+    around its committed effect? That question is answerable from the figure
+    alone, which is the whole reason the band is drawn rather than merely
+    tabulated.
+
+    What this figure does NOT decide: a SIGN disagreement between
+    `mean_predicted_uplift` and `committed_ate` is the hard gate, and it is
+    evaluated in `models.py` and recorded in `model_results.parquet`. This
+    figure exists to make the magnitude comparison legible, not to adjudicate
+    it -- a reader who eyeballs a marker near the band edge and a gate that
+    reads a stored boolean must never be two different answers.
+
+    Rows are panelled one subplot per distinct `unit`, exactly as
+    `ate_forest` does and for the identical reason recorded in its docstring:
+    two of the outcomes are proportions and the third is dollars, and this
+    phase's six effects span three orders of magnitude (0.003111 to
+    0.769827). A single shared numeric axis would draw the +$0.77 spend
+    effect as though it were +76.98 percentage points and flatten both
+    conversion cells to invisibility. Panels are keyed off the `unit` column,
+    so a later outcome inherits the right panel from its unit rather than
+    from a list somebody remembered to update.
+
+    Renders nothing and writes nothing; the input frame is not mutated.
+    """
+    # Every guard fires BEFORE `plt.subplots`: a raise afterwards leaves a
+    # Figure registered in pyplot's global state with no handle for the
+    # caller to close. Plain if/raise, never `assert`.
+    if len(rows) == 0:
+        raise ValueError("rows is empty; there are no calibration cells to draw.")
+
+    missing = [column for column in _CALIBRATION_COLUMNS if column not in rows.columns]
+    if missing:
+        raise ValueError(
+            f"rows is missing the required column(s) {missing}; "
+            f"calibration_plot reads {list(_CALIBRATION_COLUMNS)} and got "
+            f"{list(rows.columns)}."
+        )
+
+    units = list(dict.fromkeys(rows["unit"]))
+    for unit in units:
+        # One validator governs the whole module, so a typo'd unit raises
+        # here rather than drawing a dollar cell at a proportion's magnitude.
+        _guard_unit(unit, "the `unit` column of `rows`")
+
+    for column in ("mean_predicted_uplift", "committed_ate"):
+        values = np.asarray(rows[column], dtype=float)
+        if np.isnan(values).any():
+            raise ValueError(
+                f"rows['{column}'] contains "
+                f"{int(np.isnan(values).sum())} NaN value(s). A NaN marker is "
+                "simply absent from the canvas, so the cell would look "
+                "unexamined rather than broken."
+            )
+
+    groups = [rows.loc[rows["unit"] == unit] for unit in units]
+
+    fig, axes = plt.subplots(
+        nrows=len(units),
+        ncols=1,
+        figsize=(7.5, 5.5),
+        height_ratios=[len(group) for group in groups],
+    )
+    # atleast_1d so a single-unit frame is not a special case with its own
+    # untested code path (`ate_forest` line for line).
+    axes = np.atleast_1d(axes)
+
+    for ax, unit, group in zip(axes, units, groups):
+        scale = _UNIT_SCALE[unit]
+        committed = group["committed_ate"].to_numpy() * scale
+        predicted = group["mean_predicted_uplift"].to_numpy() * scale
+        band = np.abs(group["calibration_band"].to_numpy()) * scale
+        y = np.arange(len(group))
+
+        # The band is drawn as a SYMMETRIC error bar around the committed
+        # effect, because that is what the tolerance is: `|predicted -
+        # committed| <= band`. errorbar's xerr is a distance from the point,
+        # not an endpoint, so passing the band directly is correct here in
+        # the same way that passing interval endpoints would be wrong in
+        # `ate_forest`.
+        ax.errorbar(
+            committed,
+            y,
+            xerr=band,
+            fmt="o",
+            capsize=3,
+            lw=1.2,
+            color="#1f4e79",
+            label="Committed ATE +/- calibration band",
+        )
+        ax.plot(
+            predicted,
+            y,
+            marker="D",
+            markersize=6,
+            linestyle="none",
+            color="#c65911",
+            label="Mean predicted uplift (holdout)",
+        )
+        ax.axvline(0, color="0.5", lw=0.8)
+
+        ax.set_yticks(y)
+        ax.set_yticklabels(
+            [
+                f"{arm} / {outcome}"
+                for arm, outcome in zip(group["arm"], group["outcome"])
+            ]
+        )
+        ax.set_ylim(-0.7, len(group) - 0.3)
+        ax.invert_yaxis()
+        ax.set_xlabel(_UNIT_AXIS_LABEL[unit])
+
+        # Pinned, never auto-scaled, following the Love plot's x limits and
+        # for the same class of reason: this figure is read by asking whether
+        # a marker sits inside a band, so a band edge that ran off the canvas
+        # would draw a bounded tolerance as an unbounded one and a failing
+        # cell as an unexamined one. The limits therefore span both markers
+        # and the FULL band, plus a margin.
+        lows = [float(np.min(committed - band)), float(np.min(predicted)), 0.0]
+        highs = [float(np.max(committed + band)), float(np.max(predicted)), 0.0]
+        span = max(highs) - min(lows)
+        margin = 0.10 * span if span > 0.0 else 1.0
+        ax.set_xlim(min(lows) - margin, max(highs) + margin)
+
+        ax.legend(loc="lower right", fontsize=7)
+
+    fig.suptitle(
+        title
+        if title is not None
+        else "Mean predicted uplift against the committed average treatment effect"
+    )
+    fig.tight_layout()
+    return fig
+
+
+def uplift_vs_base_score_plot(
+    uplift,
+    base_score,
+    *,
+    r=None,
+    base_label="m0",
+    unit="pp",
+    title=None,
+):
+    """Return a Figure of predicted uplift against a base-model prediction.
+
+    `uplift` and `base_score` are equal-length 1-D arrays of holdout
+    predictions. `r` is the correlation ALREADY computed upstream in
+    `models.propensity_correlations`; this factory displays that number and
+    never recomputes it, so the value the shipping gate stores in
+    `model_results.parquet` and the value printed on the figure cannot drift
+    apart. `base_label` names which of the two base models the x axis is,
+    because an `m0` diagnostic and an `m1` diagnostic are different claims
+    and a reader cannot tell them apart from the cloud alone.
+
+    **What to look for, and why it is a gate rather than a curiosity.** A
+    T-learner's predicted uplift is a DIFFERENCE of two base-model
+    predictions. When that difference turns out to be a monotone function of
+    one of them, the ranking is a repackaged propensity ranking wearing an
+    uplift label: it ranks customers by how likely they were to respond
+    anyway, not by how much the email changed them. A tight monotone line
+    here is the smoking gun. It matters because the two are not mutually
+    exclusive -- a cell can beat the response baseline on Qini while
+    correlating 0.95 with `m0` -- so Qini alone cannot rule it out, and a
+    cell above the pre-registered threshold does not ship whatever its Qini
+    says.
+
+    Renders nothing and writes nothing; neither input array is mutated.
+    """
+    uplift = np.asarray(uplift, dtype=float)
+    base_score = np.asarray(base_score, dtype=float)
+
+    # Every guard fires BEFORE `plt.subplots`, for the reason recorded in
+    # `qini_train_holdout_plot`. Plain if/raise, never `assert`.
+    if uplift.size != base_score.size:
+        raise ValueError(
+            "uplift and base_score must have the same length; got "
+            f"{uplift.size} and {base_score.size}."
+        )
+    if uplift.size == 0:
+        raise ValueError("uplift and base_score are empty; there is nothing to draw.")
+    if np.isnan(uplift).any() or np.isnan(base_score).any():
+        raise ValueError(
+            "uplift and base_score must contain no NaN; got "
+            f"{int(np.isnan(uplift).sum())} and "
+            f"{int(np.isnan(base_score).sum())}. A scatter drops NaN points "
+            "silently, so the drawn cloud would rest on fewer customers than "
+            "the caption claims."
+        )
+    _guard_unit(unit, "`unit`")
+    if not str(base_label).strip():
+        raise ValueError(
+            "base_label is empty; the figure must name which base model the "
+            "x axis is, because an m0 diagnostic and an m1 diagnostic are "
+            "different claims."
+        )
+
+    scale = _UNIT_SCALE[unit]
+    drawn = uplift * scale
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+
+    # The holdout is roughly 21,300 customers, so a default marker size at
+    # full opacity draws a solid block in which every relationship looks the
+    # same. A low alpha and a small marker exist so the SHAPE of the cloud is
+    # visible, which is the entire diagnostic value here: a tight monotone
+    # line and a shapeless cloud are the two answers this figure exists to
+    # tell apart, and an over-inked scatter shows neither.
+    ax.scatter(base_score, drawn, s=4, alpha=0.12, color="#1f4e79", linewidths=0)
+
+    if r is not None:
+        # Three decimals so the value is comparable against the
+        # pre-registered 0.9 threshold at a glance rather than after
+        # rounding: 0.897 and 0.903 must not render identically.
+        ax.text(
+            0.02,
+            0.98,
+            f"corr(predicted uplift, {base_label} prediction) = {float(r):+.3f}",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8},
+        )
+
+    ax.axhline(0.0, color="0.5", lw=0.8)
+    ax.set_xlabel(f"Base-model predicted outcome, {base_label}")
+    ax.set_ylabel(_UPLIFT_AXIS_LABEL[unit])
+    if title is not None:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig
