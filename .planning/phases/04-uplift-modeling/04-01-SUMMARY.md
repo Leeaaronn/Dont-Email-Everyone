@@ -188,6 +188,10 @@ Carried forward unchanged: the two Phase 4/5 blockers in STATE.md (the multi-arm
 
 None — no new network endpoint, auth path, file access pattern, or trust-boundary schema change. Both modules are pure and touch no path; `data/processed/` is byte-identical.
 
+## Self-Check: PASSED
+
+All four source/test files and the SUMMARY exist on disk; all four commits (`f381f4f`, `d289613`, `f5f6e0c`, `d7f2492`) are present in `git log`.
+
 ---
 *Phase: 04-uplift-modeling*
 *Completed: 2026-09-08*

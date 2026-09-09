@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-09-09T00:38:28.975Z"
-last_activity: 2026-09-09 -- Phase 04 execution started
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-09-09T01:39:27.928Z"
+last_activity: 2026-09-09
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 26
-  completed_plans: 17
+  completed_plans: 18
   percent: 43
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 04 (uplift-modeling) — EXECUTING
-Plan: 1 of 9
-Status: Executing Phase 04
-Last activity: 2026-09-09 -- Phase 04 execution started
+Plan: 2 of 9
+Status: Ready to execute
+Last activity: 2026-09-09
 
-Progress: [░░░░░░░░░░] 0% (9 plans, 8 waves)
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [░░░░░░░░░░] 0% (9 plans, 8 waves)
 | Phase 03 P04 | 25min | 3 tasks | 3 files |
 | Phase 03 P05 | 22min | 3 tasks | 3 files |
 | Phase 03 P06 | 14min | 3 tasks | 4 files |
+| Phase 04 P01 | 38min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -136,6 +137,12 @@ Recent decisions affecting current work:
 - [Phase 03-06]: a phase that persists no artifact cites its provenance differently -- validity.md's italic 'Source: data/processed/<file>.parquet' line becomes an italic line naming the pytest node ID that reproduces the number, so reports/metric.md is checkable by running the suite rather than by trusting the author
 - [Phase 03-06]: reports/metric.md gets presence, git-tracking and a 2,000-byte floor and nothing more -- validity.md's headline-number-tracing test has no analogue because its premise is that every number traces to a committed artifact; prose accuracy is the phase's single manual-only verification, discharged by the user's explicit approval at 03-06-T3
 - [Phase 03-06]: FIGURE_NAMES deliberately not extended (D-09) -- a synthetic Qini figure committed beside the real love_plot.png and ate_forest.png could be misread as a result; the first committed uplift figure is Phase 4's, drawn on real holdout scores
+- [Phase 04-01]: assign_split lives in frames.py, not features.py -- ingest.py already imports frames.build_all_frames, so routing the split through a Phase 4 modeling module would invert the dependency and make Phase 1 ingestion depend on Phase 4
+- [Phase 04-01]: All-K one-hot (drop=None) is the repo's THIRD encoding convention and is deliberate: the collinearity argument forcing K-1 in balance.omnibus_lr_test does not transfer because every D-10 learner is L2-penalized or a tree, and all-K reproduces exactly the 11 covariate names balance.parquet already carries
+- [Phase 04-01]: features.py carries its OWN FORBIDDEN_FEATURE_COLUMNS tuple naming split; balance.POST_TREATMENT_COLUMNS is left byte-identical because that constant predates D-07 and editing it would change what the Phase 2 balance table guards without re-verifying balance.parquet
+- [Phase 04-01]: np.random.default_rng, never scikit-learn's stratified helper -- NumPy's Generator stream is a documented stability guarantee (NEP 19) and the split column is committed to git; the rationale is spelled non-greppably in the docstring because the acceptance criterion greps frames.py for both forbidden tokens
+- [Phase 04-01]: the combined-frame slice test rebuilds the arm frames from analysis_df via frames.build_frame -- the committed arm-frame Parquets carry a reset RangeIndex, so slicing X by mens_frame.index would select the wrong rows and measure a 42,613-row overlap instead of the 21,306 shared control rows the anti-Pitfall-5 assertion exists to prove
+- [Phase 04-01]: UPLIFT-01 left Pending despite appearing in this plan's requirements frontmatter -- 04-01 ships two pure primitives (design matrix, split labeller) and fits no model; the requirement is not satisfied until a T-learner exists per arm, following the 02-01 (VALID-01/02) and 03-01..05 (UPLIFT-02) precedent
 
 ### Pending Todos
 
@@ -160,6 +167,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-07T01:47:44.591Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-uplift-modeling/04-CONTEXT.md
+Last session: 2026-09-09T01:39:00.868Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
