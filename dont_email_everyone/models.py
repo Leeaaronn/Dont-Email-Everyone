@@ -103,6 +103,54 @@ selling point is that its numbers are correct.
     conversion cell already being fit -- most of the added sophistication
     would be a second copy of a model this phase already has.
 
+(e) CALIBRATION IS TWO GATES, NOT ONE (CONTEXT.md D-22). The SIGN gate is
+    hard: mean predicted uplift must agree in sign with the committed ATE
+    for that cell, and a disagreement fails the cell outright. It is the
+    gate that catches a swapped `m0` and `m1`, because that one mistake
+    flips every predicted sign at once while raising nothing.
+
+    The MAGNITUDE band is `CALIBRATION_SIGMA * CALIBRATION_SD[(arm,
+    outcome)]` -- an ABSOLUTE per-cell tolerance, measured in this
+    repository across 20 split draws, and never a relative percentage.
+
+    A single relative bar is structurally wrong here, not merely less
+    tidy. Relative error scales inversely with the effect size, and this
+    phase's six committed effects span three orders of magnitude, from a
+    +0.31pp womens conversion effect to a +$0.77 mens spend effect. One
+    percentage cannot be right for both: the smallest effect carries the
+    largest relative noise (median 21.47% across the 20 draws) and the
+    largest binary effect the smallest (median 2.48%). The constant beside
+    `CALIBRATION_SD` names the imported percentage band that was
+    deliberately not adopted, and why restoring it would fail four of the
+    six cells on correct code.
+
+    The comparison is against the COMMITTED ATE, read from
+    `data/processed/ate.parquet` by the caller and passed in -- never an
+    ATE recomputed inside this module. Recomputing would compare a model
+    against a number this same phase produced, which is a weaker check;
+    the committed value is the one Phase 2 canaried, and reading it is
+    `pipeline.train()`'s job so this module stays pure.
+
+(f) THE PROPENSITY GATE IS A SHIPPING GATE, NOT A DIAGNOSTIC (CONTEXT.md
+    D-21). `PROPENSITY_CORR_THRESHOLD` is `0.9`, the threshold
+    PITFALLS.md Pitfall 5 states, and it is evaluated as the MAXIMUM
+    absolute correlation between the predicted uplift and EITHER base
+    model's score -- both `m0` and `m1`, because D-21 says "either" and
+    reporting only one leaves the other unguarded. A cell above the
+    threshold is reported as a repackaged propensity ranking and cannot
+    ship, however good its Qini.
+
+    This is the only mechanism in the project that ENFORCES the "uplift,
+    not propensity" claim rather than asserting it. A cell can beat the
+    response baseline on the Qini arithmetic while correlating 0.95 with
+    `m0`, and nothing else in the pipeline would notice; the ranking would
+    then be a propensity model wearing an uplift label, in a deliverable
+    whose entire argument is that the two are different. The gate is live
+    rather than decorative: the measured maximum at the primary seed is
+    0.879 and across 20 split draws it reaches 0.9234, so a plan must
+    budget for it firing on a spend cell rather than reading a fire as a
+    bug.
+
 `evaluation.py`'s nan-outcome guard was considered here and is satisfied by
 the schema rather than by defensive code: `RawHillstrom` validates `spend`
 as non-null `float64` and the committed artifacts round-trip clean, so no
@@ -115,6 +163,7 @@ place.
 from types import MappingProxyType
 
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import Pipeline
@@ -389,3 +438,345 @@ def response_baseline(m1, X):
     those are different customers.
     """
     return _score(m1, X)
+
+
+# --------------------------------------------------------------------------
+# ROADMAP criterion 4 -- the three diagnostics
+# --------------------------------------------------------------------------
+
+# The per-cell noise floor of the D-22 calibration check, MEASURED IN THIS
+# REPOSITORY (04-RESEARCH Q7). Editing these six numbers breaks nothing
+# loudly: every cell still fits, every check still returns a dict, and the
+# only visible change is which cells the phase is willing to call calibrated.
+#
+# 1. THE MEASUREMENT. The arm-stratified 50/50 split was re-drawn across 20
+#    seeds, the primary learner refit on all six (arm, outcome) cells at each
+#    seed, and the mean predicted holdout uplift compared against the
+#    committed `data/processed/ate.parquet` effect for that cell -- 120
+#    (cell, seed) observations. The values below are the resulting per-cell
+#    standard deviations of mean predicted uplift.
+#
+# 2. THE PROPERTY ASSERTED. The band is `CALIBRATION_SIGMA` times the cell's
+#    SD, with the multiplier 3.0 chosen as a conventional coverage figure
+#    rather than tuned to make anything pass. Against the maximum absolute
+#    error observed over those same 20 seeds, all six cells clear the band
+#    with margin: mens/visit 0.012279 vs 0.010015 (1.23x), mens/conversion
+#    0.002502 vs 0.001860 (1.35x), mens/spend 0.470280 vs 0.337928 (1.39x),
+#    womens/visit 0.009837 vs 0.006767 (1.45x), womens/conversion 0.002595
+#    vs 0.001545 (1.68x), womens/spend 0.436089 vs 0.251391 (1.73x). Neither
+#    vacuous nor tight.
+#
+# 3. REJECTED, DO NOT RESTORE. PITFALLS.md Pitfall 5 reports a T-learner
+#    "mean predicted visit uplift was 0.0769 to 0.0789 against a true ATE of
+#    0.0766" -- a 0.4% to 3.0% relative band -- and names as a warning sign a
+#    mean predicted uplift differing from the measured ATE "by more than a
+#    few percent". Both are VISIT-ONLY, SINGLE-SEED observations. This repo
+#    reproduces the anchor (mens/visit 1.59% at the primary seed 20260902),
+#    which is exactly why the anchor is credible AS AN ANCHOR and useless as
+#    a tolerance: applying a 5% bar to this repo's measured noise floor fails
+#    4 of the 6 cells at the median seed and 5 of 6 at the worst, because
+#    conversion and spend are 5 to 20 times noisier in relative terms than
+#    visit. A future agent reading a calibration failure must not "fix" it by
+#    restoring the imported percentage. `coverage.py` decision (b) records
+#    the same disposition for the same reason, and 03-04 established it.
+CALIBRATION_SD = MappingProxyType(
+    {
+        ("mens", "visit"): 0.004093,
+        ("mens", "conversion"): 0.000834,
+        ("mens", "spend"): 0.156760,
+        ("womens", "visit"): 0.003279,
+        ("womens", "conversion"): 0.000865,
+        ("womens", "spend"): 0.145363,
+    }
+)
+
+# The multiplier on the measured per-cell SD. A conventional coverage
+# choice, not a tuned one -- 2.5 or 4 would also be defensible and the
+# load-bearing part is the FORM (a measured absolute band per cell) rather
+# than this number.
+CALIBRATION_SIGMA = 3.0
+
+# CONTEXT.md D-21's hard shipping gate, at the threshold PITFALLS.md Pitfall
+# 5 states.
+#
+# It is live rather than decorative. Measured here on the six primary cells
+# at the committed split, the maximum absolute correlation is 0.7635 --
+# mens/spend against `m1`, the same cell and the same base model 04-RESEARCH
+# Q7 found the maximum on -- and 04-RESEARCH reports that across 20 re-drawn
+# split seeds the same cell reaches 0.9234, which WOULD fire. (Q7's own
+# primary-seed figure of 0.879 was taken before the `split` column was
+# committed; 0.7635 is what this repository measures today, and the finding
+# it supports -- that the spend cells sit closest to the threshold -- is
+# unchanged.) A plan consuming this constant must budget for a spend cell
+# failing the gate and report that cell as a repackaged propensity ranking;
+# a fire is the gate working, not a bug to be silenced by raising the number.
+PROPENSITY_CORR_THRESHOLD = 0.9
+
+
+def calibration_check(
+    mean_predicted_uplift, committed_ate, arm, outcome
+) -> dict:
+    """Return CONTEXT.md D-22's two-gate calibration result for one cell.
+
+    `committed_ate` is supplied BY THE CALLER, read from
+    `data/processed/ate.parquet` by `pipeline.train()`. Nothing here
+    recomputes an average treatment effect: comparing a model against a
+    number this same phase produced would be a weaker check than comparing
+    it against the number Phase 2 computed and canaried.
+
+    Two gates, both returned, and `calibration_pass` is their conjunction.
+
+    The SIGN gate is hard, and it is the one that catches a swapped `m0`
+    and `m1` -- that single mistake flips every predicted uplift sign at
+    once, raises nothing, and would invert every recommendation the project
+    makes. Measured 120 of 120 passes across six cells and 20 split draws,
+    so it is loose enough never to fire on legitimate seed variation.
+
+    The MAGNITUDE gate is an absolute per-cell band,
+    `CALIBRATION_SIGMA * CALIBRATION_SD[(arm, outcome)]`, measured in this
+    repository. Decision (e) records why a single relative percentage is
+    the wrong shape for a phase whose six effects span three orders of
+    magnitude, and the comment above `CALIBRATION_SD` names the imported
+    band that was deliberately not adopted.
+
+    Every value returned is a plain Python scalar, following
+    `ate.bootstrap_spend_ate`'s idiom, so the dict serializes without a
+    custom encoder.
+    """
+    cell = (arm, outcome)
+    if cell not in CALIBRATION_SD:
+        raise ValueError(
+            f"no calibration band is registered for the cell {cell!r}; "
+            f"CALIBRATION_SD carries {sorted(CALIBRATION_SD)}. An unknown "
+            "cell raises rather than silently getting no band, because a "
+            "missing band would let an unmeasured cell pass a check it was "
+            "never measured for."
+        )
+
+    mean_predicted_uplift = float(mean_predicted_uplift)
+    committed_ate = float(committed_ate)
+    if not np.isfinite(mean_predicted_uplift) or not np.isfinite(
+        committed_ate
+    ):
+        raise ValueError(
+            f"the calibration inputs for {cell!r} are "
+            f"{mean_predicted_uplift!r} and {committed_ate!r}; both must be "
+            "finite numbers. A nan compares False against every threshold, "
+            "so it would fail this gate for the wrong reason and hide "
+            "whichever fit produced it."
+        )
+
+    band = CALIBRATION_SIGMA * CALIBRATION_SD[cell]
+    abs_err = abs(mean_predicted_uplift - committed_ate)
+    sign_pass = bool(
+        np.sign(mean_predicted_uplift) == np.sign(committed_ate)
+    )
+    magnitude_pass = bool(abs_err < band)
+
+    return {
+        "arm": str(arm),
+        "outcome": str(outcome),
+        "mean_predicted_uplift": mean_predicted_uplift,
+        "committed_ate": committed_ate,
+        "abs_err": float(abs_err),
+        "band": float(band),
+        "sigma": float(CALIBRATION_SIGMA),
+        "sign_pass": sign_pass,
+        "magnitude_pass": magnitude_pass,
+        "calibration_pass": bool(sign_pass and magnitude_pass),
+    }
+
+
+def propensity_correlations(u, s0, s1) -> dict:
+    """Return CONTEXT.md D-21's propensity-degeneracy gate for one cell.
+
+    `u` is the predicted uplift, `s0` and `s1` the two base models' own
+    scores on the same rows. The correlation is reported against BOTH,
+    because D-21 gates on "either base-model score" and reporting only one
+    leaves the other unguarded; `max_abs_corr` is the larger absolute value
+    of the two and `propensity_gate_pass` compares it against
+    `PROPENSITY_CORR_THRESHOLD`.
+
+    A failing cell is REPORTED as a repackaged propensity ranking, not
+    dropped quietly. That distinction is the whole point: the reader of
+    `reports/model.md` learns which cells were disqualified and why, which
+    is the difference between a pre-registered gate and a filter applied
+    after the fact.
+
+    Decision (f) records why this is a shipping gate rather than a
+    diagnostic. Every guard below is a plain `if`/`raise`, and the
+    constant-array guard is load-bearing: `np.corrcoef` on a constant input
+    returns nan with a RuntimeWarning, and a nan correlation must raise
+    here rather than resolve a gate defined by a comparison against 0.9 for
+    a reason that has nothing to do with degeneracy.
+    """
+    arrays = {
+        "u": np.asarray(u, dtype=float),
+        "s0": np.asarray(s0, dtype=float),
+        "s1": np.asarray(s1, dtype=float),
+    }
+
+    n = arrays["u"].size
+    if n == 0:
+        raise ValueError(
+            "`u` is empty; there are no rows to correlate. An empty input "
+            "would make this gate a statement about nothing."
+        )
+    for name, values in arrays.items():
+        if values.ndim != 1:
+            raise ValueError(
+                f"`{name}` has shape {values.shape}; all three inputs must "
+                "be 1-D, one value per scored row."
+            )
+        if values.size != n:
+            raise ValueError(
+                f"`u`, `s0` and `s1` have lengths {arrays['u'].size}, "
+                f"{arrays['s0'].size} and {arrays['s1'].size}; all three "
+                "index the same holdout rows and must be equal. Unequal "
+                "lengths mean a slice was taken on one and not the others."
+            )
+        if not np.isfinite(values).all():
+            raise ValueError(
+                f"`{name}` carries non-finite values at positions "
+                f"{np.flatnonzero(~np.isfinite(values))[:5].tolist()}; a nan "
+                "propagates through np.corrcoef and a nan correlation would "
+                "resolve this gate without measuring anything."
+            )
+        if values.min() == values.max():
+            raise ValueError(
+                f"`{name}` is constant at {float(values[0])!r}. "
+                "np.corrcoef on a constant array returns nan with a "
+                "RuntimeWarning, and a nan here would resolve this gate for "
+                "a reason that has nothing to do with propensity "
+                "degeneracy. A constant score is itself a defect worth "
+                "raising on."
+            )
+
+    corr_m0 = float(np.corrcoef(arrays["u"], arrays["s0"])[0, 1])
+    corr_m1 = float(np.corrcoef(arrays["u"], arrays["s1"])[0, 1])
+    max_abs_corr = float(max(abs(corr_m0), abs(corr_m1)))
+
+    return {
+        "n": int(n),
+        "corr_m0": corr_m0,
+        "corr_m1": corr_m1,
+        "max_abs_corr": max_abs_corr,
+        "threshold": float(PROPENSITY_CORR_THRESHOLD),
+        "propensity_gate_pass": bool(
+            max_abs_corr <= PROPENSITY_CORR_THRESHOLD
+        ),
+    }
+
+
+def cross_arm_metrics(uplift_by_arm, shared_index) -> dict:
+    """Return CONTEXT.md D-20's measured cross-arm incomparability.
+
+    `uplift_by_arm` maps each arm name to a Series of predicted uplift
+    indexed compatibly with `shared_index`, and `shared_index` names the
+    SHARED CONTROL HOLDOUT ROWS -- the customers who appear in both arms'
+    holdouts because both arms are compared against the same control group
+    (PITFALLS.md Pitfall 2). Every number below is computed on exactly
+    those rows and no others. A union or a concatenation would count the
+    shared customers twice, which is the same structure Phase 5's
+    bootstrap has to avoid.
+
+    NO RESCALING OF EITHER ARM'S SCORES IS ATTEMPTED. The incomparability
+    is recorded as measured fact and handed on. Mean-matching each arm to
+    its own committed ATE was considered and rejected for two reasons: an
+    affine rescale does not fix incomparability at the level of RANKS,
+    which is the level a targeting rule actually consumes; and it would
+    make ROADMAP criterion 4's calibration check trivially true by
+    construction, destroying its value as a check.
+
+    D-19's assumption sits alongside it. Both arms share the same roughly
+    21,306 control customers, so the two arms' Qini values cannot be
+    numerically compared, and any cross-arm argmax over them is a winner's
+    curse estimator over two correlated noisy estimates. Phase 5 builds and
+    evaluates the policy; Phase 4 supplies the number and the caveat.
+
+    Reporting the per-arm MINIMUM and the fraction of rows below zero is
+    what settles the open question STATE.md carries about whether a genuine
+    negative-uplift segment survives holdout validation. Measured, the
+    answer lives on the other arm from the one the question names: the
+    mens minimum predicted visit uplift is strictly positive, and the
+    womens minimum is strictly negative with a nontrivial subgroup below
+    zero. Carrying it in the data rather than only in prose is what makes
+    it checkable.
+
+    All values are plain Python scalars, keyed by arm name where they are
+    per-arm, so the dict serializes without a custom encoder.
+    """
+    arms = list(uplift_by_arm)
+    if len(arms) != 2:
+        raise ValueError(
+            f"`uplift_by_arm` carries {len(arms)} arms {arms}; exactly two "
+            "are required. The pair correlation and the sign-disagreement "
+            "fraction are statements about a PAIR of arms, and neither has "
+            "a meaning at one arm or at three."
+        )
+
+    shared = pd.Index(shared_index)
+    if len(shared) == 0:
+        raise ValueError(
+            "`shared_index` is empty; there are no shared control holdout "
+            "rows to measure on."
+        )
+    if shared.has_duplicates:
+        raise ValueError(
+            "`shared_index` carries duplicate labels, so the shared control "
+            "customers would be counted more than once -- the exact "
+            "double-count PITFALLS.md Pitfall 2 warns about."
+        )
+
+    values = {}
+    for arm in arms:
+        series = uplift_by_arm[arm]
+        missing = shared.difference(pd.Index(series.index))
+        if len(missing) > 0:
+            raise ValueError(
+                f"the {arm!r} predicted uplift does not cover "
+                f"{len(missing)} of the {len(shared)} shared rows, first "
+                f"missing {missing[:5].tolist()}. Every arm must be scored "
+                "on the whole shared control holdout, or the two arms' "
+                "numbers describe different populations."
+            )
+        arm_values = np.asarray(series.loc[shared], dtype=float)
+        if not np.isfinite(arm_values).all():
+            raise ValueError(
+                f"the {arm!r} predicted uplift carries non-finite values on "
+                "the shared rows; a nan would propagate into the pair "
+                "correlation and into a reported business number."
+            )
+        values[arm] = arm_values
+
+    first, second = arms
+    a, b = values[first], values[second]
+
+    result = {
+        "n_shared": int(len(shared)),
+        "arm_a": str(first),
+        "arm_b": str(second),
+    }
+    for arm in arms:
+        arm_values = values[arm]
+        result[f"{arm}_mean"] = float(arm_values.mean())
+        result[f"{arm}_sd"] = float(arm_values.std(ddof=1))
+        result[f"{arm}_min"] = float(arm_values.min())
+        result[f"{arm}_max"] = float(arm_values.max())
+        result[f"{arm}_negative_fraction"] = float(
+            np.count_nonzero(arm_values < 0.0) / arm_values.size
+        )
+
+    if a.min() == a.max() or b.min() == b.max():
+        raise ValueError(
+            f"one arm's predicted uplift is constant on the shared rows "
+            f"({first} spans {a.min()!r} to {a.max()!r}, {second} spans "
+            f"{b.min()!r} to {b.max()!r}); np.corrcoef would return nan and "
+            "a nan cross-arm correlation is not a measurement."
+        )
+
+    result["corr_between_arms"] = float(np.corrcoef(a, b)[0, 1])
+    result["sign_disagreement_fraction"] = float(
+        np.count_nonzero(np.sign(a) != np.sign(b)) / a.size
+    )
+    return result
