@@ -1,0 +1,132 @@
+{
+  "generated_by": "dont_email_everyone.pipeline.train",
+  "split": {
+    "seed": 20260902,
+    "n_rows": 64000,
+    "n_train": 31999,
+    "n_holdout": 32001,
+    "n_shared_control_holdout": 10653
+  },
+  "gates": {
+    "primary_config": "linear",
+    "permutation_shuffles": 200,
+    "calibration_sigma": 3.0,
+    "propensity_corr_threshold": 0.9
+  },
+  "committed_ate": [
+    {
+      "arm": "mens",
+      "outcome": "visit",
+      "effect": 0.07658956365153388
+    },
+    {
+      "arm": "mens",
+      "outcome": "conversion",
+      "effect": 0.0068050065196159255
+    },
+    {
+      "arm": "mens",
+      "outcome": "spend",
+      "effect": 0.7698271558945627
+    },
+    {
+      "arm": "womens",
+      "outcome": "visit",
+      "effect": 0.04523310658705318
+    },
+    {
+      "arm": "womens",
+      "outcome": "conversion",
+      "effect": 0.0031110575110852652
+    },
+    {
+      "arm": "womens",
+      "outcome": "spend",
+      "effect": 0.42441221593659756
+    }
+  ],
+  "cross_arm_metrics": {
+    "visit": {
+      "n_shared": 10653,
+      "arm_a": "mens",
+      "arm_b": "womens",
+      "mens_mean": 0.07998450502472695,
+      "mens_sd": 0.018029332926608355,
+      "mens_min": 0.04646868119116865,
+      "mens_max": 0.14592885413426243,
+      "mens_negative_fraction": 0.0,
+      "womens_mean": 0.05174540874411006,
+      "womens_sd": 0.030749297579688827,
+      "womens_min": -0.0708021453095865,
+      "womens_max": 0.11829667978522704,
+      "womens_negative_fraction": 0.04496385994555524,
+      "corr_between_arms": 0.4227423757050965,
+      "sign_disagreement_fraction": 0.04496385994555524
+    },
+    "conversion": {
+      "n_shared": 10653,
+      "arm_a": "mens",
+      "arm_b": "womens",
+      "mens_mean": 0.008450466415946713,
+      "mens_sd": 0.005427281635551595,
+      "mens_min": -0.22621899015064,
+      "mens_max": 0.030852025183489586,
+      "mens_negative_fraction": 0.012203135267060922,
+      "womens_mean": 0.0026313382702398153,
+      "womens_sd": 0.004266381657487647,
+      "womens_min": -0.22934347846026693,
+      "womens_max": 0.02001881223538766,
+      "womens_negative_fraction": 0.21618323476954848,
+      "corr_between_arms": 0.4562895655740672,
+      "sign_disagreement_fraction": 0.2073594292687506
+    },
+    "spend": {
+      "n_shared": 10653,
+      "arm_a": "mens",
+      "arm_b": "womens",
+      "mens_mean": 0.8144132270991482,
+      "mens_sd": 0.6447472116839769,
+      "mens_min": -0.6600771010727668,
+      "mens_max": 3.5132581158024263,
+      "mens_negative_fraction": 0.04684126537125692,
+      "womens_mean": 0.42036965666123854,
+      "womens_sd": 0.6913188719302236,
+      "womens_min": -1.1812977398207254,
+      "womens_max": 2.8266174413115883,
+      "womens_negative_fraction": 0.29747488970243124,
+      "corr_between_arms": 0.4993032946043271,
+      "sign_disagreement_fraction": 0.26809349479019995
+    }
+  },
+  "tie_diagnostics": {
+    "mens": {
+      "n_scores": 21307,
+      "n_distinct": 18922,
+      "n_tie_groups": 288,
+      "largest_tie_fraction": 0.0013610550523302201,
+      "fraction_in_ties": 0.1254517294785751
+    },
+    "womens": {
+      "n_scores": 21347,
+      "n_distinct": 18909,
+      "n_tie_groups": 291,
+      "largest_tie_fraction": 0.001405349697849815,
+      "fraction_in_ties": 0.12783997751440485
+    }
+  },
+  "headline": {
+    "n_cells": 18,
+    "n_eligible": 6,
+    "n_shipping": 2,
+    "shipping_cells": [
+      "womens/visit/linear",
+      "womens/conversion/linear"
+    ],
+    "unproven_columns": [
+      "unproven_uplift_mens_conversion",
+      "unproven_uplift_mens_spend",
+      "unproven_uplift_mens_visit",
+      "unproven_uplift_womens_spend"
+    ]
+  }
+}
