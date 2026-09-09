@@ -327,7 +327,8 @@ def t_learner(make, X_train, t_train, y_train):
 
     names0 = getattr(m0, "feature_names_in_", None)
     names1 = getattr(m1, "feature_names_in_", None)
-    if names0 is None or names1 is None or len(names0) == 0 or len(names1) == 0:
+    absent = names0 is None or names1 is None
+    if absent or len(names0) == 0 or len(names1) == 0:
         raise ValueError(
             "the criterion-2 feature-space gate cannot be evaluated: m0 "
             f"exposes {None if names0 is None else list(names0)} and m1 "
