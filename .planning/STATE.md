@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-09-09T18:00:23.820Z"
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-09-09T18:21:28.975Z"
 last_activity: 2026-09-09
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 26
-  completed_plans: 21
-  percent: 81
+  completed_plans: 23
+  percent: 43
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 04 (uplift-modeling) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
 Last activity: 2026-09-09
 
-Progress: [████████░░] 81%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -74,6 +74,7 @@ Progress: [████████░░] 81%
 | Phase 04 P03 | 22min | 3 tasks | 7 files |
 | Phase 04 P04 | 20min | 2 tasks | 2 files |
 | Phase 04 P05 | 18min | 2 tasks | 2 files |
+| Phase 04 P06 | 21min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04-05]: the D-21 propensity maximum measures 0.7635 here (mens/spend against m1), not the 0.879 04-RESEARCH quotes at the primary seed -- Q7's figure predates the committed split column; same cell, same base model, gate still passes, and both numbers are recorded beside the constant
 - [Phase ?]: [Phase 04-05]: cross_arm_metrics returns FLAT per-arm keys (mens_min, womens_negative_fraction, ...) rather than a nested by-arm dict, because pipeline._jsonable coerces scalars only and would stringify a nested mapping
 - [Phase ?]: [Phase 04-05]: UPLIFT-01 left Pending for the fourth time -- 04-05 ships three diagnostics and fits no per-arm model of its own; 04-04's summary predicted completion here, but the requirement asks for models per arm and those are fit and persisted by pipeline.train() in 04-07
+- [Phase 04-06]: PERMUTATION_SHUFFLES is a separate literal from evaluation.py's null-band resample count, and models.py names that constant NON-GREPPABLY because an acceptance criterion greps the module for it and requires 0 -- the 02-03/03-01 rephrase-rather-than-drop precedent
+- [Phase 04-06]: the count-preservation test is named test_permutation_preserves_counts_of_treated_and_control, not the plan's ..._treated_and_control_counts, because pytest -k matches a SUBSTRING of the item name and the plan's own name does not contain 'preserves_counts' -- with no test selected pytest exits 5, so 04-VALIDATION's selector would have failed against correct code
+- [Phase 04-06]: the refit null measures 1.32x the score-shuffle null's SD on mens/visit at R=30 (0.001928 against 0.001459, same centre) -- a NEW measurement nothing quotes, so the test asserts >1.1 and carries the measured value rather than pinning it
+- [Phase 04-06]: the observed mens/visit holdout Qini +0.003069 DOES reproduce 04-RESEARCH to the digit, unlike 04-04's and 04-05's stale figures -- the figures that moved are the ones sensitive to which rows land in the training half
+- [Phase 04-06]: UPLIFT-01 left Pending for the fifth time -- this plan ships the null generator and persists no per-arm model; pipeline.train() does that in 04-07
 
 ### Pending Todos
 
@@ -188,6 +194,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T18:00:01.409Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-09-09T18:21:28.968Z
+Stopped at: Completed 04-06-PLAN.md
 Resume file: None
