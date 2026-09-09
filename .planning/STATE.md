@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-09-09T02:42:58.366Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-09T04:58:40.178Z"
 last_activity: 2026-09-09
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 26
-  completed_plans: 19
-  percent: 43
+  completed_plans: 20
+  percent: 77
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 04 (uplift-modeling) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 Last activity: 2026-09-09
 
-Progress: [███████░░░] 73%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [███████░░░] 73%
 | Phase 03 P06 | 14min | 3 tasks | 4 files |
 | Phase 04 P01 | 38min | 3 tasks | 4 files |
 | Phase 04 P02 | 51min | 3 tasks | 2 files |
+| Phase 04 P03 | 22min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,9 @@ Recent decisions affecting current work:
 - [Phase 04-02]: qini_train_holdout_plot draws NO axhline — an axhline's xdata is literally (0,1), indistinguishable from a chord under two-point-Line2D introspection
 - [Phase 04-02]: figures DISPLAY the gate value they are handed and never recompute it, so uplift_vs_base_score_plot and model_results.parquet cannot report different correlations
 - [Phase 04-02]: UPLIFT-01 left Pending for the second time -- 04-02 ships four pure figure factories and fits no model; the requirement is not satisfied until a T-learner exists per arm, following the 04-01 precedent
+- [Phase 04-03]: CONTEXT.md D-07 supersedes 02-06's byte-identical build_all decision: the split is materialized inside the gated build (04-03)
+- [Phase 04-03]: Gate 4 sits between Pandera validation and frame construction because RawHillstrom's strict/ordered flags admit no other position; the schema was not weakened (04-03)
+- [Phase 04-03]: Phase 2 artifacts (ate/balance/coverage.parquet) are not regenerated for the split column: content is identical and freshness is asserted on content, never bytes (04-03)
 
 ### Pending Todos
 
@@ -172,6 +176,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T02:42:58.357Z
+Last session: 2026-09-09T04:57:08.973Z
 Stopped at: Completed 04-02-PLAN.md
 Resume file: None
