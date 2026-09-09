@@ -193,17 +193,27 @@ def test_assign_split_is_deterministic_for_a_seed(analysis_df):
 
 
 def test_assign_split_does_not_mutate_input(analysis_df):
-    before_shape = analysis_df.shape
-    before_columns = list(analysis_df.columns)
-    assign_split(analysis_df)
-    assert analysis_df.shape == before_shape
-    assert list(analysis_df.columns) == before_columns
-    assert "split" not in analysis_df.columns, (
+    # Plan 04-03 materialised `split` into the committed analysis table
+    # (CONTEXT.md D-07), so the fixture now legitimately carries the
+    # column. Drop it into a local copy first: otherwise the "assign_split
+    # did not write its column onto the caller" assertion below is false
+    # for a reason that has nothing to do with mutation, and the test
+    # would be reporting a fixture property as a function defect.
+    frame = analysis_df.drop(columns=["split"])
+    before_shape = frame.shape
+    before_columns = list(frame.columns)
+    assign_split(frame)
+    assert frame.shape == before_shape
+    assert list(frame.columns) == before_columns
+    assert "split" not in frame.columns, (
         "assign_split wrote its column onto the caller's frame. It returns a "
         "Series precisely so `ingest.build_all` can place the assignment "
         "with one `.assign(...)` between the Pandera gate and frame "
         "construction."
     )
+    # The shared session fixture is also untouched, in both directions.
+    assert analysis_df.shape == (64000, 13)
+    assert "split" in analysis_df.columns
 
 
 # The 03-04 pattern (`test_curve_docstring_does_not_overclaim_invariance`):
