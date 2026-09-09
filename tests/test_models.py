@@ -12,8 +12,9 @@ asserts a non-empty eleven-name array on both the pipeline AND its inner
 estimator before it asserts equality, and then provokes the gate twice to
 prove it actually fires.
 
-Plans 04-05 and 04-06 append their own sections here; the `slow` marker
-enters with 04-06's bit-for-bit null regeneration and appears nowhere yet.
+Plan 04-05 appends the criterion-4 diagnostics section below and 04-06
+appends the permutation null; the `slow` marker enters with 04-06's
+bit-for-bit null regeneration and appears nowhere yet.
 """
 
 from types import SimpleNamespace
@@ -115,12 +116,16 @@ def _tiny_design_frame():
     )
 
 
-# `t_learner`, `uplift` and `response_baseline` are the three public
-# callables in models.py as of plan 04-04, and all three are called below.
-# Plans 04-05 and 04-06 add `permutation_null`, `empirical_p_value` and the
-# diagnostics, and each MUST be appended here -- a call list that quietly
-# stops growing turns this guarantee into a guarantee about history rather
-# than about the module.
+# `t_learner`, `uplift`, `response_baseline`, `calibration_check`,
+# `propensity_correlations` and `cross_arm_metrics` are the six public
+# callables in models.py as of plan 04-05, and all six are called below.
+# Plan 04-06 adds `permutation_null` and `empirical_p_value`, and each MUST
+# be appended here -- a call list that quietly stops growing turns this
+# guarantee into a guarantee about history rather than about the module.
+#
+# The diagnostics are called on the tiny frame's own fitted scores rather
+# than on constants, because two of them raise on a constant input and a
+# guard firing would end the test before it reached the assertion.
 #
 # The regressor cell is used because a three-row treated slice is not
 # guaranteed to carry both classes, and the property under test here is "no
@@ -133,8 +138,19 @@ def test_models_module_writes_nothing(tmp_path, monkeypatch):
     y = np.array([0.0, 1.5, 3.0, 0.0, 12.0, 4.0])
 
     m0, m1 = models.t_learner(models.LEARNERS[("reg", "linear")], X, t, y)
-    models.uplift(m0, m1, X)
+    score = models.uplift(m0, m1, X)
     models.response_baseline(m1, X)
+    models.calibration_check(0.08, 0.0766, "mens", "visit")
+    models.propensity_correlations(
+        score, models._score(m0, X), models._score(m1, X)
+    )
+    models.cross_arm_metrics(
+        {
+            "mens": pd.Series(score, index=X.index),
+            "womens": pd.Series(score[::-1], index=X.index),
+        },
+        X.index,
+    )
 
     assert list(tmp_path.iterdir()) == [], (
         "models.py wrote to disk. Only the orchestrator touches the "
@@ -705,3 +721,564 @@ def test_t_learner_recovers_a_known_individual_effect(recoverable_effect_case):
         f"deviations -- the floor is {floor:.4f}. The T-learner is not "
         "recovering the effect it was handed."
     )
+
+
+# --------------------------------------------------------------------------
+# The criterion-4 diagnostics -- D-20, D-21, D-22
+# --------------------------------------------------------------------------
+
+# The calibration band used below is `models.CALIBRATION_SIGMA` times
+# `models.CALIBRATION_SD[cell]`, and every number in it was MEASURED IN THIS
+# REPOSITORY. Same three-part shape as `tests/test_evaluation.py`'s
+# `RANDOM_SCORE_TOL` block, for the same reason.
+#
+# 1. THE MEASUREMENT. 04-RESEARCH Q7 re-drew the arm-stratified 50/50 split
+#    across 20 seeds, refit the primary learner on all six (arm, outcome)
+#    cells at each seed, and compared mean predicted holdout uplift against
+#    the committed `data/processed/ate.parquet` effect -- 120 (cell, seed)
+#    observations. The per-cell standard deviations of mean predicted uplift
+#    are 0.004093 / 0.000834 / 0.156760 on the mens arm and 0.003279 /
+#    0.000865 / 0.145363 on the womens arm, for visit / conversion / spend.
+#
+# 2. THE PROPERTY ASSERTED. The band is `3 x` that SD. Against the maximum
+#    absolute error observed over those same 20 seeds every cell clears it
+#    with margin, so the band is neither vacuous nor tight:
+#
+#        mens / visit          0.012279 vs 0.010015   margin 1.23x
+#        mens / conversion     0.002502 vs 0.001860   margin 1.35x
+#        mens / spend          0.470280 vs 0.337928   margin 1.39x
+#        womens / visit        0.009837 vs 0.006767   margin 1.45x
+#        womens / conversion   0.002595 vs 0.001545   margin 1.68x
+#        womens / spend        0.436089 vs 0.251391   margin 1.73x
+#
+#    The sign gate passed 120 of 120 over the same 120 observations.
+#
+# 3. DOCUMENTED DIVERGENCE -- REJECTED, do not restore. PITFALLS.md Pitfall
+#    5 reports a T-learner whose "mean predicted visit uplift was 0.0769 to
+#    0.0789 against a true ATE of 0.0766", a 0.4% to 3.0% relative band, and
+#    names as a warning sign a mean predicted uplift differing from the
+#    measured ATE by more than "a few percent". Both figures are VISIT-ONLY
+#    and SINGLE-SEED. This repo reproduces the anchor -- mens/visit lands
+#    1.59% from the committed ATE at the primary seed -- which is exactly
+#    why it is credible as an anchor and useless as a tolerance. Applying a
+#    5% relative bar to this repo's own numbers fails 4 of the 6 cells at
+#    the committed split, which
+#    `test_calibration_band_is_absolute_not_relative` measures directly.
+#    A future agent reading a calibration failure must not "fix" it by
+#    restoring the imported percentage. 03-04 set this disposition and
+#    `coverage.py` decision (b) records it for the coverage-gap conflict.
+
+PRIMARY_CELLS = (
+    ("mens", "visit"),
+    ("mens", "conversion"),
+    ("mens", "spend"),
+    ("womens", "visit"),
+    ("womens", "conversion"),
+    ("womens", "spend"),
+)
+
+# The shared control holdout at the committed split. Both arms are compared
+# against the SAME control customers (PITFALLS.md Pitfall 2), so exactly
+# these rows carry a predicted uplift from both arms.
+EXPECTED_SHARED_HOLDOUT = 10653
+
+# A single relative bar applied to all six cells is what decision (e)
+# rejects. 5% is PITFALLS' "a few percent" read generously.
+RELATIVE_BAR = 0.05
+
+
+@pytest.fixture(scope="module")
+def committed_ate():
+    """The six Phase 2 effects, READ FROM THE ARTIFACT, never typed out.
+
+    Hard-coding them here would make a stale `ate.parquet` invisible: the
+    tests would keep comparing against the numbers somebody remembered
+    while the committed artifact drifted. Reading them is what lets
+    02-06's content canary and this file fail together.
+    """
+    table = pd.read_parquet(config.PROCESSED / "ate.parquet")
+    return {
+        (row.arm, row.outcome): float(row.effect)
+        for row in table.itertuples()
+    }
+
+
+@pytest.fixture(scope="module")
+def primary_cells(real_inputs):
+    """The primary learner fit once on each of the six cells.
+
+    Six linear fits, well under a second in total, so this section carries
+    no `slow` marker: a broken gate must fail on every commit. Module
+    scoped so the calibration, propensity and cross-arm tests are all
+    describing the SAME six fits rather than six re-fits that could
+    disagree.
+    """
+    fitted = {}
+    for arm_name in ("mens", "womens"):
+        arm = getattr(real_inputs, arm_name)
+        for outcome, kind in models.OUTCOME_KIND.items():
+            m0, m1 = models.t_learner(
+                models.LEARNERS[(kind, models.PRIMARY_CONFIG)],
+                arm.X_train,
+                arm.t_train,
+                arm.y_train[outcome],
+            )
+            fitted[(arm_name, outcome)] = SimpleNamespace(
+                index=arm.X_hold.index,
+                u=models.uplift(m0, m1, arm.X_hold),
+                s0=models._score(m0, arm.X_hold),
+                s1=models._score(m1, arm.X_hold),
+            )
+    return fitted
+
+
+@pytest.fixture(scope="module")
+def shared_control_holdout(real_inputs):
+    """The index of customers holding out in BOTH arms -- the shared control.
+
+    Computed as the intersection of the two arms' control-segment holdout
+    rows rather than assumed, so a change to `frames.assign_split` that
+    broke the overlap would surface here instead of silently shrinking the
+    population every cross-arm number is measured on.
+    """
+    per_arm = {}
+    for arm_name in ("mens", "womens"):
+        frame = getattr(real_inputs, arm_name).frame
+        holdout_control = (frame["split"] == "holdout") & (
+            frame["treatment"] == 0
+        )
+        per_arm[arm_name] = frame.index[holdout_control]
+    return per_arm["mens"].intersection(per_arm["womens"])
+
+
+def _mean_uplift(primary_cells, cell):
+    return float(primary_cells[cell].u.mean())
+
+
+@pytest.mark.parametrize("cell", PRIMARY_CELLS, ids=lambda c: f"{c[0]}_{c[1]}")
+def test_calibration_sign_gate_passes_on_every_primary_cell(
+    primary_cells, committed_ate, cell
+):
+    """D-22's hard gate: predicted uplift agrees in sign with the ATE.
+
+    Measured 120 of 120 across six cells and 20 split draws in
+    04-RESEARCH Q7, with the closest call womens/spend at mean_u 0.173
+    against an ATE of 0.424 -- same sign, comfortably nonzero. Sharp enough
+    to catch a swapped `m0`/`m1`, loose enough never to fire on seed
+    variation.
+    """
+    arm, outcome = cell
+    result = models.calibration_check(
+        _mean_uplift(primary_cells, cell), committed_ate[cell], arm, outcome
+    )
+    assert result["sign_pass"], (
+        f"the {cell} cell predicts a mean uplift of "
+        f"{result['mean_predicted_uplift']:.6f} against a committed ATE of "
+        f"{result['committed_ate']:.6f}. A sign disagreement fails the cell "
+        "outright (D-22); the first thing to check is whether `m0` and `m1` "
+        "have been swapped, because that flips every cell at once."
+    )
+    assert result["arm"] == arm and result["outcome"] == outcome
+
+
+def test_calibration_sign_gate_fires_on_a_swapped_m0_m1(
+    primary_cells, committed_ate
+):
+    """The non-vacuity case: the sign gate has been observed to fail.
+
+    Swapping `m0` and `m1` negates every predicted uplift, so a negated
+    mean is exactly what that mistake looks like at this interface. Without
+    this test ROADMAP criterion 4's sign check would be a gate that has
+    never fired, which is indistinguishable from a gate that cannot.
+    """
+    cell = ("mens", "visit")
+    swapped = models.calibration_check(
+        -_mean_uplift(primary_cells, cell), committed_ate[cell], *cell
+    )
+    assert swapped["sign_pass"] is False, (
+        "a negated mean predicted uplift passed the sign gate; the gate "
+        "cannot catch the one failure it exists to catch (T-04-33)."
+    )
+    assert swapped["calibration_pass"] is False, (
+        "`calibration_pass` must be the conjunction of both gates, so a "
+        "failed sign gate cannot be rescued by a passing magnitude gate."
+    )
+
+
+@pytest.mark.parametrize("cell", PRIMARY_CELLS, ids=lambda c: f"{c[0]}_{c[1]}")
+def test_calibration_magnitude_band_passes_on_every_primary_cell(
+    primary_cells, committed_ate, cell
+):
+    """Every cell lands inside `3 x` its own measured seed-to-seed SD."""
+    result = models.calibration_check(
+        _mean_uplift(primary_cells, cell), committed_ate[cell], *cell
+    )
+    expected_band = models.CALIBRATION_SIGMA * models.CALIBRATION_SD[cell]
+    assert result["band"] == pytest.approx(expected_band, rel=0, abs=1e-12), (
+        f"the {cell} band is {result['band']!r}; it must be "
+        f"CALIBRATION_SIGMA ({models.CALIBRATION_SIGMA}) times "
+        f"CALIBRATION_SD[{cell}] ({models.CALIBRATION_SD[cell]}) and nothing "
+        "else."
+    )
+    assert result["magnitude_pass"], (
+        f"the {cell} cell misses its committed ATE by "
+        f"{result['abs_err']:.6f}, outside the measured band of "
+        f"{result['band']:.6f}. The band is 3x this repo's own 20-seed SD "
+        "(see the block above); do NOT widen it to PITFALLS' imported "
+        "percentage."
+    )
+    assert result["calibration_pass"] is True
+
+
+def test_calibration_band_is_absolute_not_relative(
+    primary_cells, committed_ate
+):
+    """Decision (e) made checkable: one percentage cannot serve six cells.
+
+    Two measured statements, both taken at the committed split.
+
+    First, the six bands are not a constant fraction of their ATEs. The
+    ratios `band / committed_ate` measure 0.1603, 0.3677, 0.6109, 0.2175,
+    0.8341 and 1.0275, a spread of 6.41x.
+
+    DOCUMENTED DIVERGENCE: the plan asked for "more than an order of
+    magnitude". Measured, the spread is 6.41x, not 10x, so the assertion
+    below asks for 4x -- comfortably inside the measurement and still far
+    from the 1.0x a single percentage would produce. The claim being made
+    is that the ratios are not constant; the exact spread is a property of
+    six particular effect sizes.
+
+    Second, and sharper, a single 5% relative bar applied to this repo's own
+    numbers fails 4 of the 6 cells while all six pass their measured
+    absolute bands. That is 04-RESEARCH Q7's median-seed finding reproduced
+    at the committed split, and it is what stops a future agent replacing
+    the six literals in `CALIBRATION_SD` with one percentage.
+    """
+    ratios = [
+        (models.CALIBRATION_SIGMA * models.CALIBRATION_SD[cell])
+        / abs(committed_ate[cell])
+        for cell in PRIMARY_CELLS
+    ]
+    spread = max(ratios) / min(ratios)
+    assert spread > 4.0, (
+        f"the six band/ATE ratios are {[round(r, 4) for r in ratios]}, a "
+        f"spread of only {spread:.2f}x. A spread near 1.0 means the six "
+        "measured bands have been collapsed into a single relative "
+        "percentage, which decision (e) rejects: relative error scales "
+        "inversely with effect size and these six effects span three orders "
+        "of magnitude."
+    )
+
+    relative_errors = {}
+    for cell in PRIMARY_CELLS:
+        result = models.calibration_check(
+            _mean_uplift(primary_cells, cell), committed_ate[cell], *cell
+        )
+        assert result["magnitude_pass"], cell
+        relative_errors[cell] = result["abs_err"] / abs(
+            result["committed_ate"]
+        )
+
+    would_fail = [
+        cell
+        for cell, err in relative_errors.items()
+        if err > RELATIVE_BAR
+    ]
+    assert len(would_fail) >= 3, (
+        "a single 5% relative bar would fail only "
+        f"{len(would_fail)} of the six cells "
+        f"({ {c: round(e, 4) for c, e in relative_errors.items()} }), so the "
+        "argument for a per-cell absolute band is no longer supported by "
+        "the data. Measured at the committed split it fails 4 of 6 -- "
+        "conversion and spend are 5 to 20 times noisier in relative terms "
+        "than visit."
+    )
+
+
+def test_calibration_rejects_an_unknown_cell():
+    """An unmeasured cell raises rather than quietly getting no band."""
+    with pytest.raises(ValueError) as excinfo:
+        models.calibration_check(0.1, 0.1, "mens", "clicks")
+    message = str(excinfo.value)
+    assert "clicks" in message, (
+        f"the rejection message is {message!r} and does not name the cell, "
+        "so the failure is not diagnosable from the traceback."
+    )
+
+
+# The gate is LIVE, not decorative. Measured on the six primary cells at the
+# committed split the maximum absolute correlation is 0.7635 -- mens/spend
+# against `m1` -- and 04-RESEARCH Q7 reports the same cell reaching 0.9234
+# across 20 re-drawn split seeds, which WOULD fire. (Q7's primary-seed figure
+# of 0.879 predates the committed `split` column; 0.7635 is what this
+# repository measures today, on the same cell against the same base model.)
+# A future failure on a spend cell is therefore the gate working, and the
+# response is to report that cell as a repackaged propensity ranking, never
+# to raise the threshold.
+@pytest.mark.parametrize("cell", PRIMARY_CELLS, ids=lambda c: f"{c[0]}_{c[1]}")
+def test_propensity_gate_passes_on_the_primary_seed_and_reports_both_correlations(
+    primary_cells, cell
+):
+    """D-21 reports against BOTH base scores, and gates on the larger."""
+    scored = primary_cells[cell]
+    result = models.propensity_correlations(scored.u, scored.s0, scored.s1)
+
+    assert np.isfinite(result["corr_m0"]), cell
+    assert np.isfinite(result["corr_m1"]), cell
+    assert result["max_abs_corr"] == pytest.approx(
+        max(abs(result["corr_m0"]), abs(result["corr_m1"]))
+    ), (
+        f"the {cell} cell reports max_abs_corr={result['max_abs_corr']!r} "
+        f"against corr_m0={result['corr_m0']!r} and "
+        f"corr_m1={result['corr_m1']!r}. D-21 gates on 'either base-model "
+        "score', so the maximum of the two absolute values is the gate."
+    )
+    assert result["threshold"] == models.PROPENSITY_CORR_THRESHOLD == 0.9
+    assert result["propensity_gate_pass"], (
+        f"the {cell} cell's predicted uplift correlates with a base-model "
+        f"score at {result['max_abs_corr']:.4f}, above the pre-registered "
+        "0.9 threshold. That cell is a repackaged propensity ranking and "
+        "cannot ship regardless of its Qini (D-21). Report it as failed; do "
+        "not raise the threshold."
+    )
+
+
+def test_propensity_gate_fires_on_a_ranking_that_is_a_base_score(
+    primary_cells,
+):
+    """The non-vacuity case, and the exact failure D-21 exists to catch.
+
+    A "ranking" that literally IS `m1`'s score is the pure form of the
+    threat: a propensity model shipped as an uplift result. It correlates
+    with itself at 1.0 and must fail. Without this test the gate would
+    never have been observed to fire (T-04-32).
+    """
+    scored = primary_cells[("mens", "visit")]
+    result = models.propensity_correlations(scored.s1, scored.s0, scored.s1)
+
+    assert result["max_abs_corr"] == pytest.approx(1.0), (
+        f"a ranking identical to `m1`'s own score reports "
+        f"max_abs_corr={result['max_abs_corr']!r}; it correlates with itself "
+        "at 1.0 by definition."
+    )
+    assert result["propensity_gate_pass"] is False, (
+        "the propensity gate passed a ranking that IS a base-model score. "
+        "That is the only mechanism enforcing this project's 'uplift, not "
+        "propensity' claim, and it just failed to enforce it."
+    )
+
+
+def test_propensity_rejects_a_constant_score():
+    """A constant input raises; a nan correlation must never reach the gate.
+
+    `np.corrcoef` on a constant array returns nan with a RuntimeWarning,
+    and `nan <= 0.9` is False -- so a nan would FAIL the gate for a reason
+    that has nothing to do with degeneracy, and would pass it if the
+    comparison were ever written the other way round (T-04-35).
+    """
+    with pytest.raises(ValueError) as excinfo:
+        models.propensity_correlations(
+            np.zeros(10), np.zeros(10), np.arange(10.0)
+        )
+    assert "constant" in str(excinfo.value)
+
+    with pytest.raises(ValueError):
+        models.propensity_correlations(
+            np.arange(10.0), np.full(10, np.nan), np.arange(10.0)
+        )
+
+
+def test_cross_arm_metrics_are_computed_on_the_shared_control_holdout(
+    primary_cells, shared_control_holdout
+):
+    """D-20's numbers come from the shared rows and no others.
+
+    Why this row set and no other: the two arms' holdouts overlap EXACTLY
+    on the shared control customers, so a correlation taken on a union or a
+    concatenation would count those customers twice -- the same structure
+    Phase 5's bootstrap has to avoid, where the shared control must be
+    resampled once per replicate rather than once per arm (PITFALLS.md
+    Pitfall 2, T-04-37).
+    """
+    assert len(shared_control_holdout) == EXPECTED_SHARED_HOLDOUT, (
+        f"the shared control holdout holds {len(shared_control_holdout)} "
+        f"rows, not {EXPECTED_SHARED_HOLDOUT}. The committed `split` column "
+        "is deterministic, so a change here means the split was re-drawn."
+    )
+
+    by_arm = {
+        arm: pd.Series(
+            primary_cells[(arm, "visit")].u,
+            index=primary_cells[(arm, "visit")].index,
+        )
+        for arm in ("mens", "womens")
+    }
+    result = models.cross_arm_metrics(by_arm, shared_control_holdout)
+    assert result["n_shared"] == EXPECTED_SHARED_HOLDOUT
+
+    for arm, series in by_arm.items():
+        covered = shared_control_holdout.difference(series.index)
+        assert len(covered) == 0, (
+            f"the {arm} scores miss {len(covered)} shared rows; every arm "
+            "must cover the whole shared control holdout."
+        )
+
+    # Dropping a row that IS in the shared index, not just any row: the
+    # mens holdout is far larger than the shared control, so trimming its
+    # tail would leave the shared rows fully covered and this provocation
+    # would silently not provoke anything.
+    partial = dict(by_arm)
+    partial["mens"] = by_arm["mens"].drop(shared_control_holdout[0])
+    with pytest.raises(ValueError) as uncovered:
+        models.cross_arm_metrics(partial, shared_control_holdout)
+    assert "shared" in str(uncovered.value)
+    with pytest.raises(ValueError):
+        models.cross_arm_metrics(
+            {"mens": by_arm["mens"]}, shared_control_holdout
+        )
+
+
+def test_cross_arm_metrics_report_spread_and_sign_disagreement(
+    primary_cells, shared_control_holdout
+):
+    """The quantified incomparability D-20 hands Phase 5.
+
+    Measured on the visit cell at the committed split: the two arms'
+    predicted uplift correlates at +0.4227 with 4.50% of shared rows
+    disagreeing on sign. Related, but nowhere near interchangeable -- which
+    is precisely why a naive cross-arm argmax is a winner's curse over two
+    correlated noisy estimates (D-19), and why no rescaling is attempted
+    here.
+    """
+    by_arm = {
+        arm: pd.Series(
+            primary_cells[(arm, "visit")].u,
+            index=primary_cells[(arm, "visit")].index,
+        )
+        for arm in ("mens", "womens")
+    }
+    result = models.cross_arm_metrics(by_arm, shared_control_holdout)
+
+    for arm in ("mens", "womens"):
+        for statistic in ("mean", "sd", "min", "max", "negative_fraction"):
+            key = f"{arm}_{statistic}"
+            assert key in result, (
+                f"`{key}` is missing; D-20 records each arm's mean, spread, "
+                "range and negative fraction as measured fact."
+            )
+            assert isinstance(result[key], float)
+        assert result[f"{arm}_min"] <= result[f"{arm}_mean"]
+        assert result[f"{arm}_mean"] <= result[f"{arm}_max"]
+        assert result[f"{arm}_sd"] > 0.0
+
+    correlation = result["corr_between_arms"]
+    assert 0.0 < correlation < 1.0, (
+        f"the two arms' predicted uplift correlates at {correlation:.4f} on "
+        "the shared control holdout. At 0 they would be unrelated and at 1 "
+        "interchangeable; the finding is that they are neither (measured "
+        "+0.4227)."
+    )
+    assert 0.0 < result["sign_disagreement_fraction"] < 1.0, (
+        "the two arms never disagree on sign, which would make the "
+        "incomparability D-20 measures invisible (measured 4.50%)."
+    )
+
+
+def test_cross_arm_metrics_settle_the_negative_uplift_question(
+    primary_cells, shared_control_holdout
+):
+    """STATE.md's open blocker, settled empirically as STATE.md instructs.
+
+    The blocker asks whether a genuine negative-uplift segment survives
+    holdout validation ON THE MENS ARM, and says to settle it empirically
+    without assuming either answer. Measured on the visit cell at the
+    committed split, the answer is that the phenomenon appears on the OTHER
+    arm: the mens minimum predicted uplift is +0.046469, strictly positive,
+    so the primary learner predicts no negative-uplift customers for the
+    mens email at all; the womens minimum is -0.070802 and 4.50% of shared
+    rows sit below zero.
+
+    Those two figures are recorded here as a comment rather than pinned as
+    equalities, following `tests/test_coverage.py`'s disposition: the SIGN
+    of each minimum is the finding, its exact value is a property of one
+    split draw, and an equality assertion would fail on correct code the
+    moment the split moved.
+    """
+    by_arm = {
+        arm: pd.Series(
+            primary_cells[(arm, "visit")].u,
+            index=primary_cells[(arm, "visit")].index,
+        )
+        for arm in ("mens", "womens")
+    }
+    result = models.cross_arm_metrics(by_arm, shared_control_holdout)
+
+    assert result["mens_min"] > 0.0, (
+        f"the mens minimum predicted visit uplift is "
+        f"{result['mens_min']:.6f}. Measured at +0.046469 it is strictly "
+        "positive, which is the empirical answer to STATE.md's blocker: on "
+        "the mens arm there is no predicted negative-uplift segment. A "
+        "negative value here is a real change in the finding, not a "
+        "tolerance to widen."
+    )
+    assert result["mens_negative_fraction"] == 0.0, (
+        f"{result['mens_negative_fraction']:.4%} of shared rows carry a "
+        "negative mens uplift; the measured value is exactly zero and it "
+        "must agree with the minimum being positive."
+    )
+
+    assert result["womens_min"] < 0.0, (
+        f"the womens minimum predicted visit uplift is "
+        f"{result['womens_min']:.6f}. Measured at -0.070802, the "
+        "negative-uplift phenomenon the blocker asks about appears on the "
+        "WOMENS arm rather than the mens arm it names."
+    )
+    assert result["womens_negative_fraction"] > 0.0, (
+        "no shared row carries a negative womens uplift, which contradicts "
+        "a negative minimum (measured 4.50%)."
+    )
+
+
+# Ties are a property of DUPLICATE ROWS IN THE DESIGN MATRIX, not of the
+# learner. Measured on the mens holdout: 21,307 rows over only 18,922
+# distinct feature vectors, giving 288 tie groups and 12.55% of rows sitting
+# in a tie -- and the same three numbers for visit, conversion and spend,
+# because all three cells score the same duplicated rows.
+#
+# That retroactively justifies Phase 3's seeded tie-break (D-03): without
+# it, roughly an eighth of the ranking would be ordered by CSV row position,
+# and the Qini curve would be reading the source file's sort order as signal.
+def test_tie_diagnostics_on_real_holdout_scores_are_a_property_of_the_data(
+    primary_cells, real_inputs
+):
+    """Phase 3's `tie_diagnostics`, called -- never reimplemented here.
+
+    `evaluation.tie_diagnostics` is already a complete public function and
+    `pipeline.train()` calls it directly; a second tie definition in
+    `models.py` would be two answers to one question.
+    """
+    reports = {
+        outcome: evaluation.tie_diagnostics(primary_cells[("mens", outcome)].u)
+        for outcome in models.OUTCOME_KIND
+    }
+
+    visit = reports["visit"]
+    for outcome, report in reports.items():
+        assert report == visit, (
+            f"the mens {outcome} cell reports the tie structure {report} "
+            f"against visit's {visit}. Ties come from duplicate rows in the "
+            "design matrix, so all three outcomes must report identically; "
+            "a difference means the three cells are not scoring the same "
+            "rows."
+        )
+
+    X_hold = real_inputs.mens.X_hold
+    assert visit["n_distinct"] == len(X_hold.drop_duplicates()), (
+        f"the mens holdout carries {visit['n_distinct']} distinct scores "
+        f"against {len(X_hold.drop_duplicates())} distinct design-matrix "
+        "rows. The two must agree: a deterministic model maps identical "
+        "feature vectors to identical scores, which is the whole reason the "
+        "tie fraction is a property of the data."
+    )
+    assert visit["n_scores"] > visit["n_distinct"]
+    assert 0.0 < visit["fraction_in_ties"] < 1.0
