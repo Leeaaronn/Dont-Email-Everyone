@@ -552,6 +552,35 @@ def _relabel_qini_axis(fig, outcome: str, *, axis: str) -> None:
         )
     setter(label.replace("visits", OUTCOME_NOUN[outcome]))
 
+    # The factory ran `tight_layout` with the SHORTER label in place, and
+    # "conversions" is five characters longer than "visits". Re-running the
+    # layout is not enough on its own: at the default 10-point size that
+    # label measures 561 pixels against a 550-pixel canvas, so it cannot fit
+    # down the side of the figure at any margin and loses its closing bracket
+    # off the top. The size is therefore stepped down until the label's own
+    # rendered extent lies inside the canvas -- MEASURED each time rather
+    # than assumed, so this keeps working if the wording changes again.
+    #
+    # Correcting a mislabelled axis and leaving the correction clipped would
+    # trade one unreadable figure for another.
+    artist = axes.xaxis.label if axis == "x" else axes.yaxis.label
+    for size in (10.0, 9.5, 9.0, 8.5, 8.0, 7.5, 7.0):
+        artist.set_fontsize(size)
+        fig.tight_layout()
+        fig.canvas.draw()
+        extent = artist.get_window_extent(fig.canvas.get_renderer())
+        if axis == "x":
+            fits = extent.x0 >= 0.0 and extent.x1 <= fig.bbox.width
+        else:
+            fits = extent.y0 >= 0.0 and extent.y1 <= fig.bbox.height
+        if fits:
+            return
+    raise ValueError(
+        f"the {axis} axis label {getter()!r} does not fit the canvas at any "
+        "size down to 7 points; shorten the wording rather than publishing a "
+        "clipped label."
+    )
+
 
 def _worst_base_score(cell, scores):
     """Return the base score this cell's uplift correlates most strongly with.
