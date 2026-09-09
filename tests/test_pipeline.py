@@ -286,7 +286,7 @@ def test_written_parquets_load_without_duckdb_or_pandera(analyzed):
 # --------------------------------------------------------------------------
 
 
-def test_cli_help_lists_all_three_subcommands():
+def test_cli_help_lists_all_four_subcommands():
     result = subprocess.run(
         [sys.executable, "-m", "dont_email_everyone.pipeline", "--help"],
         cwd=config.ROOT,
@@ -294,7 +294,7 @@ def test_cli_help_lists_all_three_subcommands():
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    for subcommand in ("ingest", "analyze", "all"):
+    for subcommand in ("ingest", "analyze", "train", "all"):
         assert subcommand in result.stdout, f"--help does not name {subcommand}"
 
 
@@ -315,6 +315,7 @@ def test_ingest_subcommand_delegates_to_build_all(monkeypatch):
     calls = []
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
+    monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
     pipeline.main(["ingest"])
     assert calls == ["build_all"], (
         "the ingest subcommand must delegate to the unmodified "
@@ -322,14 +323,16 @@ def test_ingest_subcommand_delegates_to_build_all(monkeypatch):
     )
 
 
-def test_all_subcommand_runs_ingest_then_analyze(monkeypatch):
+def test_all_subcommand_runs_ingest_then_analyze_then_train(monkeypatch):
     calls = []
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
+    monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
     pipeline.main(["all"])
-    assert calls == ["build_all", "analyze"], (
-        "`all` must rebuild the inputs before analysing them; the reverse "
-        "order would analyse the previous run's artifacts"
+    assert calls == ["build_all", "analyze", "train"], (
+        "`all` must rebuild the inputs before analysing them and analyse "
+        "before training; the reverse order would analyse the previous "
+        "run's artifacts, and train() reads the ate.parquet analyze writes"
     )
 
 
@@ -337,8 +340,21 @@ def test_analyze_subcommand_does_not_reingest(monkeypatch):
     calls = []
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
+    monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
     pipeline.main(["analyze"])
     assert calls == ["analyze"]
+
+
+def test_train_subcommand_neither_reingests_nor_reanalyses(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
+    monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
+    monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
+    pipeline.main(["train"])
+    assert calls == ["train"], (
+        "`train` reads the committed ate.parquet rather than regenerating "
+        "it, so it must not silently re-run analyze()"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -385,6 +401,10 @@ def test_pipeline_pairs_every_savefig_with_a_close():
     assert body.count("savefig(") == body.count("plt.close(") == 2
 
 
+# 6 = analyze()'s balance/ate/coverage plus train()'s model_results,
+# permutation_null and scored_holdout. Each write is an explicit statement
+# rather than a loop precisely so this count means something: a loop would
+# write three artifacts from one occurrence of each token.
 def test_pipeline_writes_every_parquet_without_an_index():
     body = _pipeline_body()
-    assert body.count("to_parquet(") == body.count("index=False") == 3
+    assert body.count("to_parquet(") == body.count("index=False") == 6

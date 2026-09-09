@@ -1,15 +1,19 @@
 """The project's write entrypoint: `python -m dont_email_everyone.pipeline`.
 
-Three subcommands:
+Four subcommands:
 
 - `ingest` delegates to `ingest.build_all()` and does nothing else. That
-  function's docstring commits it to four gates and three artifacts and
+  function's docstring commits it to five gates and three artifacts and
   `tests/test_build_all.py` asserts that contract, so this orchestrator
   calls it rather than extending it.
 - `analyze` reads the three committed Parquet inputs and writes four
   analysis artifacts plus two figures (below).
-- `all` runs `ingest` then `analyze`, which is the fresh-clone path
-  (ROADMAP Phase 7 criterion 5).
+- `train` reads those same three inputs PLUS the `ate.parquet` `analyze`
+  wrote, fits the eighteen Phase 4 model cells, runs the eight permutation
+  nulls, applies the pre-registered ship rule and writes four model
+  artifacts (below).
+- `all` runs `ingest` then `analyze` then `train`, which is the fresh-clone
+  path (ROADMAP Phase 7 criterion 5).
 
 `analyze` writes, under `config.PROCESSED`:
 
@@ -38,6 +42,46 @@ Three subcommands:
 
 and, under `config.FIGURES`, `love_plot.png` and `ate_forest.png`.
 
+`train` writes, under `config.PROCESSED`:
+
+- `model_results.parquet` -- the eighteen-row results table at grain
+  (arm, outcome, learner): three outcomes x two arms x three learner
+  configurations, each row carrying its train and holdout Qini, the
+  response-baseline comparison, the permutation-null gate where a null was
+  run, both diagnostic gates, and the single `ships` flag their conjunction
+  produces. Its own table rather than a JSON block because the grain is
+  tabular and matches `ate.parquet`'s precedent exactly.
+- `permutation_null.parquet` -- the eight null cells' draws in long form,
+  one row per (cell, draw). Long rather than wide because the histogram
+  wants one column of draws per cell, recomputing a quantile is then a
+  groupby, and a ninth cell later appends rows instead of altering the
+  schema. Every row carries its own shuffle count and seed, so a row lifted
+  into a report still says what produced it.
+- `scored_holdout.parquet` -- one row per HOLDOUT customer of the analysis
+  table, wide, with the six primary cells' uplift, both base scores and the
+  response baseline. Holdout rows only, which is what makes an in-sample
+  metric structurally impossible to report downstream rather than merely
+  discouraged. Wide rather than keyed by (arm, customer) because the two
+  arms share one control group: the wide form makes those shared customers
+  literally one set of rows, so a later phase resamples them once per
+  replicate with a groupby rather than a join. Score columns are `float32`,
+  which carries about seven decimal digits -- six orders of magnitude more
+  than a ranking or a dollar figure needs -- and keeps the file inside the
+  few megabytes the deployed app budgets for its load.
+- `model.json` -- the scalar block: the cross-arm comparability metrics
+  (whose grain is the arm PAIR), the per-arm tie diagnostics, the six
+  committed effects the calibration compared against, the split seed and
+  counts, and a headline naming which cells shipped. Same grain rule as
+  `ate.json` above -- anything whose grain is not the table's grain lands
+  here rather than becoming a fifth and sixth table.
+
+`train` READS the `ate.parquet` that `analyze` writes, and does not
+recompute an average treatment effect of its own: the calibration check
+must compare a model against a number a different phase produced and
+canaried, or it is a phase marking its own homework. That is a real
+ordering dependency -- `ingest` then `analyze` then `train` -- so `all`
+runs all three and `train` raises by name if `ate.parquet` is absent.
+
 Every interval is stored as two float columns, never a tuple-valued column:
 a nested dtype survives a write here and then fails to load in a later phase
 whose dependency set is pandas and pyarrow alone. Every Parquet is written
@@ -58,6 +102,7 @@ schema gates.
 """
 
 import argparse
+import hashlib
 import json
 
 import matplotlib
@@ -77,7 +122,11 @@ from dont_email_everyone import (  # noqa: E402
     balance,
     config,
     coverage,
+    evaluation,
+    features,
+    frames,
     ingest,
+    models,
     plots,
 )
 
@@ -266,9 +315,510 @@ def analyze() -> None:
     print(f"[done] wrote 4 analysis artifacts to {config.PROCESSED}")
 
 
+# --------------------------------------------------------------------------
+# Phase 4 -- the uplift models, their gates, and the four committed artifacts
+# --------------------------------------------------------------------------
+
+# The project's one seed literal, restated here rather than imported from a
+# project-wide constant: CONTEXT.md D-08 declines a `config.SEED` on purpose,
+# so every stochastic entry point names its own. `frames.assign_split`,
+# `evaluation.qini_curve`'s tie shuffle and `models.permutation_null` all
+# happen to use this number and all consume INDEPENDENT `Generator`
+# instances, so there is no correlation between the split, the tie-breaking
+# and the null.
+TRAIN_SEED = 20260902
+
+# The three outcomes and the three learner configurations, both DERIVED from
+# the constants that define them rather than typed out, so the eighteen-cell
+# lineup cannot disagree with `models.LEARNERS` and `models.OUTCOME_KIND`.
+# 02-03 generates its six ATE rows the same way and for the same reason.
+OUTCOMES = tuple(models.OUTCOME_KIND)
+LEARNER_CONFIGS = tuple(
+    dict.fromkeys(learner for _kind, learner in models.LEARNERS)
+)
+
+
+def _cell_seed(arm: str, outcome: str, learner: str) -> int:
+    """Return the permutation-null seed for one `(arm, outcome, learner)`.
+
+    Derived from the cell's own IDENTITY, never from its position in
+    `models.NULL_CELLS`: a positional offset would silently re-seed every
+    later cell if that tuple were ever reordered or extended, and the
+    committed draws would stop reproducing without anything failing.
+    Deriving from the identity is what makes plan 04-06's contract -- "a
+    single cell regenerates bit-for-bit from its seed" -- true of a single
+    cell rather than only of the whole suite.
+
+    `hashlib.sha256`, never the built-in `hash`: string hashing is salted
+    per interpreter process under `PYTHONHASHSEED`, so `hash` would give a
+    different seed on every run and the committed null would be
+    irreproducible.
+    """
+    digest = hashlib.sha256(
+        f"{arm}/{outcome}/{learner}".encode("utf-8")
+    ).digest()
+    return TRAIN_SEED + int.from_bytes(digest[:4], "big") % 1_000_000
+
+
+def _ratio(qini_train: float, qini_holdout: float) -> float:
+    """Return `qini_train / qini_holdout`, or nan when the holdout Qini is 0.
+
+    The train-over-holdout ratio is CONTEXT.md D-14's overfitting exhibit --
+    a default forest reaching a spectacular training Qini and nothing on the
+    holdout. A zero denominator returns nan rather than raising or returning
+    an infinity, because a nan reads as "undefined" in the artifact while an
+    infinity would sort as the largest ratio in the table.
+    """
+    if qini_holdout == 0.0:
+        return float("nan")
+    return float(qini_train / qini_holdout)
+
+
+def train() -> None:
+    """Fit every Phase 4 model cell and write the four artifacts described in
+    the module docstring.
+
+    Reads `analysis_table.parquet`, both committed arm frames and
+    `ate.parquet` from `config.PROCESSED` via pathlib on the ROOT-anchored
+    constant. `ate.parquet` is an INPUT here, not something recomputed:
+    CONTEXT.md D-22's calibration check compares each cell's mean predicted
+    uplift against the average treatment effect Phase 2 computed and Phase 2
+    canaried, and a number this same phase produced would be a weaker
+    comparison. That is the ordering dependency `analyze` -> `train`, and a
+    missing `ate.parquet` raises here by name rather than surfacing as a
+    bare read error from pandas.
+
+    ONE design matrix is built, on all 64,000 rows, and every per-arm and
+    per-split view below is a `.loc` slice of it. Fitting an encoder per arm
+    is PITFALLS.md Pitfall 5's named failure mode -- two arms in two
+    different feature spaces, and a difference between them is arithmetic
+    between two different meanings.
+
+    Every estimator is a separate statement and a failure in any one
+    propagates, so a run either produces the complete artifact set or
+    produces none of it -- all eighteen fits, all eight nulls and every
+    diagnostic finish before the first byte is written.
+
+    Runtime is dominated by the eight permutation nulls at about six to
+    seven minutes single-threaded; the eighteen fits themselves are seconds.
+    A progress line is printed per null cell, because a silent six-minute
+    pause reads as a hang.
+    """
+    analysis_path = config.PROCESSED / "analysis_table.parquet"
+    ate_path = config.PROCESSED / "ate.parquet"
+    # A plain if/raise naming the path, never a bare read: this is the
+    # `analyze` -> `train` ordering dependency made diagnosable at the point
+    # it is violated.
+    if not ate_path.is_file():
+        raise FileNotFoundError(
+            f"the committed average treatment effects are absent: "
+            f"{ate_path}. train() reads them rather than recomputing them "
+            "(CONTEXT.md D-22), so run the `analyze` subcommand first -- "
+            "`python -m dont_email_everyone.pipeline analyze` -- or run "
+            "`all`, which chains ingest, analyze and train in that order."
+        )
+
+    analysis = pd.read_parquet(analysis_path)
+    committed_ate = pd.read_parquet(ate_path)
+    committed_effect = {
+        (str(row["arm"]), str(row["outcome"])): float(row["effect"])
+        for _, row in committed_ate.iterrows()
+    }
+
+    # The two committed arm frames are read as the declared inputs they are,
+    # and used as a row-count cross-check on the frames rebuilt below. They
+    # are not used for the fits themselves: the committed copies carry a
+    # RESET RangeIndex, so slicing the design matrix by their index selects
+    # the wrong rows -- the defect plans 04-01 and 04-04 both recorded. The
+    # rebuilt frames preserve the analysis table's own index, which is the
+    # only index `X` can be sliced by.
+    committed_frames = {
+        "mens": pd.read_parquet(config.PROCESSED / "mens_vs_control.parquet"),
+        "womens": pd.read_parquet(
+            config.PROCESSED / "womens_vs_control.parquet"
+        ),
+    }
+    arm_frames = frames.build_all_frames(analysis)
+    for arm, frame in arm_frames.items():
+        if len(frame) != len(committed_frames[arm]):
+            raise ValueError(
+                f"the {arm!r} frame rebuilt from the analysis table has "
+                f"{len(frame)} rows against {len(committed_frames[arm])} in "
+                "the committed Parquet. The two must agree; a difference "
+                "means the committed inputs were produced from a different "
+                "analysis table and the ingest step needs re-running."
+            )
+
+    X, encoder = features.design_matrix(analysis)
+    is_holdout = (analysis["split"] == "holdout").to_numpy()
+    holdout_index = analysis.index[is_holdout]
+    print(
+        f"[1/6] inputs: analysis={analysis.shape} "
+        f"design matrix={X.shape} "
+        f"features={len(encoder.get_feature_names_out())} "
+        f"train={int((~is_holdout).sum())} holdout={len(holdout_index)}"
+    )
+
+    # Per-arm, per-split index sets. Every one is a slice of the SAME index,
+    # so `X.loc[...]`, the treatment column and the outcome column below are
+    # guaranteed to describe the same customers in the same order.
+    arm_index = {}
+    for arm, frame in arm_frames.items():
+        arm_split = analysis.loc[frame.index, "split"].to_numpy()
+        arm_index[arm] = {
+            "train": frame.index[arm_split == "train"],
+            "holdout": frame.index[arm_split == "holdout"],
+        }
+    print(
+        "[2/6] arm frames (train/holdout): "
+        + " ".join(
+            f"{arm}={len(arm_index[arm]['train'])}/"
+            f"{len(arm_index[arm]['holdout'])}"
+            for arm in arm_index
+        )
+    )
+
+    cells = {}
+    # The scores of the SIX primary cells only. The twelve forest cells are
+    # diagnostic exhibits (D-11) and are never eligible to ship, so their
+    # scores are summarized in `model_results.parquet` and deliberately not
+    # published per customer.
+    primary_scores = {}
+    for arm, frame in arm_frames.items():
+        treatment = frame["treatment"]
+        train_idx = arm_index[arm]["train"]
+        hold_idx = arm_index[arm]["holdout"]
+        X_train = X.loc[train_idx]
+        X_hold = X.loc[hold_idx]
+        t_train = treatment.loc[train_idx].to_numpy()
+        t_hold = treatment.loc[hold_idx].to_numpy()
+        for outcome in OUTCOMES:
+            y_train = analysis.loc[train_idx, outcome].to_numpy()
+            y_hold = analysis.loc[hold_idx, outcome].to_numpy()
+            for learner in LEARNER_CONFIGS:
+                make = models.LEARNERS[(models.OUTCOME_KIND[outcome], learner)]
+                m0, m1 = models.t_learner(make, X_train, t_train, y_train)
+
+                uplift_train = models.uplift(m0, m1, X_train)
+                uplift_hold = models.uplift(m0, m1, X_hold)
+                qini_train = evaluation.qini_coefficient(
+                    *evaluation.qini_curve(uplift_train, t_train, y_train)
+                )
+                qini_hold = evaluation.qini_coefficient(
+                    *evaluation.qini_curve(uplift_hold, t_hold, y_hold)
+                )
+
+                # D-13's contrast. `response_baseline` IS `m1` -- the "who
+                # is likely to buy" ranking, from the same learner class,
+                # fit on the treated arm. No second fit, so the comparison
+                # isolates uplift against propensity rather than one
+                # learner against another.
+                baseline_hold = models.response_baseline(m1, X_hold)
+                qini_baseline = evaluation.qini_coefficient(
+                    *evaluation.qini_curve(baseline_hold, t_hold, y_hold)
+                )
+
+                score_m0 = models._score(m0, X_hold)
+                score_m1 = models._score(m1, X_hold)
+                calibration = models.calibration_check(
+                    float(np.mean(uplift_hold)),
+                    committed_effect[(arm, outcome)],
+                    arm,
+                    outcome,
+                )
+                propensity = models.propensity_correlations(
+                    uplift_hold, score_m0, score_m1
+                )
+
+                cell = {
+                    "arm": arm,
+                    "outcome": outcome,
+                    "learner": learner,
+                    # D-11: eligibility is STRUCTURAL, read off the
+                    # pre-registered primary configuration, never assigned
+                    # per cell after a holdout number has been seen.
+                    "eligible": bool(learner == models.PRIMARY_CONFIG),
+                    "qini_train": float(qini_train),
+                    "qini_holdout": float(qini_hold),
+                    "train_holdout_ratio": _ratio(qini_train, qini_hold),
+                    "qini_response_baseline": float(qini_baseline),
+                    "beats_baseline": bool(qini_hold > qini_baseline),
+                    "null_p95": float("nan"),
+                    "p_empirical": float("nan"),
+                    "exceeds_null_p95": None,
+                    "mean_predicted_uplift": calibration[
+                        "mean_predicted_uplift"
+                    ],
+                    "committed_ate": calibration["committed_ate"],
+                    "calibration_abs_err": calibration["abs_err"],
+                    "calibration_band": calibration["band"],
+                    "calibration_pass": calibration["calibration_pass"],
+                    "corr_m0": propensity["corr_m0"],
+                    "corr_m1": propensity["corr_m1"],
+                    "max_abs_corr": propensity["max_abs_corr"],
+                    "propensity_gate_pass": propensity[
+                        "propensity_gate_pass"
+                    ],
+                    "ships": False,
+                    "n_train": int(len(train_idx)),
+                    "n_holdout": int(len(hold_idx)),
+                    "seed": _cell_seed(arm, outcome, learner),
+                }
+                cells[(arm, outcome, learner)] = cell
+
+                if learner == models.PRIMARY_CONFIG:
+                    primary_scores[(arm, outcome)] = {
+                        "index": hold_idx,
+                        "uplift": uplift_hold,
+                        "m0": score_m0,
+                        "m1": score_m1,
+                        "response": baseline_hold,
+                    }
+    print(
+        f"[3/6] fitted {len(cells)} cells "
+        f"({len(arm_frames)} arms x {len(OUTCOMES)} outcomes x "
+        f"{len(LEARNER_CONFIGS)} learners), "
+        f"{sum(c['eligible'] for c in cells.values())} eligible"
+    )
+
+    null_rows = []
+    for position, (arm, outcome, learner) in enumerate(
+        models.NULL_CELLS, start=1
+    ):
+        cell = cells[(arm, outcome, learner)]
+        train_idx = arm_index[arm]["train"]
+        hold_idx = arm_index[arm]["holdout"]
+        make = models.LEARNERS[(models.OUTCOME_KIND[outcome], learner)]
+        draws = models.permutation_null(
+            make,
+            X.loc[train_idx],
+            arm_frames[arm]["treatment"].loc[train_idx].to_numpy(),
+            analysis.loc[train_idx, outcome].to_numpy(),
+            X.loc[hold_idx],
+            arm_frames[arm]["treatment"].loc[hold_idx].to_numpy(),
+            analysis.loc[hold_idx, outcome].to_numpy(),
+            n_shuffles=models.PERMUTATION_SHUFFLES,
+            seed=cell["seed"],
+        )
+        summary = models.null_summary(
+            draws,
+            cell["qini_holdout"],
+            n_shuffles=models.PERMUTATION_SHUFFLES,
+            seed=cell["seed"],
+        )
+        cell["null_p95"] = summary["null_p95"]
+        cell["p_empirical"] = summary["p_empirical"]
+        cell["exceeds_null_p95"] = summary["exceeds_null_p95"]
+        for draw, value in enumerate(draws):
+            null_rows.append(
+                {
+                    "arm": arm,
+                    "outcome": outcome,
+                    "learner": learner,
+                    "draw": int(draw),
+                    "qini_null": float(value),
+                    "qini_observed": summary["qini_observed"],
+                    "null_p95": summary["null_p95"],
+                    "p_empirical": summary["p_empirical"],
+                    "n_shuffles": int(summary["n_shuffles"]),
+                    "seed": int(summary["seed"]),
+                }
+            )
+        print(
+            f"      null {position}/{len(models.NULL_CELLS)} "
+            f"{arm}/{outcome}/{learner}: "
+            f"observed={summary['qini_observed']:+.6f} "
+            f"p95={summary['null_p95']:+.6f} "
+            f"p={summary['p_empirical']:.4f} "
+            f"exceeds={summary['exceeds_null_p95']}"
+        )
+    print(
+        f"[4/6] permutation nulls: {len(models.NULL_CELLS)} cells x "
+        f"{models.PERMUTATION_SHUFFLES} refit shuffles = "
+        f"{len(null_rows)} draws"
+    )
+
+    # CONTEXT.md D-04's pre-registered ship rule, in words: a cell ships only
+    # if it is `eligible` (D-11 -- one of the six primary-learner cells; a
+    # forest exhibit and any cell with no null can never ship, which falls
+    # out of this term alone) AND its holdout Qini exceeds its own
+    # permutation null's 95th percentile AND its ranking beats the
+    # response-model baseline -- BOTH of D-04's two conditions, never either
+    # -- AND it clears D-22's calibration gate AND D-21's propensity gate.
+    # The last two are shipping gates rather than diagnostics: a cell that
+    # beats its null and the baseline but correlates above the threshold
+    # with a base score is a repackaged propensity ranking and must not
+    # ship, however good its Qini looks. All five conditions are conjunctive.
+    for cell in cells.values():
+        cell["ships"] = bool(
+            cell["eligible"]
+            and cell["exceeds_null_p95"] is True
+            and cell["beats_baseline"]
+            and cell["calibration_pass"]
+            and cell["propensity_gate_pass"]
+        )
+
+    shipping = [
+        (cell["arm"], cell["outcome"], cell["learner"])
+        for cell in cells.values()
+        if cell["ships"]
+    ]
+    print(
+        f"[5/6] ship rule: {len(shipping)}/"
+        f"{sum(c['eligible'] for c in cells.values())} eligible cells ship: "
+        + (
+            ", ".join(f"{arm}/{outcome}" for arm, outcome, _ in shipping)
+            if shipping
+            else "(none)"
+        )
+    )
+
+    results = pd.DataFrame(list(cells.values()))
+    # A nullable `boolean`, not `bool`: ten of the eighteen cells have no
+    # permutation null, and None there is honest where False would conflate
+    # "not tested" with "tested and did not clear the bar". Every flag that
+    # IS defined on all eighteen rows stays a plain `bool`, following
+    # ate.parquet's `reject_holm`.
+    results["exceeds_null_p95"] = results["exceeds_null_p95"].astype("boolean")
+    for column in (
+        "eligible",
+        "beats_baseline",
+        "calibration_pass",
+        "propensity_gate_pass",
+        "ships",
+    ):
+        results[column] = results[column].astype("bool")
+
+    null_out = pd.DataFrame(null_rows)
+
+    # D-09's labelling contract. The prefix is derived from the SAME
+    # in-memory ship decision that populates `model_results.parquet`, so the
+    # two artifacts cannot drift: one source, one decision, two renderings of
+    # it. A report can be skimmed past; a column name cannot. Phases 5, 6 and
+    # 7 must respect the prefix -- a column named `unproven_uplift_...` is a
+    # cell that did not clear the pre-registered bar, and a headline number
+    # must not be built on one without saying so.
+    scored = analysis.loc[
+        holdout_index,
+        [
+            "segment",
+            "split",
+            "history_segment",
+            *config.PRE_TREATMENT_FEATURES,
+            "visit",
+            "conversion",
+            "spend",
+        ],
+    ].copy()
+    unproven_columns = []
+    for (arm, outcome), scores in primary_scores.items():
+        cell = cells[(arm, outcome, models.PRIMARY_CONFIG)]
+        uplift_column = f"uplift_{arm}_{outcome}"
+        if not cell["ships"]:
+            uplift_column = f"unproven_{uplift_column}"
+            unproven_columns.append(uplift_column)
+        for column, values in (
+            (uplift_column, scores["uplift"]),
+            (f"m0_{arm}_{outcome}", scores["m0"]),
+            (f"m1_{arm}_{outcome}", scores["m1"]),
+            (f"response_{arm}_{outcome}", scores["response"]),
+        ):
+            # NaN outside the arm's own frame: a Womens E-Mail customer has
+            # no mens-arm uplift, and writing a number there would invent one.
+            filled = pd.Series(np.nan, index=holdout_index, dtype="float32")
+            filled.loc[scores["index"]] = np.asarray(values, dtype="float32")
+            scored[column] = filled
+
+    # D-20's cross-arm block, measured on the SHARED CONTROL holdout rows --
+    # the customers who appear in both arms' holdouts because both arms are
+    # compared against the same control group. A union would count them twice.
+    shared_index = analysis.index[
+        (analysis["segment"] == config.CONTROL).to_numpy() & is_holdout
+    ]
+    cross_arm = {}
+    for outcome in OUTCOMES:
+        cross_arm[outcome] = models.cross_arm_metrics(
+            {
+                arm: pd.Series(
+                    primary_scores[(arm, outcome)]["uplift"],
+                    index=primary_scores[(arm, outcome)]["index"],
+                )
+                for arm in arm_frames
+            },
+            shared_index,
+        )
+    ties = {
+        arm: evaluation.tie_diagnostics(
+            primary_scores[(arm, "visit")]["uplift"]
+        )
+        for arm in arm_frames
+    }
+
+    model_headline = {
+        "generated_by": "dont_email_everyone.pipeline.train",
+        "split": {
+            "seed": int(TRAIN_SEED),
+            "n_rows": int(len(analysis)),
+            "n_train": int((~is_holdout).sum()),
+            "n_holdout": int(len(holdout_index)),
+            "n_shared_control_holdout": int(len(shared_index)),
+        },
+        "gates": {
+            "primary_config": str(models.PRIMARY_CONFIG),
+            "permutation_shuffles": int(models.PERMUTATION_SHUFFLES),
+            "calibration_sigma": float(models.CALIBRATION_SIGMA),
+            "propensity_corr_threshold": float(
+                models.PROPENSITY_CORR_THRESHOLD
+            ),
+        },
+        "committed_ate": _records(committed_ate[["arm", "outcome", "effect"]]),
+        "cross_arm_metrics": {
+            outcome: {key: _jsonable(value) for key, value in block.items()}
+            for outcome, block in cross_arm.items()
+        },
+        "tie_diagnostics": {
+            arm: {key: _jsonable(value) for key, value in block.items()}
+            for arm, block in ties.items()
+        },
+        "headline": {
+            "n_cells": int(len(cells)),
+            "n_eligible": int(results["eligible"].sum()),
+            "n_shipping": int(results["ships"].sum()),
+            "shipping_cells": [
+                f"{arm}/{outcome}/{learner}"
+                for arm, outcome, learner in shipping
+            ],
+            "unproven_columns": sorted(unproven_columns),
+        },
+    }
+    print(
+        f"[6/6] artifacts assembled: results={results.shape} "
+        f"null={null_out.shape} scored={scored.shape} "
+        f"unproven={len(unproven_columns)}"
+    )
+
+    config.PROCESSED.mkdir(parents=True, exist_ok=True)
+
+    # Three explicit statements, never a loop: the source-reading boundary
+    # test counts `to_parquet(` against `index=False` in this module's body,
+    # and a loop would write three artifacts from one occurrence of each.
+    results.to_parquet(
+        config.PROCESSED / "model_results.parquet", index=False
+    )
+    null_out.to_parquet(
+        config.PROCESSED / "permutation_null.parquet", index=False
+    )
+    scored.to_parquet(config.PROCESSED / "scored_holdout.parquet", index=False)
+    (config.PROCESSED / "model.json").write_text(
+        json.dumps(model_headline, indent=2) + "\n", encoding="utf-8"
+    )
+
+    print(f"[done] wrote 4 model artifacts to {config.PROCESSED}")
+
+
 def main(argv=None) -> None:
     """Parse `argv` and run one subcommand. No default: a bare invocation is
-    an error rather than a silent choice of one of the three.
+    an error rather than a silent choice of one of the four.
     """
     parser = argparse.ArgumentParser(
         prog="python -m dont_email_everyone.pipeline",
@@ -279,15 +829,22 @@ def main(argv=None) -> None:
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser(
         "ingest",
-        help="run the four ingestion gates and write the three input Parquets",
+        help="run the five ingestion gates and write the three input Parquets",
     )
     subcommands.add_parser(
         "analyze",
         help="write the Phase 2 analysis artifacts and figures",
     )
     subcommands.add_parser(
+        "train",
+        help=(
+            "fit the uplift model cells and write the Phase 4 model "
+            "artifacts (reads the ate.parquet analyze wrote)"
+        ),
+    )
+    subcommands.add_parser(
         "all",
-        help="run ingest then analyze -- the fresh-clone path",
+        help="run ingest then analyze then train -- the fresh-clone path",
     )
     args = parser.parse_args(argv)
 
@@ -295,9 +852,12 @@ def main(argv=None) -> None:
         ingest.build_all()
     elif args.command == "analyze":
         analyze()
+    elif args.command == "train":
+        train()
     elif args.command == "all":
         ingest.build_all()
         analyze()
+        train()
     else:
         raise ValueError(
             f"unrecognised subcommand {args.command!r}; argparse should have "
