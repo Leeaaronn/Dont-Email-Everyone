@@ -6,6 +6,16 @@ Every number below is read from a committed artifact under `data/processed/`. No
 
 **A note on the citation convention, so the difference between the three write-ups reads as deliberate.** `reports/validity.md` (Phase 2) traces every number to a committed artifact path. `reports/metric.md` (Phase 3) instead names the pytest node that reproduces each number, because Phase 3 built a metric and persisted nothing at all. Phase 4 persists four artifacts and thirteen figures, so this document reverts to Phase 2's convention.
 
+## Result in brief
+
+*A signpost, not the argument. Every number here is stated and sourced again below, and the rule that produced it follows immediately — fixed before any of these results were seen, not fitted to them.*
+
+Two of the six eligible model cells cleared both pre-registered conditions, and both are on the **womens** arm: predicted **visit** uplift (empirical p-value 0.0100) and predicted **conversion** uplift (empirical p-value 0.0199). Each beats the 95th percentile of its own permutation null, and each out-ranks the response-model baseline on the same holdout customers.
+
+**Four eligible cells did not clear the bar**, including **mens/visit** — the cell this project's own research and planning documents are organised around — which failed **both** conditions. Mens conversion and mens spend both produce a negative holdout Qini; womens spend beats its baseline and still falls short of its null.
+
+What this phase is entitled to claim is therefore narrow: on the womens arm, at one pre-committed split, two uplift rankings carry signal that shuffling the treatment label does not reproduce. Read the acceptance criteria next — they are what make that a decision rather than an observation.
+
 ## Acceptance criteria, stated before the analysis
 
 A model cell — one (arm, outcome, learner) triple — is published as a real result only if **both** of the following hold:
