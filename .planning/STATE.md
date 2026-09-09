@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-09-09T04:58:40.178Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-09-09T17:45:12.624Z"
 last_activity: 2026-09-09
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 26
-  completed_plans: 20
-  percent: 77
+  completed_plans: 21
+  percent: 43
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 04 (uplift-modeling) — EXECUTING
-Plan: 4 of 9
+Plan: 2 of 9
 Status: Ready to execute
 Last activity: 2026-09-09
 
-Progress: [████████░░] 77%
+Progress: [████████░░] 81%
 
 ## Performance Metrics
 
@@ -72,6 +72,7 @@ Progress: [████████░░] 77%
 | Phase 04 P01 | 38min | 3 tasks | 4 files |
 | Phase 04 P02 | 51min | 3 tasks | 2 files |
 | Phase 04 P03 | 22min | 3 tasks | 7 files |
+| Phase 04 P04 | 20min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -152,6 +153,11 @@ Recent decisions affecting current work:
 - [Phase 04-03]: CONTEXT.md D-07 supersedes 02-06's byte-identical build_all decision: the split is materialized inside the gated build (04-03)
 - [Phase 04-03]: Gate 4 sits between Pandera validation and frame construction because RawHillstrom's strict/ordered flags admit no other position; the schema was not weakened (04-03)
 - [Phase 04-03]: Phase 2 artifacts (ate/balance/coverage.parquet) are not regenerated for the split column: content is identical and freshness is asserted on content, never bytes (04-03)
+- [Phase 04-04]: the criterion-2 feature-space gate raises on an absent or empty feature_names_in_ BEFORE comparing the two arrays -- without that first check two estimators that both lack the attribute compare equal via getattr(..., None) and the gate passes on exactly the failure it exists to catch
+- [Phase 04-04]: the oracle-recovery test does NOT use synthetic_frame's hetero mode -- _u comes from an independent default_rng(seed + 1) stream, so _tau is unlearnable from config.PRE_TREATMENT_FEATURES by construction and a T-learner correlating with it would be evidence of a leak, not of skill; the test builds its individual effect from recency instead
+- [Phase 04-04]: real-data model tests rebuild each arm frame with frames.build_frame rather than reading the committed arm Parquets, whose reset RangeIndex makes X.loc[frame.index] select the wrong 42,613 rows -- the plan's own acceptance snippet carried the bug 04-01 had already recorded
+- [Phase 04-04]: mean predicted uplift on the mens visit holdout measures +0.0800, not the +0.0754 the plan quotes; the mens visit ATE is +0.0766 full-arm / +0.0727 holdout and a T-learner's mean prediction is not constrained to equal either, so this is a stale research figure rather than a defect
+- [Phase 04-04]: UPLIFT-01 left Pending for the third time -- 04-04 ships the T-learner machinery and proves it on both arms real data, but fits and persists no per-arm model; the requirement becomes Complete in 04-05, following the 04-01/04-02/04-03 precedent
 
 ### Pending Todos
 
@@ -176,6 +182,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T04:57:08.973Z
+Last session: 2026-09-09T17:44:45.064Z
 Stopped at: Completed 04-02-PLAN.md
 Resume file: None
