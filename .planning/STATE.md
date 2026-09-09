@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-09-09T17:45:12.624Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-09-09T18:00:23.820Z"
 last_activity: 2026-09-09
 progress:
   total_phases: 7
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 04 (uplift-modeling) — EXECUTING
-Plan: 2 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-09-09
 
@@ -73,6 +73,7 @@ Progress: [████████░░] 81%
 | Phase 04 P02 | 51min | 3 tasks | 2 files |
 | Phase 04 P03 | 22min | 3 tasks | 7 files |
 | Phase 04 P04 | 20min | 2 tasks | 2 files |
+| Phase 04 P05 | 18min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -158,6 +159,11 @@ Recent decisions affecting current work:
 - [Phase 04-04]: real-data model tests rebuild each arm frame with frames.build_frame rather than reading the committed arm Parquets, whose reset RangeIndex makes X.loc[frame.index] select the wrong 42,613 rows -- the plan's own acceptance snippet carried the bug 04-01 had already recorded
 - [Phase 04-04]: mean predicted uplift on the mens visit holdout measures +0.0800, not the +0.0754 the plan quotes; the mens visit ATE is +0.0766 full-arm / +0.0727 holdout and a T-learner's mean prediction is not constrained to equal either, so this is a stale research figure rather than a defect
 - [Phase 04-04]: UPLIFT-01 left Pending for the third time -- 04-04 ships the T-learner machinery and proves it on both arms real data, but fits and persists no per-arm model; the requirement becomes Complete in 04-05, following the 04-01/04-02/04-03 precedent
+- [Phase ?]: [Phase 04-05]: the D-22 magnitude band is 3 x the per-cell seed-to-seed SD MEASURED in this repo (20 split draws, 120 cell-seed observations), never a relative percentage -- PITFALLS' 0.0769-0.0789 visit-only band is named as REJECTED in both models.py and tests/test_models.py so a future agent reading a calibration failure cannot restore it
+- [Phase ?]: [Phase 04-05]: the plan's 'band/ATE ratios span more than an order of magnitude' does not reproduce -- measured 6.41x, so test_calibration_band_is_absolute_not_relative asserts >4x and adds a sharper measured claim: a single 5% relative bar fails 4 of the 6 cells at the committed split, reproducing 04-RESEARCH Q7's median-seed finding
+- [Phase ?]: [Phase 04-05]: the D-21 propensity maximum measures 0.7635 here (mens/spend against m1), not the 0.879 04-RESEARCH quotes at the primary seed -- Q7's figure predates the committed split column; same cell, same base model, gate still passes, and both numbers are recorded beside the constant
+- [Phase ?]: [Phase 04-05]: cross_arm_metrics returns FLAT per-arm keys (mens_min, womens_negative_fraction, ...) rather than a nested by-arm dict, because pipeline._jsonable coerces scalars only and would stringify a nested mapping
+- [Phase ?]: [Phase 04-05]: UPLIFT-01 left Pending for the fourth time -- 04-05 ships three diagnostics and fits no per-arm model of its own; 04-04's summary predicted completion here, but the requirement asks for models per arm and those are fit and persisted by pipeline.train() in 04-07
 
 ### Pending Todos
 
@@ -169,7 +175,7 @@ None yet.
 
 - [Phase 1] Stack research was skipped project-wide (5 consecutive agent failures on a transient infra error). Phase 1 planning needs a research pass to pin exact library versions, resolve the local Python 3.9 vs. current library floors question, and confirm the Pandera import path (`import pandera.pandas as pa`) before any ingest code is written.
 - [Phase 4/5] Multi-arm channel-choice tie-break rule is undecided; T-learner scores across arms share a correlated control group and are only loosely comparable. Needs a documented decision.
-- [Phase 4/5] Whether a genuine negative-uplift segment survives holdout validation on the Mens arm is unknown. Settle empirically; do not assume either answer.
+- ~~[Phase 4/5] Whether a genuine negative-uplift segment survives holdout validation on the Mens arm is unknown. Settle empirically; do not assume either answer.~~ **CLOSED by 04-05.** Settled empirically on the visit cell at the committed split: on the Mens arm **no** — the minimum predicted uplift on the shared control holdout is **+0.046469** with a zero negative fraction. On the Womens arm **yes** — the minimum is **-0.070802** with **4.50%** of shared rows below zero. The phenomenon appears on the opposite arm from the one the blocker names. Pinned by `tests/test_models.py::test_cross_arm_metrics_settle_the_negative_uplift_question`; 04-09 writes it up and notes the arm swap.
 - [Phase 6] Streamlit Community Cloud resource limits are sourced from a Feb-2024 forum FAQ (MEDIUM confidence). Re-check at planning time.
 
 ## Deferred Items
@@ -182,6 +188,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T17:44:45.064Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-09-09T18:00:01.409Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
