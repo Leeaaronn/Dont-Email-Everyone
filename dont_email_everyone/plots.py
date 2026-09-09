@@ -1,6 +1,19 @@
 """Figure factories for the analysis reports: the covariate Love plot and
-the average-treatment-effect forest plot of the Phase 2 validity report, and
-the Phase 3 Qini curve that evaluates an uplift ranking.
+the average-treatment-effect forest plot of the Phase 2 validity report, the
+Phase 3 Qini curve that evaluates an uplift ranking, and the four Phase 4
+factories -- the train-versus-holdout Qini overlay, the permutation-null
+histogram, the calibration comparison and the predicted-uplift-against-base-
+model scatter.
+
+The first three draw experiment-validity and ranking-evaluation output, which
+is a property of the data. The four added in Phase 4 draw MODEL output, which
+is a different claim: they show what a fitted ranking does on rows it was not
+fit on, and each one is built so that it can show the model FAILING as
+legibly as it shows the model working. A train curve far above its holdout
+curve, an observed statistic sitting inside its own null, a predicted effect
+outside its calibration band and a scatter that is a straight line are all
+results this phase publishes, so none of them may be a figure that only
+renders well when the answer is good.
 
 Every function in this module returns a `matplotlib.figure.Figure` and calls
 no rendering or display function of any kind. The caller owns both the write
@@ -399,5 +412,324 @@ def qini_plot(
     if title is not None:
         ax.set_title(title)
     ax.legend(loc="lower right", fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+# --------------------------------------------------------------------------
+# Phase 4: model-output factories
+# --------------------------------------------------------------------------
+
+# The colour and linestyle each split is drawn in. Linestyle carries the
+# distinction as well as colour so the overlay survives greyscale printing --
+# the same reason `_COMPARISON_MARKERS` cycles markers rather than relying on
+# the colour cycle alone. Each split's random-targeting chord is drawn in its
+# own split's colour, so a reader can tell which chord belongs to which curve
+# without reading the legend twice.
+_SPLIT_COLOUR = {"train": "#1f4e79", "holdout": "#c65911"}
+_SPLIT_LINESTYLE = {"train": "-", "holdout": "-."}
+
+# The permutation-null histogram's bin count is FIXED here rather than left
+# to matplotlib's default. Editing it breaks nothing loudly: the figure still
+# renders and still looks entirely plausible, it just stops being the same
+# figure across matplotlib versions, so two runs that differ only in an
+# upgraded library emit visibly different exhibits of the identical 200
+# draws. Thirty bins over 200 draws is about seven draws a bin, which shows
+# the shape of the null without degenerating into a comb. Do not edit it
+# without re-drawing the committed figure.
+_NULL_HISTOGRAM_BINS = 30
+
+# The permutation histogram's y axis counts draws, not outcomes, so it is not
+# keyed by unit and does not belong in either label dict.
+_NULL_Y_LABEL = "Number of permutation draws"
+
+
+def _guard_qini_pair(pair, name: str):
+    """Coerce one `(fraction, qini)` pair to float arrays, or raise.
+
+    Every check here is one `qini_plot` already makes on a single curve,
+    lifted into a helper because `qini_train_holdout_plot` makes all of them
+    twice and a copy-pasted second copy is the one that drifts. Private: it
+    is not a figure factory and must not enter the module's public surface.
+
+    Plain if/raise, never `assert`: assertions are compiled out under
+    `python -O` and the guard would vanish from exactly the build that
+    renders the report.
+    """
+    try:
+        length = len(pair)
+    except TypeError:
+        raise ValueError(
+            f"`{name}` must be a (fraction, qini) pair as returned by "
+            f"evaluation.qini_curve; got a {type(pair).__name__}, which has "
+            "no length."
+        ) from None
+    if length != 2:
+        raise ValueError(
+            f"`{name}` must unpack to exactly two arrays (fraction, qini); "
+            f"got {length} element(s)."
+        )
+
+    fraction = np.asarray(pair[0], dtype=float)
+    qini = np.asarray(pair[1], dtype=float)
+
+    if fraction.size != qini.size:
+        raise ValueError(
+            f"`{name}`'s fraction and qini must have the same length; got "
+            f"{fraction.size} and {qini.size}."
+        )
+    if qini.size == 0:
+        raise ValueError(f"`{name}` is empty; there is no curve to draw.")
+    if qini[0] != 0.0:
+        raise ValueError(
+            f"a Qini curve starts at the origin: `{name}`'s Q(0) must be "
+            f"exactly 0.0, but qini[0] is {qini[0]!r}. A curve that does not "
+            "start at 0 has been shifted or sliced, and the chord drawn for "
+            "it would no longer be its random-targeting baseline."
+        )
+    return fraction, qini
+
+
+def qini_train_holdout_plot(train, holdout, *, unit="pp", title=None):
+    """Return a Figure with the train and holdout Qini curves on shared axes.
+
+    `train` and `holdout` are each a `(fraction, qini)` pair as returned by
+    `evaluation.qini_curve` -- arrays, not frames and not the module, so this
+    factory stays usable on a curve that was resampled, sliced, or read back
+    from an artifact.
+
+    **The point of this figure is the GAP between the two curves.** A train
+    curve sitting far above its own holdout curve is the overfitting exhibit:
+    a model whose ranking is memorised rather than learned scores brilliantly
+    on the rows it was fit on and near-randomly on the rows it was not. That
+    divergence is the most legible available argument for why an uplift model
+    is judged on held-out data, and this project demonstrates it rather than
+    citing it. A figure that could only draw the holdout curve would make the
+    argument unavailable.
+
+    This is a separate factory from `qini_plot`, which it neither replaces
+    nor changes. `qini_plot` draws exactly one curve, and one curve has
+    exactly one random-targeting chord; two curves have TWO, computed
+    independently, because each split has its own measured average treatment
+    effect. Folding a second curve into `qini_plot` would change both the
+    chord count and the y-limit derivation that its own tests pin.
+
+    Renders nothing and writes nothing: the returned Figure is the caller's
+    to save and to close. No input array is mutated -- the unit scaling
+    produces new arrays and nothing is assigned into the arguments.
+    """
+    # Every guard fires BEFORE `plt.subplots`. A raise after the figure
+    # exists would leave it registered in pyplot's global state with no
+    # handle for the caller to close -- exactly the leak the module docstring
+    # says this module must not create, and a test that asserts a ValueError
+    # would silently accumulate one figure per run.
+    train_fraction, train_qini = _guard_qini_pair(train, "train")
+    holdout_fraction, holdout_qini = _guard_qini_pair(holdout, "holdout")
+    _guard_unit(unit, "`unit`")
+
+    # Both curves and both chords are scaled by the SAME factor, for the
+    # reason `ate_forest` panels by unit at all: a mismatched scale would
+    # draw a $0.77 effect as though it were 76.98 percentage points.
+    scale = _UNIT_SCALE[unit]
+    splits = (
+        (
+            "train",
+            "Train",
+            train_fraction,
+            train_qini * scale,
+            float(train_qini[-1]) * scale,
+        ),
+        (
+            "holdout",
+            "Holdout",
+            holdout_fraction,
+            holdout_qini * scale,
+            float(holdout_qini[-1]) * scale,
+        ),
+    )
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+
+    lows = [0.0]
+    highs = [0.0]
+
+    for key, label, fraction, curve, ate in splits:
+        colour = _SPLIT_COLOUR[key]
+        ax.plot(
+            fraction,
+            curve,
+            color=colour,
+            ls=_SPLIT_LINESTYLE[key],
+            lw=1.6,
+            label=f"{label} Qini curve",
+        )
+        # One chord PER CURVE, each ending at that split's own Q(1) -- the
+        # average treatment effect measured on that split's own rows.
+        # Radcliffe defines the random-targeting baseline exactly this way:
+        # mailing a random fraction phi of the list buys phi of the ATE. The
+        # two splits have different ATEs and therefore different baselines,
+        # so one shared chord would judge one curve against the other's
+        # baseline. A bare `y = x` diagonal is PITFALLS.md Pitfall 8.2 -- a
+        # line with no relationship to the data at all.
+        ax.plot(
+            [0.0, 1.0],
+            [0.0, ate],
+            ls="--",
+            color=colour,
+            lw=1,
+            label=f"{label} random targeting (chord to Q(1))",
+        )
+        lows.extend([float(np.min(curve)), ate])
+        highs.extend([float(np.max(curve)), ate])
+
+    # Pinned, never auto-scaled (the same rule as the Love plot's x limits).
+    # The x axis is a targeting fraction and is therefore [0, 1] by
+    # definition. The y limits come from a FOUR-way min/max -- both curves
+    # and both chord endpoints, together with zero -- because this figure is
+    # read by comparing the two curves' vertical separation, and a limit
+    # derived from one of them would let the other's origin or its Q(1)
+    # drift off the canvas, which is precisely the comparison the reader
+    # came for.
+    ax.set_xlim(0.0, 1.0)
+    span = max(highs) - min(lows)
+    margin = 0.08 * span if span > 0.0 else 1.0
+    ax.set_ylim(min(lows) - margin, max(highs) + margin)
+
+    ax.set_xlabel(_QINI_X_LABEL)
+    ax.set_ylabel(_QINI_AXIS_LABEL[unit])
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(loc="lower right", fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def _format_p_value(p_empirical: float) -> str:
+    """Format an empirical p-value so it can never render as exactly zero.
+
+    From R draws the smallest value the add-one estimator `(1 + count) /
+    (1 + R)` can take is `1 / (1 + R)`, which at R = 200 is about 0.005. A
+    rendered `p = 0.0000` is an overclaim no permutation test of finite size
+    can support, so a value that would round away at four places is drawn
+    with a `<=` rather than an `=`.
+    """
+    text = f"{p_empirical:.4f}"
+    if float(text) == 0.0:
+        return "p <= 0.0001"
+    return f"p = {text}"
+
+
+def permutation_null_plot(
+    draws,
+    observed,
+    *,
+    p95=None,
+    p_empirical=None,
+    unit="pp",
+    title=None,
+):
+    """Return a Figure of the permutation null with the observed value marked.
+
+    `draws` is a 1-D array of null Qini coefficients and `observed` is the
+    model's actual holdout Qini coefficient. `p95` and `p_empirical`, when
+    given, are drawn as the 95th-percentile rule and as a legend entry.
+
+    **Mechanism, in one sentence, because this project has two different
+    nulls and they are constantly conflated.** These draws come from
+    permuting the TREATMENT LABEL within the training half and REFITTING both
+    base models on the permuted labels, so the distribution answers "could a
+    model fit on this feature set have produced a ranking this good when the
+    treatment assignment carried no information at all?". That is strictly
+    stronger than `evaluation.qini_random_band`, which shuffles the SCORE at
+    evaluation time and refits nothing: a random-band draw cannot detect a
+    model that fit the treatment label during training, which is the exact
+    failure this figure exists to expose. The two test different hypotheses
+    and produce different distributions, and a reader who meets both in one
+    report will merge them unless each names its own mechanism where it
+    appears.
+
+    The figure reads truthfully in both directions. Its x limits span the
+    draws AND the observed value, so an observed statistic far outside the
+    null is on the canvas rather than clipped, and an observed statistic
+    sitting comfortably inside its own null -- the honest negative result
+    this phase publishes -- is drawn as exactly that.
+
+    Renders nothing and writes nothing: the returned Figure is the caller's
+    to save and to close. The input array is not mutated.
+    """
+    draws = np.asarray(draws, dtype=float)
+
+    # Every guard fires BEFORE `plt.subplots`, for the reason recorded in
+    # `qini_train_holdout_plot`: a raise afterwards leaks a Figure the caller
+    # has no handle to close. Plain if/raise, never `assert`.
+    if draws.ndim != 1:
+        raise ValueError(
+            "draws must be a 1-D array of null Qini coefficients; got shape "
+            f"{draws.shape}."
+        )
+    if draws.size == 0:
+        raise ValueError("draws is empty; there is no null distribution to draw.")
+    if np.isnan(draws).any():
+        raise ValueError(
+            f"draws contains {int(np.isnan(draws).sum())} NaN value(s). A "
+            "histogram silently drops them, so the drawn null would rest on "
+            "fewer shuffles than the caption claims."
+        )
+    observed = float(observed)
+    if not np.isfinite(observed):
+        raise ValueError(
+            f"observed must be finite; got {observed!r}. A non-finite "
+            "observed value cannot be placed against the null."
+        )
+    _guard_unit(unit, "`unit`")
+
+    scale = _UNIT_SCALE[unit]
+    scaled = draws * scale
+    scaled_observed = observed * scale
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+
+    ax.hist(
+        scaled,
+        bins=_NULL_HISTOGRAM_BINS,
+        color="0.75",
+        edgecolor="0.45",
+        linewidth=0.6,
+        label=f"Permutation null ({draws.size} shuffles)",
+    )
+
+    observed_label = "Observed (holdout)"
+    if p_empirical is not None:
+        observed_label = f"{observed_label}, {_format_p_value(float(p_empirical))}"
+    ax.axvline(scaled_observed, color="#c00000", lw=1.6, label=observed_label)
+
+    edges = [float(np.min(scaled)), float(np.max(scaled)), scaled_observed]
+    if p95 is not None:
+        scaled_p95 = float(p95) * scale
+        ax.axvline(
+            scaled_p95,
+            color="#1f4e79",
+            lw=1.2,
+            ls="--",
+            label="Null 95th percentile",
+        )
+        edges.append(scaled_p95)
+
+    # Pinned, never auto-scaled. The limits span the draws AND the observed
+    # value together: autoscaling a histogram fits the bars, so an observed
+    # value well outside the null would be clipped off the canvas and the
+    # figure would show a model beating its null as though it merely matched
+    # it. That matters in both directions, which is why it is pinned rather
+    # than merely widened.
+    low, high = min(edges), max(edges)
+    span = high - low
+    margin = 0.08 * span if span > 0.0 else 1.0
+    ax.set_xlim(low - margin, high + margin)
+
+    ax.set_xlabel(_QINI_AXIS_LABEL[unit])
+    ax.set_ylabel(_NULL_Y_LABEL)
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     return fig
