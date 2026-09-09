@@ -52,7 +52,7 @@ patterns-established:
   - "A committed-artifact assertion (test_committed_artifacts_carry_the_split_column) turns an un-regenerated artifact into a failure rather than a silent inconsistency between code and data"
   - "When a wave-1 plan adds a column to a session fixture's source artifact, a wave-2 plan that materialises it must expect fixture-shaped test breakage that is not a defect in either plan's function"
 
-requirements-completed: [UPLIFT-01]
+requirements-completed: []
 
 # Metrics
 duration: 22min
@@ -154,9 +154,17 @@ completed: 2026-09-08
 - **Files modified:** none
 - **Verification:** the one-off exits with the raise; the scratch directory is removed and `git status` is clean.
 
+**4. [Rule 1 — Bug] `UPLIFT-01` reverted to Pending after the state update marked it Complete**
+
+- **Found during:** the post-execution state update.
+- **Issue:** This plan's frontmatter carries `requirements: [UPLIFT-01]`, and `requirements.mark-complete` duly checked the box and flipped the traceability row to Complete. That is wrong: UPLIFT-01 requires "individual-level uplift models using a two-model (T-learner) approach", and 04-03 materialises a split column and fits nothing. Both 04-01 and 04-02 hit the same frontmatter claim and both deliberately left the requirement Pending — a decision already recorded in STATE.md.
+- **Fix:** `.planning/REQUIREMENTS.md` restored with a single-path `git checkout --`. UPLIFT-01 is Pending; it becomes Complete in the plan that actually fits the per-arm T-learners.
+- **Files modified:** none (the erroneous change was reverted before commit)
+- **Verification:** `.planning/REQUIREMENTS.md` line 24 is `- [ ]` and line 63 reads `Pending`; `git status --short` on the file is empty.
+
 ---
 
-**Total deviations:** 3 (1 × Rule 1, 1 × Rule 3, 1 × Rule 2). No architectural change; no scope creep; no dependency added.
+**Total deviations:** 4 (2 × Rule 1, 1 × Rule 3, 1 × Rule 2). No architectural change; no scope creep; no dependency added.
 
 ## Issues Encountered
 
