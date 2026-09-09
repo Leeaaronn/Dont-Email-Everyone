@@ -850,6 +850,46 @@ def test_relabel_curve_legend_renames_all_four_entries():
         plt.close(figure)
 
 
+def test_relabel_qini_axis_names_the_cells_own_outcome():
+    # plots.py keys its Qini axis wording off the UNIT, so `visit` and
+    # `conversion` share it and a conversion figure would otherwise publish
+    # "Cumulative incremental visits" over a curve made of conversions.
+    fraction = np.linspace(0.0, 1.0, 11)
+    figure = plots.qini_train_holdout_plot(
+        (fraction, fraction * 0.01), (fraction, fraction * 0.004)
+    )
+    try:
+        assert "visits" in figure.axes[0].get_ylabel()
+        pipeline._relabel_qini_axis(figure, "conversion", axis="y")
+        label = figure.axes[0].get_ylabel()
+        assert "conversions" in label, label
+        assert "visits" not in label.replace("conversions", ""), label
+    finally:
+        plt.close(figure)
+
+    # On a visit cell the substitution is a no-op, which is why it is applied
+    # to every Qini figure rather than only to the conversion ones.
+    figure = plots.qini_train_holdout_plot(
+        (fraction, fraction * 0.01), (fraction, fraction * 0.004)
+    )
+    try:
+        before = figure.axes[0].get_ylabel()
+        pipeline._relabel_qini_axis(figure, "visit", axis="y")
+        assert figure.axes[0].get_ylabel() == before
+    finally:
+        plt.close(figure)
+
+
+def test_relabel_qini_axis_raises_when_the_wording_changed():
+    figure = plt.figure()
+    figure.add_subplot(111).set_ylabel("Something with no outcome noun")
+    try:
+        with pytest.raises(ValueError, match="does not carry the outcome"):
+            pipeline._relabel_qini_axis(figure, "conversion", axis="y")
+    finally:
+        plt.close(figure)
+
+
 def test_relabel_curve_legend_raises_on_an_unexpected_legend():
     # A later edit to the factory's legend wording must surface as a raise
     # here, not as a silently unrelabelled published figure.

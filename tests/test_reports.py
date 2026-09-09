@@ -29,7 +29,65 @@ import subprocess
 
 from dont_email_everyone import config
 
-FIGURE_NAMES = ["love_plot.png", "ate_forest.png"]
+# The two Phase 2 figures, held as their own tuple because
+# `test_validity_report_numbers_trace_to_committed_artifacts` below asserts
+# that `reports/validity.md` references every figure it is given -- and
+# validity.md is Phase 2's write-up, which does not reference Phase 4's
+# figures and should not. Phase 4's are referenced by `reports/model.md`
+# instead, in plan 04-09, in the same plan that writes that file.
+VALIDITY_FIGURES = ("love_plot.png", "ate_forest.png")
+
+# A presence allowlist over `reports/figures/`, not a glob -- the same
+# disposition the write-up allowlist below and the artifact allowlist in
+# tests/test_artifacts.py take (neither is named here, because an acceptance
+# criterion greps this file's diff for the write-up one and requires it to be
+# untouched), and for the same reason 02-06 recorded: a
+# figure that was never committed, or that was later deleted, still passes a
+# suite that only checks whatever files happen to be on disk. Naming a figure
+# here is what makes its absence a failure; there is no other step.
+#
+# Phase 3 deliberately left this list unextended (03-06, following 03-CONTEXT
+# D-09): a Qini figure drawn on SYNTHETIC data and committed beside the real
+# love_plot.png and ate_forest.png could be misread as a result, and 03-06
+# recorded that the first committed uplift figure would be Phase 4's. Phase 4
+# reverses that decision here, because these thirteen are that figure set --
+# drawn on real holdout scores from `scored_holdout.parquet`, not on a
+# fixture.
+#
+# The Phase 4 names are typed out rather than imported from
+# `pipeline.FIGURE_STEMS` ON PURPOSE. `tests/test_pipeline.py` asserts the
+# WRITTEN set equals that constant; this list asserts the COMMITTED set
+# matches an independently maintained one. Deriving this from the module
+# under test would collapse two different failures -- a figure written but
+# never committed, and a figure renamed in code -- into no failure at all.
+FIGURE_NAMES = [
+    # Phase 2's two, written out rather than splatted from VALIDITY_FIGURES
+    # so this literal reads as the whole committed set at a glance. The two
+    # constants cannot drift apart: test_validity_figures_are_allowlisted
+    # asserts containment.
+    "love_plot.png",
+    "ate_forest.png",
+    # Train-vs-holdout Qini: the three mens/visit learners, which read as a
+    # progression only together, plus both shipping cells.
+    "qini_train_holdout_mens_visit_linear.png",
+    "qini_train_holdout_mens_visit_rf_leaf200.png",
+    "qini_train_holdout_mens_visit_rf_default.png",
+    "qini_train_holdout_womens_visit_linear.png",
+    "qini_train_holdout_womens_conversion_linear.png",
+    # The permutation null with the observed value marked. The first is the
+    # flagship: the default forest's holdout Qini sitting INSIDE its own null.
+    "permutation_null_mens_visit_rf_default.png",
+    "permutation_null_womens_visit_linear.png",
+    "permutation_null_womens_conversion_linear.png",
+    # The uplift ranking against D-13's response-model baseline.
+    "uplift_vs_baseline_womens_visit_linear.png",
+    "uplift_vs_baseline_womens_conversion_linear.png",
+    # One calibration plot for all six eligible cells, panelled by unit.
+    "calibration_eligible_cells.png",
+    # D-21's monotonicity scatter, one per shipping cell.
+    "monotonicity_womens_visit_linear.png",
+    "monotonicity_womens_conversion_linear.png",
+]
 
 MIN_FIGURE_BYTES = 5_000
 
@@ -88,6 +146,17 @@ def test_figures_exist():
             "figures, so an untracked figure is missing from a fresh clone "
             "even though it is present here."
         )
+
+
+def test_validity_figures_are_allowlisted():
+    # VALIDITY_FIGURES is the subset reports/validity.md must reference, and
+    # FIGURE_NAMES is the full committed set. Both name the Phase 2 figures
+    # literally, so this containment check is what stops a rename in one from
+    # silently leaving the other asserting on a file that no longer exists.
+    assert set(VALIDITY_FIGURES) <= set(FIGURE_NAMES), (
+        f"{sorted(set(VALIDITY_FIGURES) - set(FIGURE_NAMES))} is referenced "
+        "by the validity write-up but is not on the figure allowlist"
+    )
 
 
 def test_validity_report_exists():
@@ -200,5 +269,8 @@ def test_validity_report_numbers_trace_to_committed_artifacts():
             "number must be quoted from a committed artifact."
         )
 
-    for figure in FIGURE_NAMES:
+    # VALIDITY_FIGURES, not FIGURE_NAMES: this test reads validity.md, which
+    # is Phase 2's write-up. Phase 4's thirteen figures are referenced by
+    # reports/model.md, written in plan 04-09 alongside its own assertions.
+    for figure in VALIDITY_FIGURES:
         assert figure in text, f"the write-up does not reference {figure}"

@@ -365,6 +365,16 @@ FIGURE_SHIPPING_CELLS = (("womens", "visit"), ("womens", "conversion"))
 # regularization strength, so all three are committed or none is.
 FIGURE_DIVERGENCE_LEARNERS = ("linear", "rf_leaf200", "rf_default")
 
+# Outcome -> the plural noun a Qini axis label should name. `plots.py`'s
+# Qini axis label is keyed by UNIT, which is right for the scale and wrong
+# for the noun: `visit` and `conversion` share the unit "pp", so both inherit
+# the wording written for `visit`. The label is corrected per figure below.
+OUTCOME_NOUN = {
+    "visit": "visits",
+    "conversion": "conversions",
+    "spend": "spend",
+}
+
 # Reader-facing learner names. The artifact keys are terse because they are
 # column values; a figure title is prose and says what the configuration is.
 LEARNER_LABEL = {
@@ -481,19 +491,66 @@ def _null_title(arm: str, outcome: str, learner: str, summary) -> str:
     the decision in `model_results.parquet` cannot disagree.
     """
     verdict = (
-        "OUTSIDE its own null: clears the pre-registered 95th percentile"
+        "OUTSIDE the null (95th percentile cleared)"
         if summary["exceeds_null_p95"]
-        else (
-            "INSIDE its own null: does not clear the pre-registered "
-            "95th percentile"
-        )
+        else "INSIDE the null (95th percentile not cleared)"
     )
+    # Kept SHORT deliberately. A title line wider than the 7.5-inch canvas is
+    # clipped at both ends by matplotlib without warning, and the first
+    # rendering of this figure lost the beginning and the end of a longer
+    # sentence -- a published figure whose caption reads "ved holdout Qini
+    # ... 95t". The empirical p-value and the percentile are already legend
+    # entries, so the title carries only the reading the legend cannot: which
+    # side of the null the observed value fell on.
     return (
         f"Refit permutation null -- {arm}/{outcome}, "
         f"{LEARNER_LABEL[learner]}\n"
         f"Observed holdout Qini {summary['qini_observed']:+.6f} sits "
         f"{verdict}"
     )
+
+
+def _relabel_qini_axis(fig, outcome: str, *, axis: str) -> None:
+    """Correct a Qini axis label that names the wrong outcome, in place.
+
+    `plots.py` keys its Qini axis wording off the UNIT, which is exactly
+    right for the SCALE -- a proportion is drawn in percentage points and a
+    dollar figure is not -- and wrong for the NOUN. `visit` and `conversion`
+    are both "pp", so a conversion cell inherits the label written for the
+    visit cells and a published figure reads "Cumulative incremental visits"
+    over a curve made of conversions. That is a wrong number on a chart with
+    nothing raised, the failure class `plots._guard_unit` exists to stop one
+    level down.
+
+    The correction is applied by the orchestrator rather than by growing an
+    `outcome=` parameter on four factories, for the reason `plots.py` returns
+    Figures and renders nothing: those signatures are pinned by plan 04-02
+    and introspected by its tests. Applied to EVERY Qini figure, not only to
+    the conversion ones, so the guarantee is structural rather than a matter
+    of the author having remembered which cells needed it -- on a visit cell
+    the substitution is a no-op that still proves the label was the one this
+    function knows how to correct.
+
+    `axis` is "x" or "y" because the histogram puts the Qini scale on x and
+    every curve figure puts it on y. Raises if the expected wording is
+    absent, so a later edit to the factory surfaces here rather than leaving
+    a mislabelled published figure.
+    """
+    axes = fig.axes[0]
+    getter, setter = (
+        (axes.get_xlabel, axes.set_xlabel)
+        if axis == "x"
+        else (axes.get_ylabel, axes.set_ylabel)
+    )
+    label = getter()
+    if "visits" not in label:
+        raise ValueError(
+            f"the {axis} axis reads {label!r}, which does not carry the "
+            "outcome noun this function knows how to correct; plots.py's "
+            "Qini axis wording changed and a conversion or spend figure "
+            "would now be published with a visit label."
+        )
+    setter(label.replace("visits", OUTCOME_NOUN[outcome]))
 
 
 def _worst_base_score(cell, scores):
@@ -1073,6 +1130,7 @@ def train() -> None:
         unit=ate.OUTCOMES["visit"],
         title=_qini_pair_title("mens", "visit", "linear", cell),
     )
+    _relabel_qini_axis(figure, "visit", axis="y")
     figure.savefig(
         config.FIGURES / "qini_train_holdout_mens_visit_linear.png", dpi=150
     )
@@ -1085,6 +1143,7 @@ def train() -> None:
         unit=ate.OUTCOMES["visit"],
         title=_qini_pair_title("mens", "visit", "rf_leaf200", cell),
     )
+    _relabel_qini_axis(figure, "visit", axis="y")
     figure.savefig(
         config.FIGURES / "qini_train_holdout_mens_visit_rf_leaf200.png",
         dpi=150,
@@ -1098,6 +1157,7 @@ def train() -> None:
         unit=ate.OUTCOMES["visit"],
         title=_qini_pair_title("mens", "visit", "rf_default", cell),
     )
+    _relabel_qini_axis(figure, "visit", axis="y")
     figure.savefig(
         config.FIGURES / "qini_train_holdout_mens_visit_rf_default.png",
         dpi=150,
@@ -1116,6 +1176,7 @@ def train() -> None:
             "womens", "visit", models.PRIMARY_CONFIG, cell
         ),
     )
+    _relabel_qini_axis(figure, "visit", axis="y")
     figure.savefig(
         config.FIGURES / "qini_train_holdout_womens_visit_linear.png", dpi=150
     )
@@ -1130,6 +1191,7 @@ def train() -> None:
             "womens", "conversion", models.PRIMARY_CONFIG, cell
         ),
     )
+    _relabel_qini_axis(figure, "conversion", axis="y")
     figure.savefig(
         config.FIGURES / "qini_train_holdout_womens_conversion_linear.png",
         dpi=150,
@@ -1150,6 +1212,7 @@ def train() -> None:
         unit=ate.OUTCOMES["visit"],
         title=_null_title("mens", "visit", "rf_default", summary),
     )
+    _relabel_qini_axis(figure, "visit", axis="x")
     figure.savefig(
         config.FIGURES / "permutation_null_mens_visit_rf_default.png", dpi=150
     )
@@ -1166,6 +1229,7 @@ def train() -> None:
             "womens", "visit", models.PRIMARY_CONFIG, summary
         ),
     )
+    _relabel_qini_axis(figure, "visit", axis="x")
     figure.savefig(
         config.FIGURES / "permutation_null_womens_visit_linear.png", dpi=150
     )
@@ -1184,6 +1248,7 @@ def train() -> None:
             "womens", "conversion", models.PRIMARY_CONFIG, summary
         ),
     )
+    _relabel_qini_axis(figure, "conversion", axis="x")
     figure.savefig(
         config.FIGURES / "permutation_null_womens_conversion_linear.png",
         dpi=150,
@@ -1212,6 +1277,7 @@ def train() -> None:
     _relabel_curve_legend(
         figure, "Uplift ranking", "Response-model baseline (m1)"
     )
+    _relabel_qini_axis(figure, "visit", axis="y")
     figure.savefig(
         config.FIGURES / "uplift_vs_baseline_womens_visit_linear.png", dpi=150
     )
@@ -1233,6 +1299,7 @@ def train() -> None:
     _relabel_curve_legend(
         figure, "Uplift ranking", "Response-model baseline (m1)"
     )
+    _relabel_qini_axis(figure, "conversion", axis="y")
     figure.savefig(
         config.FIGURES / "uplift_vs_baseline_womens_conversion_linear.png",
         dpi=150,
