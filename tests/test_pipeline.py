@@ -880,6 +880,56 @@ def test_relabel_qini_axis_names_the_cells_own_outcome():
         plt.close(figure)
 
 
+def test_symlog_uplift_axis_keeps_every_point_and_says_so():
+    # The point of symlog here is that NOTHING is clipped: the -22.93 pp row
+    # on the womens/conversion holdout stays on the canvas. Clipping would
+    # read better and would hide a real customer.
+    rng = np.random.default_rng(20260902)
+    uplift = np.concatenate([rng.normal(0.0, 0.004, 500), [-0.229]])
+    base = rng.random(uplift.size) * 0.3
+    figure = plots.uplift_vs_base_score_plot(uplift, base, r=-0.668)
+    try:
+        pipeline._symlog_uplift_axis(figure, 1.0)
+        axes = figure.axes[0]
+        assert axes.get_yscale() == "symlog"
+        low, high = axes.get_ylim()
+        assert low <= -22.9, (low, "the extreme row was clipped off the axis")
+        assert high >= uplift.max() * 100.0
+        # A transformed axis that does not say so is worse than an
+        # unreadable one: a reader measures spacing off it and is wrong.
+        label = axes.get_ylabel()
+        assert "symlog" in label and "1 pp" in label, label
+    finally:
+        plt.close(figure)
+
+
+def test_symlog_uplift_axis_rejects_a_non_positive_linthresh():
+    figure = plt.figure()
+    figure.add_subplot(111)
+    try:
+        with pytest.raises(ValueError, match="positive half-width"):
+            pipeline._symlog_uplift_axis(figure, 0.0)
+    finally:
+        plt.close(figure)
+
+
+def test_only_the_conversion_monotonicity_cell_gets_a_symlog_axis():
+    # Measured, not aesthetic: 97.90% of the womens/conversion holdout points
+    # lie within +/-1 pp against a -22.93 pp minimum, so symlog draws almost
+    # all of them linearly and compresses only the tail. On womens/visit only
+    # 5.97% lie within +/-1 pp and the range is [-7.10, +11.83] with no tail,
+    # so the same transform would push 94% of that cloud into the log region
+    # and distort a figure that already reads. Two figures of one kind on two
+    # scales is a wart; drawing one of them wrong is worse.
+    assert pipeline.MONOTONICITY_SYMLOG_LINTHRESH == {
+        ("womens", "conversion"): 1.0
+    }
+    for arm, outcome in pipeline.FIGURE_SHIPPING_CELLS:
+        assert f"monotonicity_{arm}_{outcome}_{models.PRIMARY_CONFIG}" in (
+            pipeline.FIGURE_STEMS
+        )
+
+
 def test_relabel_qini_axis_raises_when_the_wording_changed():
     figure = plt.figure()
     figure.add_subplot(111).set_ylabel("Something with no outcome noun")

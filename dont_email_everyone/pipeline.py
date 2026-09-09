@@ -375,6 +375,27 @@ OUTCOME_NOUN = {
     "spend": "spend",
 }
 
+# The monotonicity cells whose predicted-uplift tail is long enough that a
+# linear y axis renders the scatter as a block of ink, mapped to the symlog
+# linear-region half-width (in percentage points) each one gets.
+#
+# `womens/conversion` is here and `womens/visit` is deliberately NOT, and the
+# asymmetry is measured rather than aesthetic. On the conversion cell 97.90%
+# of the 21,347 holdout points lie within +/-1 pp while the minimum is
+# -22.93 pp, so a linear axis spends about 95% of the canvas on a handful of
+# rows and symlog at 1 pp draws 97.90% of the data on the LINEAR part and
+# log-compresses only the 2.10% tail. On the visit cell the distribution is
+# the other way round: its range is [-7.10, +11.83] with no tail at all, and
+# only 5.97% of its points lie within +/-1 pp -- the same transform would
+# push 94% of that cloud into the log region, squash its dense +7 to +10 pp
+# band into a sliver and give its sparsest rows a third of the canvas. It
+# would distort the figure that already reads, to no gain.
+#
+# Clipping the axis instead was considered and REJECTED: it would hide real
+# outlier customers to make the picture tidier, which is the one trade this
+# project does not make. Every point stays on the canvas.
+MONOTONICITY_SYMLOG_LINTHRESH = {("womens", "conversion"): 1.0}
+
 # Reader-facing learner names. The artifact keys are terse because they are
 # column values; a figure title is prose and says what the configuration is.
 LEARNER_LABEL = {
@@ -580,6 +601,42 @@ def _relabel_qini_axis(fig, outcome: str, *, axis: str) -> None:
         "size down to 7 points; shorten the wording rather than publishing a "
         "clipped label."
     )
+
+
+def _symlog_uplift_axis(fig, linthresh: float) -> None:
+    """Put the uplift axis of a monotonicity scatter on a symlog scale.
+
+    `symlog` is linear within `+/-linthresh` and logarithmic beyond it, which
+    is the transform for a distribution that is tight around zero with a few
+    rows far out: every point stays on the canvas -- nothing is clipped and
+    no customer is dropped -- while the bulk stops collapsing into a block of
+    ink. Clipping the axis would read better and would be a lie about the
+    data, which is the trade this repository exists not to make.
+
+    A transformed axis that does not SAY it is transformed is worse than an
+    unreadable one, because a reader measures spacing off it and gets a wrong
+    answer with nothing to warn them. The scale and its threshold are
+    therefore appended to the axis label itself rather than left to a caption
+    that a figure embedded on its own would arrive without.
+
+    Applied from the orchestrator, like the write and the close: `plots.py`
+    returns a Figure whose scale the caller may set for its own output
+    context, and its `uplift_vs_base_score_plot` signature stays the one plan
+    04-02 pinned.
+    """
+    if not linthresh > 0.0:
+        raise ValueError(
+            f"linthresh is {linthresh}; symlog's linear region must have a "
+            "positive half-width."
+        )
+    axes = fig.axes[0]
+    axes.set_yscale("symlog", linthresh=linthresh, linscale=1.0)
+    axes.set_ylabel(
+        f"{axes.get_ylabel()}\n"
+        "symlog scale: linear within "
+        f"+/-{linthresh:g} pp, logarithmic beyond"
+    )
+    fig.tight_layout()
 
 
 def _worst_base_score(cell, scores):
@@ -1393,6 +1450,9 @@ def train() -> None:
             "-- womens/conversion\nD-21 gate: a tight monotone line would "
             "be a repackaged propensity ranking"
         ),
+    )
+    _symlog_uplift_axis(
+        figure, MONOTONICITY_SYMLOG_LINTHRESH[("womens", "conversion")]
     )
     figure.savefig(
         config.FIGURES / "monotonicity_womens_conversion_linear.png", dpi=150
