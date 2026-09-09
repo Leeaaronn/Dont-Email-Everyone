@@ -70,10 +70,31 @@ decision below is shaped by that fact.
   alongside**. Percentages survive the holdout-to-population scaling question cleanly; absolute
   counts do not. The full k-grid curve is reported so any capacity can be read off it.
 
-- **D-08:** The **headline contrast is targeted top-k versus emailing everyone**, matching the
-  project's own title and core-value statement. The difference against "email nobody" is also
-  reported, per criterion 1, but is not the headline — it answers "should we email at all", which
-  Phase 2's ATE already settled.
+- **D-08 (SUPERSEDED 2026-09-09 by D-08a — kept for the record):** The headline contrast is targeted
+  top-k versus emailing everyone, matching the project's own title and core-value statement.
+
+- **D-08a (REPLACES D-08):** The **headline contrast is targeted top-k versus a RANDOM send of the
+  same size.** Both criterion-1 differences — versus "email everyone" and versus "email nobody" —
+  are still computed and reported; neither is the headline.
+
+  **Why D-08 was overturned.** Phase 5 research established that `V(π_k) − V(all)` is *minus* the
+  incremental outcome of the bottom (1−k) customers. At zero cost, beating a blanket send therefore
+  requires a segment that email measurably *harms*, and the Hillstrom womens arm has a positive ATE
+  on every outcome. Swept across 3 outcomes x 3 ranking scores x 101 grid points, **not one k
+  produces a CI excluding zero** on the vs-everyone contrast, and at k=0.10 on spend it is
+  significantly negative. D-06, D-08 and D-10 chosen together were mutually incompatible with a
+  positive headline. This is arithmetic, not model failure, and no anchor choice could have fixed it.
+
+  **Why vs-random is the right comparator, not a retreat to a friendlier one.** D-06 already locked
+  the capacity framing, and under a capacity constraint "email everyone" is not on the menu — the
+  decision actually facing the marketer is how to spend a fixed budget of N sends. The vs-random
+  contrast is the one D-06's own sentence describes. It is also the contrast under which the model
+  demonstrably works: the visit contrast excludes zero at **88 of 101** grid points (k = 0.06 to
+  0.93), and spend at 16 points (k = 0.14 to 0.59).
+
+  **The zero-cost caveat must be stated, not buried.** With genuinely free email the correct action
+  is to email everyone; this result is about spending a fixed budget well. State that plainly
+  wherever the headline appears, with the cost crossover from D-09 beside it.
 
 - **D-09:** Cost-optimal k is still built and shown (criterion 3 requires k* to demonstrably move as
   cost changes) — it is simply not the headline.
@@ -108,7 +129,36 @@ decision below is shaped by that fact.
 - Artifact naming and schema for the precomputed bootstrap bands, subject to criterion 4
   (small, format-stable, sufficient to reproduce every headline number with arithmetic alone).
 
-### Deferred to the researcher — do not guess these
+### Amendments made after research (2026-09-09)
+
+- **D-13 (answers the deferred anchor question):** The headline capacity anchor is **k = 0.20**,
+  chosen on **provenance rather than on the curve**: it is `evaluation.uplift_at_k`'s default,
+  committed in `9581e84` on 2026-09-05, before `models.py` existed. It therefore could not have been
+  selected to flatter a result that did not yet exist — which is the property the deferred question
+  was actually asking for. It independently lands on a plateau (k in [0.15, 0.25] all within ±10%).
+  k <= 0.10 is unusable: the frame holds only 170 non-zero spend rows and one 1,068-row slice
+  carries 14 of them.
+
+- **D-14 (answers the deferred bootstrap question):** `evaluation.bootstrap_indices` satisfies
+  criterion 2 **as-is** for the womens-only policy (verified `(500, 21347)` int32, position-preserving
+  invariant holds, control drawn once per replicate). For the cross-arm piece it **raises
+  `ValueError`** on a 3-valued column. The specified extension is a
+  `stratified_indices(labels, ..., level_order=)` generalization with `bootstrap_indices` delegating
+  to it. **Hazard:** the existing `for value in (1, 0)` iteration order is load-bearing — reversing
+  it changes 99.989% of the matrix. Preserve it explicitly and pin it with a test.
+
+- **D-15 (D-05 discharge):** Extend `pipeline.train()` by two additive lines so both arms' scores land
+  on all rows; `scored_holdout.parquet` goes `(32001, 37)` -> `(32001, 43)`. This regenerates a
+  Phase-4 artifact after Phase 4 closed, so the change must be **purely additive**: every existing
+  column and every Phase 4 headline number must reproduce bit-identically, pinned as a test. Without
+  this, D-05 cannot be discharged as written — only the 10,653 control rows carry both arms' scores
+  in the current artifact, and IPW needs the treated rows.
+
+- **D-16 (ROADMAP criterion 1 amended):** The IPW weight is **2, not 3**, derived from the evaluation
+  frame rather than transcribed from the criterion text. ROADMAP criterion 1 was amended in place
+  with the reasoning recorded. See D-08a's block for the measured consequence of getting this wrong.
+
+### Deferred to the researcher — ANSWERED, see D-13 and D-14 above
 
 - **The headline capacity anchor.** "Top 30%" was used illustratively during discussion and is
   **not** a locked value. The anchor should be chosen once the curve is visible and then
