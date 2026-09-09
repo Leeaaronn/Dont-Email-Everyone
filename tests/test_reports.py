@@ -25,7 +25,11 @@ failure mode a `.is_file()` check misses: a figure that was written but
 rendered nothing.
 """
 
+import json
+import re
 import subprocess
+
+import pandas as pd
 
 from dont_email_everyone import config
 
@@ -100,7 +104,14 @@ MIN_FIGURE_BYTES = 5_000
 # `coverage.CELL_SIZES`: a module constant a test can accidentally mutate is
 # a shared mutable, and `tests/test_ate.py` pins that convention with a
 # `pytest.raises(TypeError)`.
-REPORT_NAMES = ("validity.md", "metric.md")
+#
+# `model.md` (Phase 4's write-up) joins the allowlist here, in the same plan
+# and the same working tree that writes the file, so an added name and an
+# added write-up cannot diverge. Naming it is the only step needed to bring
+# it under the presence, git-tracking and byte-floor assertions below; the
+# Phase 4 assertions further down are additional to those three, not a
+# replacement for them.
+REPORT_NAMES = ("validity.md", "metric.md", "model.md")
 
 # In the spirit of MIN_FIGURE_BYTES above, and for the same failure mode: a
 # stub write-up -- a title and a TODO -- passes `.is_file()` and fails a
@@ -274,3 +285,407 @@ def test_validity_report_numbers_trace_to_committed_artifacts():
     # reports/model.md, written in plan 04-09 alongside its own assertions.
     for figure in VALIDITY_FIGURES:
         assert figure in text, f"the write-up does not reference {figure}"
+
+
+# --------------------------------------------------------------------------
+# Phase 4's write-up, `reports/model.md`
+#
+# `validity.md` gets an ordering test, an anti-overclaim test and a
+# number-tracing test because its premise is that every number in it comes
+# from a committed artifact. Phase 4 persists four artifacts and thirteen
+# figures, so `model.md` takes the same three shapes and adds the bans this
+# phase's own research flagged. `metric.md` still gets none of them, and
+# that stays deliberate -- Phase 3 persisted nothing, so its numbers trace
+# to pytest nodes rather than to files.
+#
+# What none of this can do is decide whether a sentence is TRUE. That is
+# 04-VALIDATION.md's second manual-only verification, discharged by an
+# explicit human checkpoint, exactly as 03-06 discharged the same check on
+# `metric.md`.
+# --------------------------------------------------------------------------
+
+MODEL_REPORT = "model.md"
+
+# The phase's figures: everything on the committed allowlist that is not one
+# of Phase 2's two. Derived rather than typed out, so this file carries no
+# second copy of the thirteen names and a rename lands in exactly one place.
+MODEL_FIGURES = tuple(n for n in FIGURE_NAMES if n not in VALIDITY_FIGURES)
+
+
+def _model_report_text():
+    return (config.REPORTS / MODEL_REPORT).read_text(encoding="utf-8")
+
+
+def _flat(text):
+    """The report with its emphasis markers removed.
+
+    A substring assertion against prose has to survive `**bold**` landing
+    in the middle of the phrase it is looking for. Stripping the markers is
+    what lets these tests assert on wording rather than on typography.
+    """
+    return text.replace("*", "")
+
+
+def _first_result_offset(text):
+    """Where the results begin -- the first numbered result section.
+
+    Used by both ordering tests below. Deliberately the SECTION offset and
+    not the offset of the first digit anywhere: the acceptance section
+    quotes thresholds and a split seed, and must be allowed to.
+    """
+    at = text.find("## 1.")
+    assert at != -1, "no numbered result section found in the write-up"
+    return at
+
+
+def test_model_report_states_the_ship_rule_before_results():
+    # The direct analogue of
+    # test_validity_report_states_acceptance_criteria_before_results, and
+    # the assertion that makes this phase's pre-registration checkable by
+    # the suite rather than by a reader's goodwill. Offsets are compared;
+    # asserting that both sections merely EXIST would pass on a document
+    # that narrated the rule after the result it judges.
+    text = _model_report_text()
+    criteria_at = text.find("Acceptance criteria")
+    assert criteria_at != -1, "no acceptance-criteria section found"
+
+    results_at = _first_result_offset(text)
+
+    # A quoted result number as well as the section heading, so moving the
+    # heading alone cannot satisfy this.
+    for marker in ("## 1.", "+0.009569"):
+        marker_at = text.find(marker)
+        assert marker_at != -1, f"no {marker!r} found in the write-up"
+        assert criteria_at < marker_at, (
+            f"the acceptance criteria appear after {marker!r}. A decision "
+            "rule stated after the result it judges is not a decision rule."
+        )
+
+    # Both of the two conditions, not either. The word "Both" is
+    # load-bearing: a one-condition rule would be a different and much
+    # weaker pre-registration.
+    flat = _flat(text[criteria_at:results_at])
+    for phrase in ("95th percentile", "response-model baseline", "Both"):
+        assert phrase in flat, (
+            f"the acceptance section does not state {phrase!r}. The rule is "
+            "two conjunctive conditions and the write-up must say so above "
+            "the table."
+        )
+
+
+def test_model_report_states_both_veto_gates_before_results():
+    # D-21 and D-22 can veto a cell REGARDLESS of its Qini, so both are
+    # part of the pre-registration and both have to sit above the results
+    # for the same reason the ship rule does.
+    text = _model_report_text()
+    criteria_at = text.find("Acceptance criteria")
+    assert criteria_at != -1, "no acceptance-criteria section found"
+    results_at = _first_result_offset(text)
+
+    for gate, description in (
+        ("0.9", "the propensity-correlation threshold"),
+        ("sign gate", "the hard calibration sign gate"),
+    ):
+        gate_at = text.find(gate)
+        assert gate_at != -1, f"{description} ({gate!r}) is never stated"
+        assert criteria_at < gate_at < results_at, (
+            f"{description} ({gate!r}) does not sit between the acceptance "
+            f"heading ({criteria_at}) and the first result ({results_at}); "
+            f"it is at {gate_at}. A gate that can veto a cell regardless of "
+            "its Qini is part of the decision rule, and a decision rule "
+            "stated after the result it judges is not a decision rule."
+        )
+
+    # The magnitude band is ABSOLUTE and measured in this repository. A
+    # future edit restoring an imported relative percentage would fail four
+    # of the six cells on correct code -- models.CALIBRATION_SD's comment
+    # records that measurement.
+    flat = _flat(text[criteria_at:results_at])
+    assert "not an imported relative percentage" in flat, (
+        "the write-up does not state that the calibration magnitude band is "
+        "an absolute measured tolerance rather than an imported relative "
+        "percentage"
+    )
+
+
+def test_model_report_states_the_shared_control_assumption():
+    # D-19, and the assertion that keeps the closed STATE.md multi-arm
+    # tie-break blocker closed. Four separate claims, because dropping any
+    # one of them leaves a reader able to rank the two arms' coefficients:
+    # the control group is shared, its size is named, the coefficients
+    # therefore cannot be compared, and choosing the larger of two
+    # correlated noisy estimates is optimistic by construction.
+    flat = _flat(_model_report_text())
+
+    assert "21,306" in flat, (
+        "the write-up does not name the size of the shared control group. "
+        "Both arms are fitted against the same 21,306 customers and the "
+        "number is what makes the assumption checkable."
+    )
+    assert "share the same control group" in flat, (
+        "the write-up does not state that the two arms share one control "
+        "group"
+    )
+    assert "numerically compared" in flat, (
+        "the write-up does not state that the two arms' Qini coefficients "
+        "may not be numerically compared"
+    )
+    assert "winner's-curse" in flat, (
+        "the write-up does not name the winner's-curse problem. Choosing "
+        "the arm with the larger predicted uplift is an argmax over two "
+        "correlated noisy estimates and is optimistic by construction."
+    )
+
+
+def test_model_report_traces_its_headline_numbers_to_the_artifact():
+    # T-04-72, and the analogue of
+    # test_validity_report_numbers_trace_to_committed_artifacts. Read the
+    # artifacts and go looking for their values in the prose, rather than
+    # pinning literals here -- a literal in this file would be a third copy
+    # of a number and could drift from both the report and the artifact.
+    text = _model_report_text()
+
+    results = pd.read_parquet(config.PROCESSED / "model_results.parquet")
+    shipping = results[results["ships"]]
+    assert not shipping.empty, (
+        "no cell is flagged as shipping in model_results.parquet, so this "
+        "test would pass vacuously"
+    )
+
+    for _, cell in shipping.iterrows():
+        name = f"{cell['arm']}/{cell['outcome']}"
+        for label, literal in (
+            ("holdout Qini", f"{cell['qini_holdout']:.6f}"),
+            ("empirical p-value", f"{cell['p_empirical']:.4f}"),
+        ):
+            assert literal in text, (
+                f"the {label} for {name} is {literal} in "
+                "model_results.parquet and does not appear in the "
+                "write-up. A number in the write-up that is not in an "
+                "artifact is a number nobody can reproduce -- and a "
+                "headline the artifact carries that the write-up does not "
+                "quote is a headline nobody can check."
+            )
+
+    scalars = json.loads(
+        (config.PROCESSED / "model.json").read_text(encoding="utf-8")
+    )
+    visit = scalars["cross_arm_metrics"]["visit"]
+    for label, literal in (
+        ("shared control holdout size", f"{visit['n_shared']:,}"),
+        ("womens minimum predicted uplift", f"{visit['womens_min']:.6f}"),
+        ("between-arm correlation", f"{visit['corr_between_arms']:.6f}"),
+    ):
+        assert literal in text, (
+            f"the {label} is {literal} in model.json and does not appear "
+            "in the write-up's cross-arm section."
+        )
+
+
+def test_model_report_references_every_committed_figure():
+    # A committed figure no write-up references is one a reader will never
+    # find. VALIDITY_FIGURES are excluded because they are Phase 2's and
+    # `validity.md` references them; every remaining name on the allowlist
+    # belongs to this phase and belongs in this document.
+    text = _model_report_text()
+    assert MODEL_FIGURES, "no Phase 4 figures on the allowlist to check"
+    for figure in MODEL_FIGURES:
+        assert figure in text, (
+            f"the write-up does not reference {figure}, which is committed "
+            "under reports/figures/ and named on the test allowlist."
+        )
+
+
+def test_model_report_names_conversion_and_spend_as_results():
+    # D-01 and D-02. The phase fitted all three outcomes for both arms and
+    # the negatives were run through the identical apparatus; the claim
+    # "we tested the negatives as hard as the positives" is only checkable
+    # if the negatives are actually reported.
+    text = _model_report_text()
+    results_at = _first_result_offset(text)
+    body = _flat(text[results_at:])
+
+    for outcome in ("conversion", "spend"):
+        assert outcome in body, (
+            f"the {outcome} outcome is never discussed in the results. "
+            "Quietly modelling only visit is the omission a knowledgeable "
+            "reviewer notices."
+        )
+
+    assert "negative result" in body, (
+        "the write-up does not name its negative results as results. Four "
+        "of the six eligible cells did not clear the pre-registered bar, "
+        "and reporting them is the honesty signal rather than an "
+        "embarrassment to soften."
+    )
+
+
+def test_model_report_does_not_present_the_forest_ratio_as_stable():
+    # T-04-73. The default forest's train/holdout ratio landed on top of
+    # the ratio the project's pitfalls research cites, which is tempting to
+    # present as the reproduction of a law. It is one number from one
+    # split: under the alternative split draw the same configuration gave a
+    # NEGATIVE holdout Qini. The qualifier has to sit in the same passage
+    # as the ratio, not merely somewhere in the file, because a reader who
+    # stops at the table has already taken the wrong reading.
+    text = _flat(_model_report_text())
+
+    results = pd.read_parquet(config.PROCESSED / "model_results.parquet")
+    default_forest = results[
+        (results["arm"] == "mens")
+        & (results["outcome"] == "visit")
+        & (results["learner"] == "rf_default")
+    ]
+    assert len(default_forest) == 1
+    ratio = f"{float(default_forest['train_holdout_ratio'].iloc[0]):.2f}"
+
+    occurrences = [m.start() for m in re.finditer(re.escape(ratio), text)]
+    assert occurrences, (
+        f"the default forest's train/holdout ratio ({ratio}x) never "
+        "appears in the write-up, so the exhibit is not reported"
+    )
+
+    # The window is SYMMETRIC. The qualifier has to sit in the same passage
+    # as the ratio, and "the same passage" means either side of it: the
+    # write-up quotes the ratio once in the exhibit table, once in the
+    # sentence that qualifies it, once again in a figure list a paragraph
+    # later, and once in the conclusion. Only looking forward would demand
+    # the qualifier be repeated after every backward reference, which is a
+    # demand about typing rather than about honesty.
+    window = 1_500
+    for at in occurrences:
+        passage = text[max(0, at - window) : at + window]
+        assert "one split" in passage, (
+            f"the ratio {ratio}x at offset {at} is quoted without a "
+            "qualifier naming it as one number from one split anywhere in "
+            f"the surrounding {window} characters. It is not a stable "
+            "property: under the alternative split draw the same "
+            "configuration produced a negative holdout Qini."
+        )
+
+
+def test_model_report_does_not_conflate_the_two_nulls():
+    # T-04-74. Two things in this project are called a null and they test
+    # different hypotheses. One permutes the treatment label and refits
+    # both base models; the other shuffles the score and refits nothing. A
+    # reader meeting both without a distinguishing sentence will conflate
+    # them and misread the evidence.
+    flat = _flat(_model_report_text())
+
+    assert "qini_random_band" in flat, (
+        "Phase 3's null band is never named, so a reader cannot tell which "
+        "of the two nulls a Qini claim rests on"
+    )
+    assert "permutes the treatment label" in flat, (
+        "the permutation null's mechanism is not described"
+    )
+    assert "refits both base models" in flat, (
+        "the write-up does not state that the permutation null REFITS. An "
+        "evaluation-only shuffle tests a strictly weaker hypothesis and "
+        "cannot detect a model that overfit the treatment label during "
+        "training."
+    )
+    assert "refits nothing" in flat, (
+        "the write-up does not state that qini_random_band refits nothing, "
+        "which is the whole difference between the two mechanisms"
+    )
+
+
+def test_model_report_never_writes_a_zero_p_value():
+    # T-04-75. The empirical p-value is (1 + count) / (1 + R), so at 200
+    # draws its floor is 1/201 and the honest phrasing of the minimum is
+    # that p is AT MOST about 0.005. A zero p-value is an overclaim in any
+    # spelling, and the artifact-level guarantee from the +1 correction
+    # does not stop a hand-written sentence in a report.
+    text = _model_report_text()
+    banned = re.compile(r"p *= *0(\.0+)?([^0-9]|$)|p-value of 0", re.I)
+    match = banned.search(text)
+    assert match is None, (
+        f"the write-up contains {match.group(0)!r} -- see the offset with "
+        "banned.search(text).start(). No permutation p-value from 200 "
+        "draws can be zero; the floor is 1/201, about 0.005."
+    )
+
+
+def test_model_report_has_no_classification_metric_headline():
+    # ROADMAP C5 and Phase 7 criterion 4, which greps the repository for
+    # exactly these four spellings. Each is assembled by concatenation so
+    # this file does not trip the grep it exists to anticipate --
+    # tests/test_evaluation.py's precedent for the same problem.
+    banned = (
+        "accuracy" + "_score",
+        "roc" + "_auc",
+        "classification" + "_report",
+        "." + "score(",
+    )
+    text = _model_report_text()
+    for token in banned:
+        assert token not in text, (
+            f"the write-up contains {token!r}. An uplift model is judged "
+            "on the Qini arithmetic in evaluation.py and nowhere else; a "
+            "classification-family figure here would be the wrong "
+            "yardstick presented as a result."
+        )
+
+
+def test_model_report_makes_no_policy_claim():
+    # The phase boundary. Phase 5 criterion 1 requires the targeting rule's
+    # value to come from a known-propensity estimator on the holdout, not
+    # from summed predicted uplift, so a dollar figure published here would
+    # be derived by the wrong method and would pre-empt the criterion that
+    # forbids deriving it that way. Phase 4 supplies the measured
+    # incomparability (D-19) and nothing more.
+    flat = _flat(_model_report_text())
+    lowered = flat.lower()
+
+    for phrase in (
+        "ipw",
+        "policy value",
+        "incremental revenue",
+        "revenue gain",
+        "expected profit",
+    ):
+        assert phrase not in lowered, (
+            f"the write-up contains {phrase!r}. Valuing the targeting rule "
+            "is Phase 5's, by a method this phase does not implement."
+        )
+
+    # `argmax` may be NAMED -- D-19 requires the write-up to say that
+    # choosing between arms per customer is a winner's-curse estimator --
+    # but it may never be named without that caution attached. That is the
+    # difference between describing the problem and making the claim, and
+    # banning the token outright would forbid the sentence D-19 requires.
+    for match in re.finditer("argmax", lowered):
+        neighbourhood = lowered[
+            max(0, match.start() - 400) : match.start() + 400
+        ]
+        assert "winner" in neighbourhood, (
+            f"'argmax' appears at offset {match.start()} without the "
+            "winner's-curse caution nearby. The two arms' scores are "
+            "correlated estimates over a shared control group, so choosing "
+            "the larger of the two is optimistic by construction."
+        )
+
+
+def test_model_report_keeps_the_regenerate_line_true():
+    # ROADMAP Phase 7 criterion 5 requires a fresh clone to reproduce every
+    # artifact and figure from one command, and this write-up closes by
+    # claiming it. A report that claims the line while the subcommand list
+    # has drifted is worse than one that omits it, so the claim is checked
+    # against the parser rather than trusted.
+    text = _model_report_text()
+    assert "python -m dont_email_everyone.pipeline all" in text, (
+        "the write-up does not carry the regenerate line"
+    )
+
+    source = (config.ROOT / "dont_email_everyone" / "pipeline.py").read_text(
+        encoding="utf-8"
+    )
+    registered = set(re.findall(r'add_parser\(\s*\n?\s*"(\w+)"', source))
+    for subcommand in ("ingest", "analyze", "train", "all"):
+        assert subcommand in registered, (
+            f"the write-up's regenerate line chains through {subcommand!r}, "
+            f"which pipeline.main does not register (found: "
+            f"{sorted(registered)}). The claim in a committed document has "
+            "stopped being true."
+        )
