@@ -275,3 +275,7 @@ None. No new network, auth or file-access surface: the only new writes derive fr
 - It must also state that `monotonicity_womens_conversion_linear.png` is on a **symlog** y axis and its sibling is not, so a reader comparing the two does not read symlog spacing as linear.
 - `REPORT_NAMES` gains `model.md` in that same plan, in the same commit that writes the file, so an added name and an added file cannot diverge.
 - Every Phase 4 figure filename is a stable reference: `FIGURE_STEMS` in `pipeline.py` and `FIGURE_NAMES` in `tests/test_reports.py` both name them, and a rename must move all three.
+
+## Self-Check: PASSED
+
+All thirteen committed PNGs exist on disk and are git-tracked; the SUMMARY exists; all five commits (`fb38708`, `4aa6d2d`, `b7dd449`, `2c507af`, `12d262b`) resolve in `git log`.
