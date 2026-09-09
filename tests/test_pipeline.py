@@ -22,6 +22,13 @@ analyze() is run exactly ONCE for the whole module, against a tmp directory
 seeded with copies of the three committed inputs. It takes about seven
 seconds, most of it the R=4,000 coverage sweep, and running it per test
 would multiply that by the test count for no added coverage.
+
+`train()` gets a parallel `trained` fixture, seeded with those same three
+inputs PLUS the `ate.parquet` analyze() writes. It runs once per module
+too, and it takes MINUTES rather than seconds -- the eight refit
+permutation nulls dominate -- so every test consuming it carries the
+`slow` marker. The source-reading boundary tests at the foot of this file
+stay unmarked so a structural break still fails in a second.
 """
 
 import io
@@ -39,7 +46,14 @@ import pytest
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from dont_email_everyone import config, coverage, ingest, pipeline  # noqa: E402
+from dont_email_everyone import (  # noqa: E402
+    config,
+    coverage,
+    evaluation,
+    ingest,
+    models,
+    pipeline,
+)
 
 INPUT_ARTIFACTS = (
     "analysis_table.parquet",
@@ -279,6 +293,487 @@ def test_written_parquets_load_without_duckdb_or_pandera(analyzed):
     )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
+
+
+
+
+# --------------------------------------------------------------------------
+# Phase 4 -- train()
+# --------------------------------------------------------------------------
+
+# train() reads the three Phase 1 inputs PLUS the ate.parquet that analyze()
+# writes: CONTEXT.md D-22's calibration check compares each cell against the
+# effect Phase 2 computed and canaried, never one this phase produced.
+TRAIN_INPUT_ARTIFACTS = INPUT_ARTIFACTS + ("ate.parquet",)
+
+MODEL_ARTIFACTS = (
+    "scored_holdout.parquet",
+    "permutation_null.parquet",
+    "model_results.parquet",
+    "model.json",
+)
+
+# The six primary-learner cells, generated the same structural way train()
+# generates them so this list cannot drift from the code under test.
+PRIMARY_CELLS = tuple(
+    (arm, outcome)
+    for arm in config.ARMS
+    for outcome in models.OUTCOME_KIND
+)
+
+# The six cells of models.NULL_CELLS that run on the primary learner. Their
+# observed Qini must recompute from the committed float32 scores alone.
+LINEAR_NULL_CELLS = tuple(
+    (arm, outcome, learner)
+    for arm, outcome, learner in models.NULL_CELLS
+    if learner == models.PRIMARY_CONFIG
+)
+
+# The recomputation tolerance for that check. It is not zero because the
+# scored artifact carries float32 while train() ranked float64 in memory:
+# the rounding can swap two near-tied customers, and a Qini coefficient is
+# an area under a curve built from that ranking. MEASURED worst case across
+# the six linear cells at the committed split is 1.4e-08 (mens/visit), so
+# this leaves about seventy times that headroom -- loose enough never to
+# fire on float32 rounding, tight enough that a genuinely different fit
+# cannot slip through.
+QINI_RECOMPUTE_TOLERANCE = 1e-6
+
+
+@pytest.fixture(scope="module")
+def trained(tmp_path_factory):
+    """Run `train()` once against redirected directories; return the paths.
+
+    A parallel to `analyzed`, copied wholesale from it. The FOUR committed
+    inputs are copied in BEFORE the constants are patched, so the copy reads
+    the real artifacts and the run reads only the tmp ones. Because this
+    fixture runs into its own fresh tmp directory seeded with only its own
+    inputs, `test_analyze_writes_exactly_the_expected_artifact_set` is
+    unaffected by it and stays untouched.
+
+    `reports/` and `reports/figures/` deliberately do not exist beforehand.
+    train() writes no figure in this plan, so they must still not exist
+    afterwards -- which is what `test_train_leaves_no_open_figures` and the
+    directory assertion below turn into a cheap forward guard.
+
+    train() takes several MINUTES, dominated by the eight refit permutation
+    nulls at 200 shuffles each, so it runs exactly ONCE per module in the
+    same way `analyzed` does, and the tests that consume it carry the `slow`
+    marker following tests/test_coverage.py's convention. The source-reading
+    boundary tests are deliberately left unmarked so a structural break
+    still fails in a second rather than in six minutes.
+    """
+    root = tmp_path_factory.mktemp("train")
+    processed = root / "processed"
+    reports = root / "reports"
+    figures = reports / "figures"
+    processed.mkdir(parents=True)
+    for name in TRAIN_INPUT_ARTIFACTS:
+        shutil.copyfile(config.PROCESSED / name, processed / name)
+
+    plt.close("all")
+    stdout = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config, "PROCESSED", processed)
+        mp.setattr(config, "REPORTS", reports)
+        mp.setattr(config, "FIGURES", figures)
+        assert not reports.exists(), "reports/ must not exist before the run"
+        assert not figures.exists(), "figures/ must not exist before the run"
+        with redirect_stdout(stdout):
+            pipeline.train()
+        open_figures = plt.get_fignums()
+
+    return SimpleNamespace(
+        processed=processed,
+        reports=reports,
+        figures=figures,
+        stdout=stdout.getvalue(),
+        open_figures=open_figures,
+        results=pd.read_parquet(processed / "model_results.parquet"),
+        null=pd.read_parquet(processed / "permutation_null.parquet"),
+        scored=pd.read_parquet(processed / "scored_holdout.parquet"),
+        model_json=json.loads(
+            (processed / "model.json").read_text(encoding="utf-8")
+        ),
+    )
+
+
+@pytest.mark.slow
+def test_train_writes_exactly_the_expected_artifact_set(trained):
+    written = {p.name for p in trained.processed.iterdir()}
+    assert written == set(TRAIN_INPUT_ARTIFACTS) | set(MODEL_ARTIFACTS), (
+        "train() must write four artifacts beside the four inputs and no "
+        "others -- an unlisted file is one no test asserts on and no report "
+        "traces a number to"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("name", "expected_rows"),
+    (
+        # 32,001, not the 32_000 the plan and 04-RESEARCH quote. Measured:
+        # frames.assign_split gives each arm `size // 2` train rows and the
+        # remainder to holdout, so the two odd-sized arms each contribute one
+        # extra holdout row. The stale figure assumed an exact half.
+        ("scored_holdout.parquet", 32_001),
+        # 8 null cells x models.PERMUTATION_SHUFFLES draws.
+        ("permutation_null.parquet", 1_600),
+        # 2 arms x 3 outcomes x 3 learner configurations.
+        ("model_results.parquet", 18),
+    ),
+)
+def test_train_writes_each_data_artifact(trained, name, expected_rows):
+    path = trained.processed / name
+    assert path.is_file(), f"missing {name}"
+    frame = pd.read_parquet(path)
+    assert len(frame) == expected_rows, (
+        f"{name} has {len(frame)} rows, expected {expected_rows}"
+    )
+    assert "index" not in frame.columns, "index=False was not honored"
+
+
+@pytest.mark.slow
+def test_scored_holdout_contains_holdout_rows_only(trained):
+    analysis = pd.read_parquet(
+        trained.processed / "analysis_table.parquet"
+    )
+    expected = int((analysis["split"] == "holdout").sum())
+
+    assert set(trained.scored["split"].unique()) == {"holdout"}, (
+        "the scored artifact carries a non-holdout row. Holdout-only is "
+        "what makes an in-sample metric structurally IMPOSSIBLE to report "
+        "downstream rather than merely discouraged -- a consumer cannot "
+        "compute a train-set Qini from data that holds no train rows"
+    )
+    assert int((trained.scored["split"] != "holdout").sum()) == 0
+    assert len(trained.scored) == expected, (
+        f"the scored artifact has {len(trained.scored)} rows against the "
+        f"analysis table's {expected} holdout rows"
+    )
+
+
+@pytest.mark.slow
+def test_scored_holdout_carries_every_score_column_as_float32(trained):
+    scored = trained.scored
+    for arm, outcome in PRIMARY_CELLS:
+        plain = f"uplift_{arm}_{outcome}"
+        prefixed = f"unproven_{plain}"
+        assert (plain in scored.columns) != (prefixed in scored.columns), (
+            f"exactly one of {plain} / {prefixed} must be present; the "
+            "prefix is applied per cell from the ship decision"
+        )
+        for name in (f"m0_{arm}_{outcome}", f"m1_{arm}_{outcome}",
+                     f"response_{arm}_{outcome}"):
+            assert name in scored.columns, f"missing score column {name}"
+
+    score_columns = [
+        c
+        for c in scored.columns
+        if c.startswith(("uplift_", "unproven_uplift_", "m0_", "m1_",
+                         "response_"))
+    ]
+    assert len(score_columns) == 24, (
+        f"{len(score_columns)} score columns, expected 24 (6 uplift + 12 "
+        "base scores + 6 response baselines)"
+    )
+    assert {str(scored[c].dtype) for c in score_columns} == {"float32"}, (
+        "score columns must be float32: float64 nearly doubles the "
+        "committed file for six orders of magnitude more precision than a "
+        "ranking or a dollar figure needs"
+    )
+
+    for name in (
+        "segment",
+        "split",
+        "history_segment",
+        *config.PRE_TREATMENT_FEATURES,
+        "visit",
+        "conversion",
+        "spend",
+    ):
+        assert name in scored.columns, (
+            f"{name} is not carried; the pre-treatment features are needed "
+            "for a later phase's profiling of who the rule selects, and "
+            "carrying beats recomputing"
+        )
+
+
+@pytest.mark.slow
+def test_scored_holdout_response_column_equals_m1(trained):
+    # CONTEXT.md D-13. The response baseline IS m1 -- the same learner
+    # class, fit on the treated arm. Asserting equality is what stops a
+    # future refactor silently making the baseline a DIFFERENT model, which
+    # would confound the uplift-versus-propensity comparison the baseline
+    # exists to isolate.
+    for arm, outcome in PRIMARY_CELLS:
+        response = trained.scored[f"response_{arm}_{outcome}"]
+        m1 = trained.scored[f"m1_{arm}_{outcome}"]
+        assert response.notna().sum() > 0
+        assert response.equals(m1), (
+            f"response_{arm}_{outcome} differs from m1_{arm}_{outcome}; the "
+            "response baseline must be m1 itself, not a second fit"
+        )
+
+
+@pytest.mark.slow
+def test_scored_holdout_masks_rows_outside_an_arm(trained):
+    scored = trained.scored
+    mens_column = next(
+        c for c in scored.columns if c.endswith("uplift_mens_visit")
+    )
+    womens_column = next(
+        c for c in scored.columns if c.endswith("uplift_womens_visit")
+    )
+
+    on_womens = scored["segment"] == config.ARMS["womens"]
+    on_mens = scored["segment"] == config.ARMS["mens"]
+    shared = scored["segment"] == config.CONTROL
+
+    assert scored.loc[on_womens, mens_column].isna().all(), (
+        "a Womens E-Mail customer is not in the mens frame and has no "
+        "mens-arm uplift; writing a number there would invent one"
+    )
+    assert scored.loc[on_mens, womens_column].isna().all()
+    assert scored.loc[shared, mens_column].notna().all(), (
+        "the control customers are the SHARED rows -- they belong to both "
+        "arms' frames, which is the structure the later shared-control "
+        "resampling depends on"
+    )
+    assert scored.loc[shared, womens_column].notna().all()
+    assert int(shared.sum()) > 0
+
+
+@pytest.mark.slow
+def test_unproven_prefix_matches_the_ships_flag(trained):
+    prefixed = {
+        c.removeprefix("unproven_uplift_")
+        for c in trained.scored.columns
+        if c.startswith("unproven_uplift_")
+    }
+    eligible = trained.results[trained.results["eligible"]]
+    did_not_ship = {
+        f"{row['arm']}_{row['outcome']}"
+        for _, row in eligible[~eligible["ships"]].iterrows()
+    }
+    # SET EQUALITY, both directions. A subset check would pass while a
+    # shipped column silently carried the prefix, or while a failed cell
+    # silently lost it -- the two failures the label exists to prevent.
+    assert prefixed == did_not_ship, (
+        f"the unproven_ columns {sorted(prefixed)} do not match the "
+        f"eligible cells that did not ship {sorted(did_not_ship)}. The "
+        "prefix and the ships flag must come from ONE decision, or they "
+        "drift and a failed cell loses its label"
+    )
+
+
+@pytest.mark.slow
+def test_permutation_null_artifact_shape_and_self_description(trained):
+    null = trained.null
+    groups = null.groupby(["arm", "outcome", "learner"], observed=True)
+    assert groups.ngroups == len(models.NULL_CELLS) == 8
+    assert set(groups.size()) == {models.PERMUTATION_SHUFFLES}
+    assert len(null) == 8 * models.PERMUTATION_SHUFFLES
+
+    assert int(null["n_shuffles"].isna().sum()) == 0
+    assert int(null["seed"].isna().sum()) == 0
+    assert set(null["n_shuffles"]) == {models.PERMUTATION_SHUFFLES}
+    assert set(null["draw"]) == set(range(models.PERMUTATION_SHUFFLES))
+
+    for key, group in groups:
+        for column in ("qini_observed", "null_p95", "p_empirical", "seed"):
+            assert group[column].nunique() == 1, (
+                f"{column} varies within the cell {key}; it is a per-cell "
+                "summary repeated on every row so a row lifted into a "
+                "report still says what produced it"
+            )
+
+
+@pytest.mark.slow
+def test_permutation_null_observed_values_recompute_from_the_scored_artifact(
+    trained,
+):
+    # CONTEXT.md D-18: the committed null must be CHECKABLE without refitting
+    # anything. Each observed Qini is recomputed here from the committed
+    # float32 scores plus the committed treatment and outcome columns alone.
+    scored = trained.scored
+    for arm, outcome, learner in LINEAR_NULL_CELLS:
+        column = next(
+            c
+            for c in scored.columns
+            if c.endswith(f"uplift_{arm}_{outcome}")
+        )
+        mask = scored["segment"].isin([config.ARMS[arm], config.CONTROL])
+        cell = scored.loc[mask]
+        recomputed = evaluation.qini_coefficient(
+            *evaluation.qini_curve(
+                cell[column].to_numpy(dtype=float),
+                (cell["segment"] == config.ARMS[arm]).astype("int64").to_numpy(),
+                cell[outcome].to_numpy(dtype=float),
+            )
+        )
+        row = trained.null[
+            (trained.null["arm"] == arm)
+            & (trained.null["outcome"] == outcome)
+            & (trained.null["learner"] == learner)
+        ]
+        observed = float(row["qini_observed"].iloc[0])
+        assert abs(recomputed - observed) < QINI_RECOMPUTE_TOLERANCE, (
+            f"{arm}/{outcome}/{learner}: recomputed {recomputed:+.9f} "
+            f"against the committed {observed:+.9f}. A gap larger than "
+            f"{QINI_RECOMPUTE_TOLERANCE} is not float32 rounding -- it "
+            "means the committed scores and the committed metric describe "
+            "different fits"
+        )
+
+
+@pytest.mark.slow
+def test_permutation_null_p_values_are_never_zero(trained):
+    floor = 1 / (1 + models.PERMUTATION_SHUFFLES)
+    assert float(trained.null["p_empirical"].min()) >= floor, (
+        "a permutation p-value of zero is an overclaim from a finite number "
+        f"of draws; the honest reading of the minimum is p <= {floor}"
+    )
+
+
+@pytest.mark.slow
+def test_model_results_has_eighteen_rows_and_six_eligible(trained):
+    results = trained.results
+    assert len(results) == 18
+    assert len(results.drop_duplicates(["arm", "outcome", "learner"])) == 18, (
+        "the grain is (arm, outcome, learner); a duplicate key means two "
+        "rows describe the same cell"
+    )
+    eligible = results[results["eligible"]]
+    assert len(eligible) == 6
+    assert set(eligible["learner"]) == {models.PRIMARY_CONFIG}, (
+        "only the pre-registered primary configuration is eligible (D-11); "
+        "a forest cell carrying eligible=True would put its Qini back into "
+        "the multiplicity the pre-registration exists to collapse"
+    )
+
+    for column in (
+        "eligible",
+        "beats_baseline",
+        "calibration_pass",
+        "propensity_gate_pass",
+        "ships",
+    ):
+        assert results[column].dtype == "bool", (
+            f"{column} round-tripped as {results[column].dtype}; a flag "
+            "stored as an int stops reading as a flag"
+        )
+    # The one deliberately NULLABLE flag: ten cells have no permutation null,
+    # and None there is honest where False would conflate "not tested" with
+    # "tested and did not clear the bar".
+    assert results["exceeds_null_p95"].dtype == "boolean"
+    assert int(results["exceeds_null_p95"].notna().sum()) == len(
+        models.NULL_CELLS
+    )
+
+
+@pytest.mark.slow
+def test_model_results_ships_implies_every_gate_passed(trained):
+    shipped = trained.results[trained.results["ships"]]
+    for _, row in shipped.iterrows():
+        for gate in (
+            "eligible",
+            "exceeds_null_p95",
+            "beats_baseline",
+            "calibration_pass",
+            "propensity_gate_pass",
+        ):
+            assert bool(row[gate]) is True, (
+                f"{row['arm']}/{row['outcome']}/{row['learner']} ships with "
+                f"{gate}={row[gate]!r}. The ship rule is CONJUNCTIVE over "
+                "all five conditions -- both of D-04's, not either, and "
+                "neither diagnostic gate may be quietly skipped"
+            )
+
+
+@pytest.mark.slow
+def test_no_forest_cell_ships(trained):
+    forests = trained.results[
+        trained.results["learner"] != models.PRIMARY_CONFIG
+    ]
+    assert len(forests) == 12
+    assert not forests["ships"].any(), (
+        "a forest configuration shipped. Both are diagnostic exhibits and "
+        "are never eligible however their holdout Qini happens to land"
+    )
+
+
+@pytest.mark.slow
+def test_model_json_carries_the_cross_arm_block_and_tie_diagnostics(trained):
+    payload = trained.model_json
+    for key in (
+        "generated_by",
+        "split",
+        "gates",
+        "committed_ate",
+        "cross_arm_metrics",
+        "tie_diagnostics",
+        "headline",
+    ):
+        assert key in payload, f"model.json is missing {key}"
+
+    for outcome in models.OUTCOME_KIND:
+        block = payload["cross_arm_metrics"][outcome]
+        for key in (
+            "n_shared",
+            "corr_between_arms",
+            "sign_disagreement_fraction",
+            "mens_min",
+            "womens_min",
+            "mens_negative_fraction",
+            "womens_negative_fraction",
+        ):
+            assert key in block, f"cross_arm_metrics[{outcome}] lacks {key}"
+
+    for arm in config.ARMS:
+        ties = payload["tie_diagnostics"][arm]
+        for key in ("n_scores", "n_distinct", "n_tie_groups",
+                    "largest_tie_fraction", "fraction_in_ties"):
+            assert key in ties, f"tie_diagnostics[{arm}] lacks {key}"
+
+    # allow_nan=False raises on a NaN or an Infinity, which json.dumps would
+    # otherwise emit as the bare literals NaN/Infinity -- valid for Python
+    # and invalid JSON everywhere else. A numpy scalar raises here too.
+    json.dumps(payload, allow_nan=False)
+
+
+@pytest.mark.slow
+def test_train_prints_numbered_progress(trained):
+    for marker in ("[1/6]", "[2/6]", "[3/6]", "[4/6]", "[5/6]", "[6/6]",
+                   "[done]"):
+        assert marker in trained.stdout, (
+            f"{marker} missing from the run output; the repo's only "
+            "user-facing progress convention is numbered stage prints, and "
+            "the null stage alone runs for minutes"
+        )
+
+
+@pytest.mark.slow
+def test_train_leaves_no_open_figures(trained):
+    assert trained.open_figures == [], (
+        "train() writes no figure in this plan, so it must leave none open; "
+        "this is the forward guard the figure plan leans on"
+    )
+    assert not trained.figures.exists(), (
+        "train() created reports/figures/ without writing a figure into it"
+    )
+
+
+def test_train_raises_when_the_committed_ate_is_absent(tmp_path):
+    processed = tmp_path / "processed"
+    processed.mkdir(parents=True)
+    for name in INPUT_ARTIFACTS:
+        shutil.copyfile(config.PROCESSED / name, processed / name)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config, "PROCESSED", processed)
+        with pytest.raises(FileNotFoundError, match="ate.parquet"):
+            pipeline.train()
 
 
 # --------------------------------------------------------------------------

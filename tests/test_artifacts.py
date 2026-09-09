@@ -30,6 +30,9 @@ from dont_email_everyone import config
 # therefore safe, and omitting a newly written artifact would silently
 # under-test it: the glob readability check picks a new Parquet up
 # automatically, but the existence and git-tracking assertions never would.
+# The last four are Phase 4's, written by pipeline.train(): appending them
+# here is exactly how a new artifact becomes covered by the existence and
+# git-tracking assertions, which is why the list is maintained by hand.
 ARTIFACT_NAMES = [
     "analysis_table.parquet",
     "mens_vs_control.parquet",
@@ -37,6 +40,10 @@ ARTIFACT_NAMES = [
     "balance.parquet",
     "ate.parquet",
     "coverage.parquet",
+    "scored_holdout.parquet",
+    "permutation_null.parquet",
+    "model_results.parquet",
+    "model.json",
 ]
 
 # `split` joins the four original string columns for the same pandas 3.0
@@ -144,6 +151,45 @@ def test_analysis_artifact_dtypes_survive_round_trip():
     coverage = pd.read_parquet(config.PROCESSED / "coverage.parquet")
     assert coverage["cell_size"].dtype == "int64"
     assert coverage["coverage"].dtype == "float64"
+
+
+def test_committed_model_results_are_not_stale():
+    # The Phase 4 analogue of the ATE canary above: reads the artifact as
+    # committed on disk and never rebuilds it, so a stale file cannot sit in
+    # the repo backing a fresh claim in a report.
+    #
+    # Two stable, load-bearing counts are pinned and no Qini coefficient is.
+    # A Qini here is split-seed dependent -- a legitimate re-draw of the
+    # train/holdout halves moves it by a factor of two on the mens visit
+    # cell -- so pinning one to six decimal places would assert a property
+    # of one seed rather than a property of the pipeline. The two counts
+    # below are properties of the design: six eligible cells because only
+    # the pre-registered primary learner is eligible, and the shipping count
+    # because the ship rule was pre-registered and applied once.
+    results = pd.read_parquet(config.PROCESSED / "model_results.parquet")
+    assert len(results) == 18, (
+        f"model_results.parquet has {len(results)} rows, expected 18 "
+        "(2 arms x 3 outcomes x 3 learner configurations)"
+    )
+    assert int(results["eligible"].sum()) == 6, (
+        f"{int(results['eligible'].sum())} eligible cells, expected 6. A "
+        "different count means the committed artifact is stale or the "
+        "pre-registered primary configuration changed."
+    )
+    assert int(results["ships"].sum()) == 2, (
+        f"{int(results['ships'].sum())} shipping cells, expected 2 -- both "
+        "on the womens arm. A mismatch here means the committed artifact is "
+        "stale, not that a tolerance is too tight; regenerate it with "
+        "`python -m dont_email_everyone.pipeline train`."
+    )
+    shipped = {
+        (row["arm"], row["outcome"], row["learner"])
+        for _, row in results[results["ships"]].iterrows()
+    }
+    assert shipped == {
+        ("womens", "visit", "linear"),
+        ("womens", "conversion", "linear"),
+    }, f"the committed shipping cells are {sorted(shipped)}"
 
 
 def test_committed_ate_effects_are_not_stale():
