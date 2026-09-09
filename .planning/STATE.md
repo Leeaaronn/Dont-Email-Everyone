@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04-08-PLAN.md
-last_updated: "2026-09-09T21:59:15.093Z"
+status: verifying
+stopped_at: Completed 04-09-PLAN.md — phase 04 complete
+last_updated: "2026-09-09T22:49:53.533Z"
 last_activity: 2026-09-09
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 26
-  completed_plans: 25
-  percent: 43
+  completed_plans: 26
+  percent: 57
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 
 Phase: 04 (uplift-modeling) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-09
 
-Progress: [██████████] 96%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [██████████] 96%
 | Phase 04 P06 | 21min | 2 tasks | 2 files |
 | Phase 04 P07 | 71min | 3 tasks | 8 files |
 | Phase 04 P08 | 214min | 3 tasks | 16 files |
+| Phase 04 P09 | 39min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -177,6 +178,13 @@ Recent decisions affecting current work:
 - [Phase 04-08]: three render defects (a title clipped at both ends, three conversion figures labelled 'visits', and the corrected label then clipped itself) were found by LOOKING at the PNGs — the 5,000-byte floor proves a figure is not blank and proves nothing about whether it is readable or true
 - [Phase 04-08]: monotonicity_womens_conversion is symlog at linthresh 1.0 pp (97.90% of its points within +/-1 pp, minimum -22.93 pp) and monotonicity_womens_visit stays LINEAR (only 5.97% within +/-1 pp, range -7.10 to +11.83, no tail) — two scales for one figure kind is the smaller cost; clipping was rejected because it hides real outlier customers
 - [Phase 04-08]: 03-06's decision not to extend FIGURE_NAMES is REVERSED — these are the first uplift figures drawn on real holdout scores rather than synthetic data; VALIDITY_FIGURES was split out because validity.md's tracing test asserts it references every figure named
+- [Phase 04-09]: reports/model.md reverts to validity.md's italic artifact-Source convention rather than metric.md's pytest-node-ID convention, because Phase 3 persisted nothing while Phase 4 persists four artifacts and thirteen figures -- and the report states that difference in one line so it reads as deliberate
+- [Phase 04-09]: the report says the ship rule is stated above the expression that applies it in pipeline.train(), NOT in models.py's docstring as the plan directs -- models.py carries the eligibility restriction and both veto gates, but the five-condition conjunction lives in pipeline.py, and repeating the plan's sentence would have put a checkable falsehood into a document whose whole value is that its claims are checkable
+- [Phase 04-09]: the D-16 replicate-count table recomputes to a 14.6% p95 shift on womens/visit, not 04-RESEARCH's 19.8% -- the committed null derives a distinct seed per cell from the cell identity while the research pass used one seed across cells; the qualitative claim (the largest shift lands on the cell that ships) is unchanged and is the load-bearing part
+- [Phase 04-09]: test_model_report_makes_no_policy_claim bans the Phase 5 CLAIM rather than the token argmax, because D-19 obliges the write-up to name the cross-arm argmax as a winner's-curse estimator; the test permits argmax only with 'winner' within 400 characters, which forbids the actual failure mode rather than the word
+- [Phase 04-09]: the forest-ratio anti-overclaim window is SYMMETRIC (+/-1500 chars) -- forward-only fails on correct prose at 1 of 5 occurrences because a figure list quotes 242.70x a paragraph after the sentence that qualifies it, and demanding the qualifier be repeated after every backward reference is a demand about typing rather than about honesty
+- [Phase 04-09]: Task 2's 'no deleted line matching validity|metric' criterion is unsatisfiable alongside its own single-literal REPORT_NAMES criterion; the three-name tuple was written, the one deleted line is the constant itself, and no Phase 2 or Phase 3 test function was touched
+- [Phase 04-09]: the checkpoint fixed the 51KB length concern by ADDING a ~180-word 'Result in brief' signpost rather than cutting evidence -- and the block was audited against three ordering assertions before insertion, since each keys on the FIRST occurrence of a token (ships, 0.9, +0.009569) above the results boundary
 
 ### Pending Todos
 
@@ -187,7 +195,7 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 1] Stack research was skipped project-wide (5 consecutive agent failures on a transient infra error). Phase 1 planning needs a research pass to pin exact library versions, resolve the local Python 3.9 vs. current library floors question, and confirm the Pandera import path (`import pandera.pandas as pa`) before any ingest code is written.
-- [Phase 4/5] Multi-arm channel-choice tie-break rule is undecided; T-learner scores across arms share a correlated control group and are only loosely comparable. Needs a documented decision.
+- ~~[Phase 4/5] Multi-arm channel-choice tie-break rule is undecided; T-learner scores across arms share a correlated control group and are only loosely comparable. Needs a documented decision.~~ **CLOSED by D-19, documented in 04-09.** The decision is that Phase 4 delivers a **documented assumption and a measurement, not a rule**: both arms are fitted against the same **21,306** control customers, so their Qini coefficients may not be numerically compared, and an argmax over the two arms' scores is a **winner's-curse estimator** over two correlated noisy estimates. The incomparability is quantified rather than asserted — between-arm correlation **0.422742** on visit with **4.4964%** sign disagreement, from `data/processed/model.json` — and handed to Phase 5, which owns the rule and the shared-control bootstrap that makes it honest. Stated above the results table in `reports/model.md` and pinned by `tests/test_reports.py::test_model_report_states_the_shared_control_assumption`.
 - ~~[Phase 4/5] Whether a genuine negative-uplift segment survives holdout validation on the Mens arm is unknown. Settle empirically; do not assume either answer.~~ **CLOSED by 04-05.** Settled empirically on the visit cell at the committed split: on the Mens arm **no** — the minimum predicted uplift on the shared control holdout is **+0.046469** with a zero negative fraction. On the Womens arm **yes** — the minimum is **-0.070802** with **4.50%** of shared rows below zero. The phenomenon appears on the opposite arm from the one the blocker names. Pinned by `tests/test_models.py::test_cross_arm_metrics_settle_the_negative_uplift_question`; 04-09 writes it up and notes the arm swap.
 - [Phase 6] Streamlit Community Cloud resource limits are sourced from a Feb-2024 forum FAQ (MEDIUM confidence). Re-check at planning time.
 
@@ -201,6 +209,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T21:59:15.085Z
-Stopped at: Completed 04-08-PLAN.md
+Last session: 2026-09-09T22:49:53.526Z
+Stopped at: Completed 04-09-PLAN.md — phase 04 complete
 Resume file: None
