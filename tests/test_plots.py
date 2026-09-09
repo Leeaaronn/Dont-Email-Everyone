@@ -33,6 +33,7 @@ error-bar spans) and a non-trivial file size, never a checksum.
 """
 
 import inspect
+import re
 
 import matplotlib
 import pytest
@@ -40,6 +41,7 @@ import pytest
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 from matplotlib.collections import PolyCollection  # noqa: E402
 
 from dont_email_everyone import (  # noqa: E402
@@ -670,6 +672,534 @@ def test_ate_forest_rejects_an_unrecognized_unit_in_the_column(ate_df):
 
 
 # --------------------------------------------------------------------------
+# Phase 4 fixtures: the model-output factories' inputs
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def qini_pair_holdout():
+    """A second `(fraction, qini)` pair with a visibly SMALLER Q(1).
+
+    Deliberately not a copy of `qini_pair` and deliberately not the same
+    seed: the two-chord assertion below has to be unsatisfiable by one chord
+    drawn twice, which needs the two curves' endpoints to differ by more
+    than floating-point noise. The weaker lift here also makes the figure
+    read the way the real exhibit does -- a strong train curve above a weak
+    holdout one.
+    """
+    rng = np.random.default_rng(20260904)
+    n = 4000
+    treatment = (rng.random(n) < 0.5).astype(int)
+    score = rng.normal(size=n)
+    base = (rng.random(n) < 0.15).astype(int)
+    lift = (rng.random(n) < 0.005 + 0.02 * (score > 0)).astype(int)
+    outcome = np.clip(base + treatment * lift, 0, 1)
+    return evaluation.qini_curve(score, treatment, outcome)
+
+
+@pytest.fixture(scope="module")
+def null_draws():
+    """200 synthetic null Qini coefficients -- D-16's production count.
+
+    Synthetic on purpose: whether the real null is correctly generated is
+    `models.py`'s question and its own test file's. What this module needs
+    is an array of the right shape and size to draw.
+    """
+    rng = np.random.default_rng(20260905)
+    return rng.normal(0.0, 0.002, 200)
+
+
+@pytest.fixture(scope="module")
+def calibration_rows():
+    """A six-row calibration frame built on the committed effects.
+
+    `committed_ate` carries the real `data/processed/ate.parquet` values, so
+    the three-orders-of-magnitude spread the panelling exists to handle
+    (0.003111 to 0.769827) is the actual spread rather than a convenient
+    one. The predicted values and bands are illustrative -- `models.py`
+    computes the real ones and this factory only draws what it is handed.
+    """
+    return pd.DataFrame(
+        {
+            "arm": ["mens", "mens", "mens", "womens", "womens", "womens"],
+            "outcome": ["visit", "conversion", "spend"] * 2,
+            "unit": ["pp", "pp", "$", "pp", "pp", "$"],
+            "mean_predicted_uplift": [
+                0.075372,
+                0.007100,
+                0.710000,
+                0.044109,
+                0.003300,
+                0.400000,
+            ],
+            "committed_ate": [
+                0.076590,
+                0.006805,
+                0.769827,
+                0.045233,
+                0.003111,
+                0.424412,
+            ],
+            "calibration_band": [
+                0.012279,
+                0.002502,
+                0.470280,
+                0.009837,
+                0.002595,
+                0.436089,
+            ],
+        }
+    )
+
+
+@pytest.fixture(scope="module")
+def uplift_and_base_score():
+    """An `(uplift, base_score)` pair on a holdout-sized cloud."""
+    rng = np.random.default_rng(20260906)
+    base_score = rng.random(5000)
+    uplift = 0.05 + 0.02 * base_score + rng.normal(0.0, 0.02, 5000)
+    return uplift, base_score
+
+
+def _curve_lines(ax):
+    """Return the drawn curves -- every Line2D with more than two points.
+
+    The complement of `_two_point_segments`: reference lines and chords are
+    two-point segments, so anything longer is data.
+    """
+    return [line for line in ax.lines if len(line.get_xdata()) > 2]
+
+
+def _rendered_text(ax):
+    """Every string this Axes puts in front of a reader, joined.
+
+    Annotations, legend entries and axis labels together, because "the
+    figure says X" is a claim about what is visible, not about which artist
+    happens to carry it.
+    """
+    parts = [text.get_text() for text in ax.texts]
+    legend = ax.get_legend()
+    if legend is not None:
+        parts.extend(text.get_text() for text in legend.get_texts())
+    parts.extend([ax.get_xlabel(), ax.get_ylabel(), ax.get_title()])
+    return " ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# qini_train_holdout_plot
+# --------------------------------------------------------------------------
+
+
+def test_qini_train_holdout_plot_returns_a_figure(qini_pair, qini_pair_holdout):
+    fig = plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout)
+    try:
+        assert isinstance(fig, matplotlib.figure.Figure)
+    finally:
+        plt.close(fig)
+
+
+def test_qini_train_holdout_plot_draws_two_computed_chords(
+    qini_pair, qini_pair_holdout
+):
+    """The load-bearing case: TWO chords, each to its own split's Q(1)."""
+    scale = plots._UNIT_SCALE["pp"]
+    train_ate = float(qini_pair[1][-1]) * scale
+    holdout_ate = float(qini_pair_holdout[1][-1]) * scale
+
+    # Non-vacuity, asserted before the figure is built. If the two endpoints
+    # coincided, one chord drawn twice would satisfy the assertion below; if
+    # either were 1.0 a y = x diagonal would; if either were 0.0 a flat
+    # reference line would. The test would then pass on exactly the bugs it
+    # exists to catch.
+    assert train_ate != pytest.approx(holdout_ate, rel=1e-6)
+    for endpoint in (train_ate, holdout_ate):
+        assert endpoint != pytest.approx(1.0, abs=1e-9)
+        assert endpoint != pytest.approx(0.0, abs=1e-9)
+
+    fig = plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout, unit="pp")
+    try:
+        chords = [
+            segment
+            for segment in _two_point_segments(fig.axes[0])
+            if segment[0] == (0.0, 1.0)
+            and segment[1][0] == pytest.approx(0.0, abs=1e-12)
+        ]
+        drawn = sorted(segment[1][1] for segment in chords)
+        assert len(chords) == 2, (
+            "two curves have TWO random-targeting baselines, because each "
+            "split has its own average treatment effect measured on its own "
+            "rows. Drawing one shared chord judges one curve against the "
+            "other's baseline; drawing a bare y = x diagonal is PITFALLS.md "
+            "Pitfall 8.2 -- a line with no relationship to the data, which "
+            "on any outcome whose ATE is not 1.0 manufactures an advantage "
+            "over random targeting that does not exist. Drawn two-point "
+            f"lines: {_two_point_segments(fig.axes[0])}"
+        )
+        assert drawn == pytest.approx(sorted([train_ate, holdout_ate]), rel=1e-9), (
+            "each chord must end at ITS OWN curve's Q(1); expected "
+            f"{sorted([train_ate, holdout_ate])}, drew {drawn}"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_train_holdout_plot_labels_both_splits(qini_pair, qini_pair_holdout):
+    fig = plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout)
+    try:
+        ax = fig.axes[0]
+        legend = ax.get_legend()
+        assert legend is not None, "the two splits are unlabelled"
+        text = " ".join(entry.get_text() for entry in legend.get_texts()).lower()
+        assert "train" in text and "holdout" in text, (
+            "a reader comparing two curves must be told which is which; got "
+            f"{text!r}"
+        )
+
+        curves = _curve_lines(ax)
+        assert len(curves) == 2, f"expected exactly two drawn curves, got {len(curves)}"
+        styles = {curve.get_linestyle() for curve in curves}
+        assert len(styles) == 2, (
+            "the two curves must differ in linestyle as well as colour, or "
+            "the figure says nothing in greyscale print -- the same reason "
+            "the Love plot cycles markers rather than relying on the colour "
+            f"cycle. Got {styles}."
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_train_holdout_plot_x_limits_are_pinned(qini_pair, qini_pair_holdout):
+    fig = plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout)
+    try:
+        assert fig.axes[0].get_xlim() == (0.0, 1.0), (
+            "the targeting fraction is [0, 1] by definition; auto-scaling it "
+            "lets either chord's endpoint at phi = 1 fall off the canvas"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_train_holdout_plot_y_limits_contain_both_curves(
+    qini_pair, qini_pair_holdout
+):
+    scale = plots._UNIT_SCALE["pp"]
+    fig = plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout, unit="pp")
+    try:
+        low, high = fig.axes[0].get_ylim()
+        for fraction, qini in (qini_pair, qini_pair_holdout):
+            curve = np.asarray(qini, dtype=float) * scale
+            endpoint = float(qini[-1]) * scale
+            assert low < curve.min() and curve.max() < high, (
+                "the y limits must be a FOUR-way min/max over both curves, "
+                "not one curve's range: this figure is read by comparing the "
+                "two curves' vertical separation, and a limit taken from one "
+                f"clips the other. Limits ({low}, {high})."
+            )
+            assert low < endpoint < high, (
+                f"a chord endpoint at Q(1) = {endpoint} is off the canvas"
+            )
+    finally:
+        plt.close(fig)
+
+
+def test_qini_train_holdout_plot_leaves_no_stray_figures_on_a_guard_raise(
+    qini_pair, qini_pair_holdout
+):
+    """03-03's T-03-10 property: the guards precede `plt.subplots`."""
+    plt.close("all")
+    fraction, qini = qini_pair
+    with pytest.raises(ValueError, match="same length"):
+        plots.qini_train_holdout_plot((fraction, qini[:-1]), qini_pair_holdout)
+    assert plt.get_fignums() == [], (
+        "a guard that raises after plt.subplots leaves a Figure registered "
+        "in pyplot's global state with no handle for the caller to close, so "
+        "a suite that exercises the guard accumulates one figure per run"
+    )
+
+
+def test_qini_train_holdout_plot_does_not_mutate_input(qini_pair, qini_pair_holdout):
+    before = [np.asarray(array).copy() for pair in (qini_pair, qini_pair_holdout) for array in pair]
+    fig = plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout, unit="pp")
+    plt.close(fig)
+    after = [np.asarray(array) for pair in (qini_pair, qini_pair_holdout) for array in pair]
+    for original, current in zip(before, after):
+        assert np.array_equal(original, current), (
+            "the pp scaling must produce new arrays, not multiply the "
+            "caller's in place"
+        )
+
+
+# --------------------------------------------------------------------------
+# permutation_null_plot
+# --------------------------------------------------------------------------
+
+
+def test_permutation_null_plot_returns_a_figure(null_draws):
+    fig = plots.permutation_null_plot(null_draws, 0.0031)
+    try:
+        assert isinstance(fig, matplotlib.figure.Figure)
+        assert fig.axes[0].patches, "the null itself is not drawn"
+    finally:
+        plt.close(fig)
+
+
+def test_permutation_null_plot_marks_observed_and_p95(null_draws):
+    scale = plots._UNIT_SCALE["pp"]
+    observed = 0.0031
+    p95 = float(np.quantile(null_draws, 0.95))
+    fig = plots.permutation_null_plot(
+        null_draws, observed, p95=p95, unit="pp"
+    )
+    try:
+        positions = _vertical_line_positions(fig.axes[0])
+        for name, value in (("observed", observed), ("p95", p95)):
+            assert any(
+                position == pytest.approx(value * scale, abs=1e-7)
+                for position in positions
+            ), (
+                f"the {name} rule is missing from the canvas; drawn vertical "
+                f"positions are {positions}"
+            )
+    finally:
+        plt.close(fig)
+
+
+def test_permutation_null_plot_x_limits_cover_an_observed_value_outside_the_null(
+    null_draws,
+):
+    """Clipping the observed value turns an honest exhibit into a misleading one.
+
+    The flagship figure of this phase is an observed statistic sitting
+    INSIDE its own null. Its counterpart -- a shipping cell whose observed
+    value is far outside -- has to render just as truthfully, and an
+    auto-scaled histogram fits the bars, not the rule.
+    """
+    scale = plots._UNIT_SCALE["pp"]
+    observed = float(np.max(null_draws)) + 0.05
+    fig = plots.permutation_null_plot(null_draws, observed, unit="pp")
+    try:
+        low, high = fig.axes[0].get_xlim()
+        assert low < observed * scale < high, (
+            f"the observed value {observed * scale} is clipped off a canvas "
+            f"spanning ({low}, {high}); the figure would show a model that "
+            "beat its null as though it merely matched it"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_permutation_null_plot_never_renders_a_zero_p_value(null_draws):
+    """D-18: from 200 draws the honest statement is `p <= 0.005`, never 0."""
+    fig = plots.permutation_null_plot(
+        null_draws, 0.0031, p_empirical=1.0 / 201.0, unit="pp"
+    )
+    try:
+        text = _rendered_text(fig.axes[0])
+        assert "p = 0.0000" not in text and "p=0.0000" not in text
+        values = re.findall(r"p\s*(?:<=|=)\s*([0-9]*\.?[0-9]+)", text)
+        assert values, f"no p-value was rendered at all; text was {text!r}"
+        assert all(float(value) > 0.0 for value in values), (
+            "`count / R` can be 0.0 and a reported p = 0 from 200 draws is "
+            "an overclaim no permutation test of finite size can support. "
+            "The add-one estimator's floor at R = 200 is 1/201 ~ 0.005 "
+            f"(04-RESEARCH Pitfall 5). Rendered: {values}"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_permutation_null_plot_docstring_distinguishes_the_two_nulls():
+    """04-RESEARCH Pitfall 4: two different nulls, named where each appears."""
+    doc = plots.permutation_null_plot.__doc__
+    assert doc is not None
+    lowered = doc.lower()
+    assert "refit" in lowered, (
+        "these draws permute the TREATMENT LABEL and refit both base models; "
+        "a docstring that does not say so lets a reader read this as the "
+        "evaluation-only null"
+    )
+    assert "qini_random_band" in doc, (
+        "`evaluation.qini_random_band` shuffles the SCORE and refits "
+        "nothing. The two test different hypotheses and produce different "
+        "distributions, and a reader who meets both in one report will "
+        "merge them unless each names its own mechanism where it appears."
+    )
+
+
+def test_permutation_null_plot_leaves_no_stray_figures_on_a_guard_raise(null_draws):
+    plt.close("all")
+    with pytest.raises(ValueError, match="NaN"):
+        plots.permutation_null_plot(
+            np.append(null_draws, np.nan), 0.0031
+        )
+    with pytest.raises(ValueError, match="1-D"):
+        plots.permutation_null_plot(null_draws.reshape(2, -1), 0.0031)
+    assert plt.get_fignums() == []
+
+
+# --------------------------------------------------------------------------
+# calibration_plot
+# --------------------------------------------------------------------------
+
+
+def test_calibration_plot_panels_by_unit(calibration_rows):
+    fig = plots.calibration_plot(calibration_rows)
+    try:
+        assert len(fig.axes) == calibration_rows["unit"].nunique() == 2, (
+            "spend is in dollars and the other two outcomes are proportions, "
+            "and these six effects span three orders of magnitude (0.003111 "
+            "to 0.769827). On one shared numeric axis the +$0.77 spend "
+            "effect would be drawn as though it were 76.98 percentage points."
+        )
+        labels = " ".join(ax.get_xlabel().lower() for ax in fig.axes)
+        assert "percentage point" in labels
+        assert "dollar" in labels
+    finally:
+        plt.close(fig)
+
+
+def test_calibration_plot_draws_the_band(calibration_rows):
+    """The band is read off the drawn artists, not assumed from the frame."""
+    fig = plots.calibration_plot(calibration_rows)
+    try:
+        rows = {
+            f"{row.arm} / {row.outcome}": row
+            for row in calibration_rows.itertuples()
+        }
+        checked = 0
+        for ax in fig.axes:
+            labels = [text.get_text() for text in ax.get_yticklabels()]
+            for (drawn_low, drawn_high), label in zip(_errorbar_spans(ax), labels):
+                row = rows[label]
+                # Matched by row under its OWN panel's scale, never by sorted
+                # width: a dollar band and a percentage-point band are not
+                # comparable numbers.
+                scale = plots._UNIT_SCALE[row.unit]
+                assert drawn_low == pytest.approx(
+                    (row.committed_ate - row.calibration_band) * scale, rel=1e-9
+                )
+                assert drawn_high == pytest.approx(
+                    (row.committed_ate + row.calibration_band) * scale, rel=1e-9
+                )
+                checked += 1
+        assert checked == len(calibration_rows), (
+            "whether a cell passes must be readable from the figure alone, "
+            f"so every cell needs its band drawn; found {checked} of "
+            f"{len(calibration_rows)}"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_calibration_plot_limits_are_pinned_and_contain_every_band(calibration_rows):
+    fig = plots.calibration_plot(calibration_rows)
+    try:
+        units = list(dict.fromkeys(calibration_rows["unit"]))
+        assert len(fig.axes) == len(units)
+        for ax, unit in zip(fig.axes, units):
+            low, high = ax.get_xlim()
+            group = calibration_rows.loc[calibration_rows["unit"] == unit]
+            scale = plots._UNIT_SCALE[unit]
+            for row in group.itertuples():
+                for edge in (
+                    (row.committed_ate - row.calibration_band) * scale,
+                    (row.committed_ate + row.calibration_band) * scale,
+                    row.mean_predicted_uplift * scale,
+                ):
+                    assert low <= edge <= high, (
+                        f"{edge} falls outside the {unit} panel's limits "
+                        f"({low}, {high}); a band edge off the canvas draws a "
+                        "bounded tolerance as an unbounded one"
+                    )
+    finally:
+        plt.close(fig)
+
+
+def test_calibration_plot_rejects_a_missing_column(calibration_rows):
+    with pytest.raises(ValueError, match="calibration_band"):
+        plots.calibration_plot(calibration_rows.drop(columns=["calibration_band"]))
+
+
+def test_calibration_plot_leaves_no_stray_figures_on_a_guard_raise(calibration_rows):
+    plt.close("all")
+    with pytest.raises(ValueError, match="committed_ate"):
+        plots.calibration_plot(calibration_rows.drop(columns=["committed_ate"]))
+    typo = calibration_rows.copy()
+    typo.loc[typo.index[0], "unit"] = "USD"
+    with pytest.raises(ValueError, match="unit"):
+        plots.calibration_plot(typo)
+    assert plt.get_fignums() == []
+
+
+# --------------------------------------------------------------------------
+# uplift_vs_base_score_plot
+# --------------------------------------------------------------------------
+
+
+def test_uplift_vs_base_score_plot_returns_a_figure_with_a_scatter(
+    uplift_and_base_score,
+):
+    uplift, base = uplift_and_base_score
+    fig = plots.uplift_vs_base_score_plot(uplift, base)
+    try:
+        assert isinstance(fig, matplotlib.figure.Figure)
+        assert fig.axes[0].collections, (
+            "the monotonicity diagnostic is the cloud; without a scatter "
+            "there is nothing on the canvas to read"
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_uplift_vs_base_score_plot_shows_the_supplied_correlation(
+    uplift_and_base_score,
+):
+    """The figure DISPLAYS the gate's number; it never recomputes one.
+
+    A figure that recomputed the correlation could disagree with the value
+    `model_results.parquet` stores, and then a reader and a gate would be
+    reading two different diagnostics off the same cell. Two calls with two
+    different values prove the display tracks the argument.
+    """
+    uplift, base = uplift_and_base_score
+    for value, expected in ((0.879, "0.879"), (-0.421, "0.421")):
+        fig = plots.uplift_vs_base_score_plot(uplift, base, r=value)
+        try:
+            text = _rendered_text(fig.axes[0])
+            assert expected in text, (
+                f"r={value} was passed but {expected!r} is nowhere on the "
+                f"figure; rendered text was {text!r}"
+            )
+        finally:
+            plt.close(fig)
+
+
+def test_uplift_vs_base_score_plot_names_the_base_model(uplift_and_base_score):
+    uplift, base = uplift_and_base_score
+    for label in ("m0", "m1"):
+        fig = plots.uplift_vs_base_score_plot(uplift, base, r=0.5, base_label=label)
+        try:
+            assert label in _rendered_text(fig.axes[0]), (
+                "an m0 diagnostic and an m1 diagnostic are different claims "
+                "and a reader cannot tell them apart from the cloud alone"
+            )
+        finally:
+            plt.close(fig)
+
+
+def test_uplift_vs_base_score_plot_leaves_no_stray_figures_on_a_guard_raise(
+    uplift_and_base_score,
+):
+    uplift, base = uplift_and_base_score
+    plt.close("all")
+    with pytest.raises(ValueError, match="same length"):
+        plots.uplift_vs_base_score_plot(uplift, base[:-1])
+    with pytest.raises(ValueError, match="base_label"):
+        plots.uplift_vs_base_score_plot(uplift, base, base_label="  ")
+    assert plt.get_fignums() == []
+
+
+# --------------------------------------------------------------------------
 # Module boundary
 # --------------------------------------------------------------------------
 
@@ -707,17 +1237,20 @@ def test_plots_module_selects_the_headless_backend_before_pyplot():
 
 
 def test_plots_module_writes_nothing(
-    balance_df, ate_df, qini_pair, tmp_path, monkeypatch
+    balance_df, ate_df, qini_pair, qini_pair_holdout, null_draws,
+    calibration_rows, uplift_and_base_score, tmp_path, monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
-    # Every public factory, not a subset: the guarantee this test states is
-    # about the module, so a factory left out of this tuple quietly narrows
-    # it to the ones somebody remembered.
-    fraction, qini = qini_pair
+    # EVERY public factory, never a subset: a factory left out of this tuple
+    # quietly narrows the module guarantee to the ones somebody remembered.
     for fig in (
         plots.love_plot(balance_df),
         plots.ate_forest(ate_df),
-        plots.qini_plot(fraction, qini),
+        plots.qini_plot(*qini_pair),
+        plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout),
+        plots.permutation_null_plot(null_draws, 0.0031, p95=0.004),
+        plots.calibration_plot(calibration_rows),
+        plots.uplift_vs_base_score_plot(*uplift_and_base_score, r=0.5),
     ):
         plt.close(fig)
     assert list(tmp_path.iterdir()) == [], (
