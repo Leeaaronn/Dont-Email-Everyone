@@ -1,0 +1,33 @@
+# Streamlit configuration for the deployed Community Cloud app.
+#
+# Every key below was confirmed against the installed streamlit==1.63.0 by
+# enumerating streamlit.config._config_options_template before this file was
+# written, so none of them is a guess and none had to be dropped.
+
+[browser]
+# ROADMAP criterion 4: no network call. streamlit's own default for this
+# option is True, so a deployment WITHOUT this file phones home to
+# streamlit.io on every session while every local test still passes. This
+# line is the whole reason the file is a Wave 0 deliverable.
+gatherUsageStats = false
+
+[client]
+# "viewer" hides the rerun / clear-cache / deploy controls. The reviewer this
+# app is built for is not the developer, and a deploy button offered to a
+# stranger is developer chrome leaking into a published artifact.
+toolbarMode = "viewer"
+
+[theme]
+# Load-bearing, not cosmetic. The three matplotlib figures are drawn on a
+# white canvas, and the hatched covers-zero spans are a light grey face on a
+# white axes face. A reviewer whose browser prefers dark mode would get dark
+# chrome around three white rectangles, with those spans sitting inside the
+# brightest region of the page -- demoting exactly the encoding the 05-08
+# checkpoint approved as load-bearing evidence.
+base = "light"
+# plots._POLICY_BAND_COLOUR, so the widget accent is the same blue as the
+# policy curve. streamlit's stock accent is a red (#FF4B4B), and red chrome
+# beside a "not detectable" verdict line reads as an alert about a defect
+# rather than as a finding -- the specific misreading this phase exists to
+# prevent.
+primaryColor = "#1f4e79"
