@@ -1072,7 +1072,17 @@ network calls, and Phase 1's checksum gate stands between the vendored CSV and e
 
 ---
 
-## Open Questions
+## Open Questions (ALL RESOLVED 2026-09-09)
+
+> **Resolution record.** All four questions were settled before execution began. Do not re-open them
+> from this document; the plans are authoritative.
+>
+> | # | Question | Resolution | Where |
+> |---|---|---|---|
+> | 1 | Accept the two-line `pipeline.train()` scoring extension? | **Yes — Option A**, additive `_all` columns, gated on a bit-identity permission-slip test proving every pre-existing column and every Phase 4 headline number reproduces exactly. User decision, recorded as D-15. | 05-03 |
+> | 2 | How wide should the c/m sweep be? | **0–1.5 grid**, which resolves the first breakpoint at 0.068. | 05-06 |
+> | 3 | Is R = 500 sufficient for the policy band? | **Checked, not assumed** — an R=500-vs-2000 stability check on the spend band specifically, since spend is heavier-tailed than the visit outcome `BOOTSTRAP_BAND_RESAMPLES` was justified against. | 05-06 Task 2 |
+> | 4 | Publish the conversion-ranked sensitivity? | **Yes**, with rationale stated. | 05-09 §12 |
 
 1. **Does the planner accept the two-line `pipeline.train()` scoring extension?**
    - What we know: it is leak-free, costs a `predict` call, and is the only route to a *valued*
