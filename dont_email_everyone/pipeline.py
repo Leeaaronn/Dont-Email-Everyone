@@ -1,6 +1,6 @@
 """The project's write entrypoint: `python -m dont_email_everyone.pipeline`.
 
-Four subcommands:
+Five subcommands:
 
 - `ingest` delegates to `ingest.build_all()` and does nothing else. That
   function's docstring commits it to five gates and three artifacts and
@@ -12,8 +12,11 @@ Four subcommands:
   wrote, fits the eighteen Phase 4 model cells, runs the eight permutation
   nulls, applies the pre-registered ship rule and writes four model
   artifacts (below).
-- `all` runs `ingest` then `analyze` then `train`, which is the fresh-clone
-  path (ROADMAP Phase 7 criterion 5).
+- `policy` reads the three artifacts `analyze` and `train` wrote, values
+  every top-k targeting policy from the randomization alone, and writes
+  the four Phase 5 artifacts (below). It fits nothing.
+- `all` runs `ingest` then `analyze` then `train` then `policy`, which is
+  the fresh-clone path (ROADMAP Phase 7 criterion 5).
 
 `analyze` writes, under `config.PROCESSED`:
 
@@ -104,6 +107,51 @@ shipping evidence, and every eligible cell for the one calibration plot.
 `reports/model.md` carries that rule in full so the absent figures read as
 a decision rather than an omission.
 
+`policy` reads the `scored_holdout.parquet` and `model.json` that `train`
+wrote plus the `ate.parquet` that `analyze` wrote, and writes, under
+`config.PROCESSED`:
+
+- `policy_curve.parquet` -- LONG form, one row per (ranking, outcome, k)
+  over the 101-point grid: nine groups of 101 rows. Each row carries the
+  policy value, both of ROADMAP criterion 1's contrasts (versus emailing
+  nobody and versus emailing everyone), CONTEXT.md D-08a's versus-a-
+  random-send-of-the-same-size comparator, the per-targeted-customer
+  figure, and the weight and frame size all of them were computed on.
+  Long rather than wide for `permutation_null.parquet`'s reason: a tenth
+  ranking appends rows instead of altering the schema. `ranking` is the
+  scored artifact's own column name, so an unproven cell's label is part
+  of every row it produces rather than something reattached by hand.
+- `policy_bands.parquet` -- one row per (ranking, outcome, contrast, k)
+  with `lo` and `hi` as two float columns. Percentile bands drawn from ONE
+  bootstrap index matrix shared across the whole phase, which is what
+  makes the phase's intervals jointly valid rather than merely each
+  defensible alone (ROADMAP criterion 2). The `per_targeted` contrast has
+  100 rows rather than 101: at k = 0 no emails are sent, so a per-email
+  band holds no numbers and the row is absent rather than nan.
+- `cost_sweep.parquet` -- CONTEXT.md D-09's exhibit. One row per
+  cost-to-margin ratio over a 1,501-point axis, carrying the
+  profit-maximizing depth, the profit there, and the profit of a blanket
+  send at the same price, plus three ILLUSTRATIVE (cost, margin) rows
+  flagged as such. No cost and no margin is adopted anywhere -- D-10 keeps
+  the headline free of invented constants -- and `profit_unit` records
+  which of the two denominators each row uses, because the swept rows are
+  per unit of gross margin and the three illustrative ones are dollars.
+- `manifest.json` -- the scalar block Phase 6's app and Phase 7's README
+  read, same grain rule as `ate.json` and `model.json` above: anything
+  whose grain is not tabular lands here. It carries the frame, the
+  headline block at the capacity anchor with every contrast and its band,
+  the zero-cost caveat in full, and a `reproduce` sentence spelling out
+  the two-term subtraction a reader can run on a calculator against the
+  scored artifact. That sentence is how ROADMAP criterion 4 becomes a
+  property of the artifact rather than only a property of the code. The
+  two sensitivity rankings are keyed by their own column names under
+  `sensitivity` and contribute no number to `headline` (D-03).
+
+`policy` READS what `train` and `analyze` wrote and fits nothing, which is
+a second real ordering dependency -- `analyze` then `train` then `policy`
+-- so `all` chains all four and `policy` raises by name if any one of its
+three inputs is absent.
+
 Every interval is stored as two float columns, never a tuple-valued column:
 a nested dtype survives a write here and then fails to load in a later phase
 whose dependency set is pandas and pyarrow alone. Every Parquet is written
@@ -144,6 +192,7 @@ from dont_email_everyone import (  # noqa: E402
     balance,
     config,
     coverage,
+    economics,
     evaluation,
     features,
     frames,
@@ -1520,9 +1569,524 @@ def train() -> None:
     print(f"[done] wrote 4 model artifacts to {config.PROCESSED}")
 
 
+# --------------------------------------------------------------------------
+# Phase 5: the policy layer
+# --------------------------------------------------------------------------
+
+# The three rankings the policy artifacts value, spelled with the ARTIFACT'S
+# OWN column names rather than with a tidied-up label. That is deliberate and
+# it is CONTEXT.md D-03 expressed as a data structure: `unproven_` is a
+# property of the cell that produced the score, and using the column name as
+# the `ranking` value in every row means the label travels with the number
+# automatically, into every groupby, join and chart downstream. A prettier
+# label would have to be reattached by hand at each of those points, and the
+# first place it was forgotten is the place an unproven number reads as a
+# published one.
+POLICY_RANKINGS = (
+    "uplift_womens_visit",
+    "uplift_womens_conversion",
+    "unproven_uplift_womens_spend",
+)
+
+# D-01, locked on Phase 4 evidence -- holdout Qini +0.009569 at an empirical
+# p of 0.0100 -- before any policy curve existed. The other two rankings are
+# labelled sensitivity, and only this one may reach the manifest's headline.
+POLICY_HEADLINE_RANKING = "uplift_womens_visit"
+
+POLICY_OUTCOMES = ("visit", "conversion", "spend")
+
+# The project-wide draw seed, shared with evaluation's own default so the
+# Qini band, this policy band and Phase 6's revenue band are three views of
+# one set of replicates (D-12).
+POLICY_SEED = 20260902
+
+# The c/m sweep axis: 0 to 1.5 in steps of 0.001. Both ends come from the
+# MEASURED curve rather than being picked round. The optimum sits at
+# k* = 0.80 while email is nearly free and does not move at all until c/m
+# reaches 0.068, so a coarser axis would render that first breakpoint at the
+# wrong ratio -- at a step of 0.005 it reads 0.070 -- and the flat region is
+# the finding, so its right-hand edge has to be resolved. k* reaches 0 at
+# 1.397, so 1.5 covers the whole interesting range with a little air beyond
+# it. 1,501 rows of four floats is a few tens of kilobytes.
+POLICY_RATIO_MAX = 1.5
+POLICY_RATIO_GRID_POINTS = 1501
+
+# ILLUSTRATIVE ONLY, and never a default anywhere: `economics.py` refuses to
+# hold a cost or a margin at all (D-10), and these three pairs live here, in
+# the artifact writer, flagged `illustrative` in every row they produce.
+# Hillstrom carries no cost data, so any one of these adopted as THE number
+# would be an invented constant standing behind a published figure. They
+# exist to put three named points on the exhibit's axis: a near-free send, a
+# conventionally priced one, and one expensive enough to push the optimum
+# most of the way to zero.
+ILLUSTRATIVE_COST_MARGIN_PAIRS = (
+    (0.001, 0.40),
+    (0.10, 0.40),
+    (0.30, 0.25),
+)
+
+
+def policy() -> None:
+    """Value the top-k targeting policies and write the four Phase 5
+    artifacts described in the module docstring.
+
+    Reads `scored_holdout.parquet`, `ate.parquet` and `model.json` from
+    `config.PROCESSED`. All three are INPUTS: this function fits nothing,
+    and ROADMAP criterion 4 requires every headline number to be
+    reproducible from the committed scores with arithmetic alone. A
+    missing input raises by name rather than surfacing as a bare read
+    error, which makes the `train` -> `policy` ordering dependency
+    diagnosable at the point it is violated.
+
+    ONE bootstrap index matrix is built, over all 32,001 holdout rows at
+    three levels, and every band in the phase is a masked view of it. The
+    reasoning is in the comment at the build site and in
+    `evaluation.stratified_indices`' docstring: the shared control group
+    gets one draw per replicate, which is ROADMAP criterion 2, and three
+    intervals computed from the same replicates are jointly valid where
+    three independently drawn intervals quietly disagree with each other.
+
+    Every dollar figure is on the evaluation frame AS MEASURED, plus a per
+    targeted customer figure (D-11). Nothing is scaled to the 64,000-row
+    list anywhere in this function.
+
+    Runtime is about twenty seconds, dominated by the nine bootstrap bands
+    at 500 replicates each. A progress line is printed per band.
+    """
+    scored_path = config.PROCESSED / "scored_holdout.parquet"
+    ate_path = config.PROCESSED / "ate.parquet"
+    model_path = config.PROCESSED / "model.json"
+
+    # Three plain if/raise statements naming the path and the subcommand
+    # that produces it, never a bare read: this is the `train` -> `policy`
+    # ordering dependency made diagnosable where it is violated, exactly
+    # as train() does for the `analyze` -> `train` one.
+    if not scored_path.is_file():
+        raise FileNotFoundError(
+            f"the committed holdout scores are absent: {scored_path}. "
+            "policy() ranks customers with them and refits nothing, so run "
+            "the `train` subcommand first -- "
+            "`python -m dont_email_everyone.pipeline train` -- or run "
+            "`all`, which chains ingest, analyze, train and policy in that "
+            "order."
+        )
+    if not ate_path.is_file():
+        raise FileNotFoundError(
+            f"the committed average treatment effects are absent: "
+            f"{ate_path}. policy() records them beside the policy value as "
+            "the untargeted comparison Phase 2 canaried, so run the "
+            "`analyze` subcommand first -- "
+            "`python -m dont_email_everyone.pipeline analyze` -- or run "
+            "`all`."
+        )
+    if not model_path.is_file():
+        raise FileNotFoundError(
+            f"the committed model scalar block is absent: {model_path}. "
+            "policy() reads which cells shipped and which carry the "
+            "unproven label from it, so run the `train` subcommand first "
+            "-- `python -m dont_email_everyone.pipeline train` -- or run "
+            "`all`."
+        )
+
+    scored = pd.read_parquet(scored_path)
+    committed_ate = pd.read_parquet(ate_path)
+    model_block = json.loads(model_path.read_text(encoding="utf-8"))
+    unproven_columns = list(model_block["headline"]["unproven_columns"])
+    print(
+        f"[1/6] inputs: scored={scored.shape} ate={committed_ate.shape} "
+        f"unproven cells named by model.json: {len(unproven_columns)}"
+    )
+
+    segment = scored["segment"].to_numpy()
+    # (control, mens, womens) -- stated explicitly and passed explicitly.
+    # `level_order` IS the order in which the levels consume the RNG
+    # stream, so a different order is a different matrix; leaving it to
+    # the ascending default would make the project's single draw depend
+    # on how the three arm names happen to sort.
+    policy_levels = (config.CONTROL, config.ARMS["mens"], config.ARMS["womens"])
+    level_code = {name: code for code, name in enumerate(policy_levels)}
+    codes = np.array([level_code[value] for value in segment], dtype=np.int64)
+
+    # ONE matrix for the whole phase, over ALL holdout rows, rather than
+    # one per arm frame. `stratified_indices` is position-preserving, so
+    # masking its columns by the ORIGINAL segment yields exactly the
+    # womens+control replicate rows and exactly the mens+control ones,
+    # and within a replicate the control columns are elementwise
+    # identical between the two masks. That is ROADMAP criterion 2 as a
+    # construction rather than as a claim: the shared control group is
+    # drawn ONCE per replicate, so the correlation between the two arms
+    # survives into the intervals. Three bands from these same replicates
+    # are jointly valid; three bands drawn independently would each be
+    # defensible alone and would quietly disagree with each other.
+    indices_all = evaluation.stratified_indices(
+        codes,
+        evaluation.BOOTSTRAP_BAND_RESAMPLES,
+        POLICY_SEED,
+        level_order=list(range(len(policy_levels))),
+    )
+
+    # Every size below is DERIVED from the data. A literal 21,347 here
+    # would survive a regenerated scored artifact and index the wrong
+    # customers without raising.
+    frame_mask = segment != config.ARMS["mens"]
+    n_frame = int(frame_mask.sum())
+    frame_rows = np.flatnonzero(frame_mask)
+    # The masked matrix holds positions into the FULL holdout, so it is
+    # remapped once into positions of the frame the estimator runs on.
+    # int32 is preserved because `_guard_indices` requires an integer
+    # kind and the full matrix is already 64 MB at three levels.
+    frame_position = np.full(len(scored), -1, dtype=np.int32)
+    frame_position[frame_rows] = np.arange(n_frame, dtype=np.int32)
+    indices = frame_position[indices_all[:, frame_mask]]
+
+    frame = scored.loc[frame_mask]
+    treatment = (
+        frame["segment"].to_numpy() == config.ARMS["womens"]
+    ).astype(float)
+    outcome_values = {
+        name: frame[name].to_numpy(dtype=float) for name in POLICY_OUTCOMES
+    }
+    print(
+        f"[2/6] one three-level draw: {indices_all.shape} over all holdout "
+        f"rows, masked to {indices.shape} on the womens+control frame "
+        f"({int(treatment.sum())} treated / {int((treatment == 0).sum())} "
+        "control)"
+    )
+
+    curves = {}
+    curve_parts = []
+    band_parts = []
+    for ranking in POLICY_RANKINGS:
+        score = frame[ranking].to_numpy(dtype=float)
+        for outcome in POLICY_OUTCOMES:
+            result = evaluation.policy_value_curve(
+                score,
+                treatment,
+                outcome_values[outcome],
+                weight=evaluation.POLICY_WEIGHT,
+                n_grid=evaluation.BAND_GRID_POINTS,
+                seed=POLICY_SEED,
+            )
+            grid, band = evaluation.policy_value_band(
+                score,
+                treatment,
+                outcome_values[outcome],
+                indices=indices,
+                weight=evaluation.POLICY_WEIGHT,
+                n_grid=evaluation.BAND_GRID_POINTS,
+                seed=POLICY_SEED,
+            )
+            curves[(ranking, outcome)] = (result, band)
+            curve_parts.append(
+                pd.DataFrame(
+                    {
+                        "ranking": ranking,
+                        "outcome": outcome,
+                        "k": result.grid,
+                        "n_targeted": result.n_targeted,
+                        "v_pi": result.v_pi,
+                        "v_all": result.v_all,
+                        "v_none": result.v_none,
+                        "delta_none": result.delta_none,
+                        "delta_all": result.delta_all,
+                        "delta_random": result.delta_random,
+                        "per_targeted": result.per_targeted,
+                        "weight": result.weight,
+                        "n_frame": result.n,
+                    }
+                )
+            )
+            for contrast in evaluation.POLICY_CONTRASTS:
+                lo, hi = band[contrast]
+                # `per_targeted` is nan at k = 0 in every replicate, by
+                # construction: no emails are sent there, so there is no
+                # per-email figure to take a percentile of. That row is
+                # DROPPED rather than written as two nans -- a band row
+                # holding no numbers is not a band, and a nan pair in a
+                # two-float-column artifact reads downstream as data loss
+                # rather than as "the question is undefined here". The
+                # curve artifact keeps its nan, because there the value
+                # is one cell of a wide row that does exist.
+                finite = np.isfinite(lo) & np.isfinite(hi)
+                band_parts.append(
+                    pd.DataFrame(
+                        {
+                            "ranking": ranking,
+                            "outcome": outcome,
+                            "contrast": contrast,
+                            "k": grid[finite],
+                            "lo": lo[finite],
+                            "hi": hi[finite],
+                        }
+                    )
+                )
+            print(
+                f"      curve and band: {ranking} / {outcome} "
+                f"(R={indices.shape[0]})"
+            )
+
+    curve_out = pd.concat(curve_parts, ignore_index=True)
+    band_out = pd.concat(band_parts, ignore_index=True)
+    print(f"[3/6] curves={curve_out.shape} bands={band_out.shape}")
+
+    # D-09's exhibit, on the headline ranking and the spend outcome only:
+    # money is the axis a cost sweep is about, and the other eight cells
+    # would be eight step functions nobody reads.
+    headline_curve = curves[(POLICY_HEADLINE_RANKING, "spend")][0]
+    ratios = np.linspace(0.0, POLICY_RATIO_MAX, POLICY_RATIO_GRID_POINTS)
+    swept, k_star, profit_at_k_star = economics.cost_margin_sweep(
+        headline_curve.delta_none, headline_curve.grid, ratios
+    )
+    # Profit at k = 1 is the blanket send's own profit on the same axis,
+    # so a reader can see the optimum's advantage over emailing everyone
+    # at each price rather than only the optimum's level.
+    profit_at_k_1 = np.array(
+        [
+            economics.profit_curve(
+                headline_curve.delta_none,
+                headline_curve.grid,
+                cost_per_email=float(ratio),
+                gross_margin=1.0,
+            )[-1]
+            for ratio in swept
+        ]
+    )
+    sweep_out = pd.DataFrame(
+        {
+            "cost_over_margin": swept,
+            "k_star": k_star,
+            "profit_at_k_star": profit_at_k_star,
+            "profit_at_k_1": profit_at_k_1,
+            "illustrative": False,
+            "cost_per_email": np.nan,
+            "gross_margin": np.nan,
+            "profit_unit": "per_unit_of_gross_margin",
+        }
+    )
+
+    illustrative_rows = []
+    for cost_per_email, gross_margin in ILLUSTRATIVE_COST_MARGIN_PAIRS:
+        star_k, star_profit = economics.optimal_k(
+            headline_curve.delta_none,
+            headline_curve.grid,
+            cost_per_email=cost_per_email,
+            gross_margin=gross_margin,
+        )
+        blanket = economics.profit_curve(
+            headline_curve.delta_none,
+            headline_curve.grid,
+            cost_per_email=cost_per_email,
+            gross_margin=gross_margin,
+        )[-1]
+        illustrative_rows.append(
+            {
+                "cost_over_margin": cost_per_email / gross_margin,
+                "k_star": float(star_k),
+                "profit_at_k_star": float(star_profit),
+                "profit_at_k_1": float(blanket),
+                "illustrative": True,
+                "cost_per_email": float(cost_per_email),
+                "gross_margin": float(gross_margin),
+                # The unit travels with the number. Swept rows are
+                # denominated per unit of gross margin, because the sweep
+                # names no margin at all; these three rows name one, so
+                # their profits are dollars per population customer. One
+                # column carrying two units and no label would be exactly
+                # the silent-wrong-number defect this project exists to
+                # avoid.
+                "profit_unit": "dollars_per_population_customer",
+            }
+        )
+    sweep_out = pd.concat(
+        [sweep_out, pd.DataFrame(illustrative_rows)], ignore_index=True
+    )
+
+    zero_cost_k = float(k_star[0])
+    moved = np.flatnonzero(k_star != zero_cost_k)
+    first_breakpoint = float(swept[moved[0]]) if moved.size else None
+    zeroed = np.flatnonzero(k_star == 0.0)
+    first_zero_ratio = float(swept[zeroed[0]]) if zeroed.size else None
+    print(
+        f"[4/6] cost exhibit: {sweep_out.shape} rows, k* from {zero_cost_k} "
+        f"at c/m = 0 to {float(k_star[-1])} at {POLICY_RATIO_MAX}, "
+        f"{int(np.unique(k_star).size)} distinct optima, first breakpoint "
+        f"{first_breakpoint}"
+    )
+
+    capacity_k = economics.HEADLINE_CAPACITY
+    anchor = int(np.argmin(np.abs(headline_curve.grid - capacity_k)))
+    n_targeted = economics.emails_at_capacity(n_frame, capacity_k)
+
+    def _outcome_block(ranking: str, outcome: str) -> dict:
+        """The per-outcome scalars at the capacity anchor, with bands.
+
+        Defined here rather than at module scope because it closes over
+        `anchor` and `curves`, both properties of THIS run's frame; a
+        module-level helper would need every one of them passed back in
+        and would read as reusable when it is not.
+        """
+        result, band = curves[(ranking, outcome)]
+        # D-11: on the evaluation frame AS MEASURED. Nothing in this
+        # block is scaled to the 64,000-row list, here or anywhere
+        # downstream -- `per_targeted` is what a reader multiplies by
+        # their own send volume to get a campaign-scale figure, and doing
+        # that is their extrapolation to state, not ours.
+        return {
+            "total": float(result.delta_none[anchor] * result.n),
+            "total_lo": float(band["delta_none"][0][anchor] * result.n),
+            "total_hi": float(band["delta_none"][1][anchor] * result.n),
+            "per_targeted": float(result.per_targeted[anchor]),
+            "per_targeted_lo": float(band["per_targeted"][0][anchor]),
+            "per_targeted_hi": float(band["per_targeted"][1][anchor]),
+            "vs_nobody": float(result.delta_none[anchor]),
+            "vs_nobody_lo": float(band["delta_none"][0][anchor]),
+            "vs_nobody_hi": float(band["delta_none"][1][anchor]),
+            "vs_everyone": float(result.delta_all[anchor]),
+            "vs_everyone_lo": float(band["delta_all"][0][anchor]),
+            "vs_everyone_hi": float(band["delta_all"][1][anchor]),
+            "vs_random": float(result.delta_random[anchor]),
+            "vs_random_lo": float(band["delta_random"][0][anchor]),
+            "vs_random_hi": float(band["delta_random"][1][anchor]),
+        }
+
+    # Derived, not typed: the reproduce sentence has to name the file it
+    # is about, and a quoted path literal in this module is banned by
+    # `test_pipeline_paths_all_come_from_config` for the good reason that
+    # every path here is ROOT-anchored.
+    scored_relative = scored_path.relative_to(config.ROOT).as_posix()
+    womens_name = config.ARMS["womens"]
+
+    caveat = (
+        "With genuinely free email the correct action is to email "
+        "everyone, not to target: the womens arm's average treatment "
+        "effect is positive on every outcome measured here, so a top-k "
+        "policy cannot beat a blanket send when a send is free. Swept "
+        "over three outcomes, three rankings and all "
+        f"{evaluation.BAND_GRID_POINTS} grid points at "
+        f"{evaluation.BOOTSTRAP_BAND_RESAMPLES} bootstrap replicates, not "
+        "one k produces a versus-everyone interval that excludes zero "
+        "from above. The point estimate of that contrast is positive at "
+        "some k; the interval never is, and the claim made here is about "
+        "the interval. This headline is therefore about spending a FIXED "
+        "BUDGET of sends well -- the decision a capacity-constrained "
+        "marketer actually faces -- which is why the comparator is a "
+        "random send of the same size. Email is not free in practice, "
+        "and the cost exhibit says where the price begins to bite: the "
+        "optimal depth does not move at all until the cost-to-margin "
+        f"ratio reaches {first_breakpoint}, and falls to zero only at "
+        f"{first_zero_ratio}."
+    )
+
+    reproduce = (
+        f"Read {scored_relative} and keep the {n_frame} rows whose segment "
+        f"is {womens_name!r} or {config.CONTROL!r}. Rank them by the "
+        f"{POLICY_HEADLINE_RANKING} column, descending, breaking ties with "
+        f"a numpy default_rng({POLICY_SEED}).permutation applied before a "
+        "stable argsort -- evaluation._ranked_arrays is the one "
+        f"implementation of that ordering. Take the first int({n_frame} * "
+        f"k) rows; at k = {capacity_k} that is {n_targeted}. Then total = "
+        f"{evaluation.POLICY_WEIGHT} * (the sum of the outcome column over "
+        f"the rows of that head whose segment is {womens_name!r}, minus "
+        f"the sum over the rows whose segment is {config.CONTROL!r}). "
+        f"vs_nobody is total / {n_frame} and per_targeted is total / "
+        f"{n_targeted}. No model file is read and nothing is refitted: "
+        f"{evaluation.POLICY_WEIGHT} is the Horvitz-Thompson weight the "
+        "two-arm design fixes at 1 / P(womens | womens or control) = "
+        "1 / (1/2)."
+    )
+
+    manifest = {
+        "generated_by": "dont_email_everyone.pipeline.policy",
+        "generated_from": [scored_path.name, ate_path.name, model_path.name],
+        "frame": {
+            "n_customers": int(n_frame),
+            "n_targeted": int(n_targeted),
+            "capacity_k": float(capacity_k),
+            "weight": float(evaluation.POLICY_WEIGHT),
+            "ranking": POLICY_HEADLINE_RANKING,
+            "arm": womens_name,
+            "outcomes": list(POLICY_OUTCOMES),
+            "n_resamples": int(evaluation.BOOTSTRAP_BAND_RESAMPLES),
+            "band_level": float(evaluation.BOOTSTRAP_BAND_LEVEL),
+            "seed": int(POLICY_SEED),
+        },
+        "headline": {
+            "contrast": "vs_random_send_of_the_same_size",
+            "per_outcome": {
+                outcome: _outcome_block(POLICY_HEADLINE_RANKING, outcome)
+                for outcome in POLICY_OUTCOMES
+            },
+            "caveat": caveat,
+            "reproduce": reproduce,
+        },
+        "cost_exhibit": {
+            "ranking": POLICY_HEADLINE_RANKING,
+            "outcome": "spend",
+            "k_star_at_zero_cost": zero_cost_k,
+            "first_breakpoint": first_breakpoint,
+            "first_ratio_with_k_star_zero": first_zero_ratio,
+            "k_star_at_ratio_1_5": float(k_star[-1]),
+            "n_distinct_k_star": int(np.unique(k_star).size),
+            "profit_unit": "per_unit_of_gross_margin",
+            "illustrative_pairs": [
+                {
+                    "cost_per_email": row["cost_per_email"],
+                    "gross_margin": row["gross_margin"],
+                    "cost_over_margin": row["cost_over_margin"],
+                    "k_star": row["k_star"],
+                    "profit_at_k_star": row["profit_at_k_star"],
+                    "profit_unit": row["profit_unit"],
+                }
+                for row in illustrative_rows
+            ],
+        },
+        # Sensitivity is keyed by the ARTIFACT'S column name, so the
+        # `unproven_` prefix is part of the key rather than a footnote
+        # beside it. D-03's rule is that no number under `headline` may
+        # come from one of these rankings, and the shape of this block is
+        # what makes that checkable by serializing `headline` and looking
+        # for the substring.
+        "sensitivity": {
+            ranking: {
+                "published": not ranking.startswith("unproven_"),
+                "per_outcome": {
+                    outcome: _outcome_block(ranking, outcome)
+                    for outcome in POLICY_OUTCOMES
+                },
+            }
+            for ranking in POLICY_RANKINGS
+            if ranking != POLICY_HEADLINE_RANKING
+        },
+    }
+    print(
+        f"[5/6] manifest assembled: headline on {POLICY_HEADLINE_RANKING} "
+        f"at k = {capacity_k} ({n_targeted} of {n_frame} customers), "
+        f"{len(manifest['sensitivity'])} sensitivity rankings"
+    )
+
+    config.PROCESSED.mkdir(parents=True, exist_ok=True)
+
+    # Four explicit statements, never a loop, for the reason train()'s
+    # three carry: the source-reading boundary test counts `to_parquet(`
+    # against `index=False` in this module's body, and a loop would write
+    # three artifacts from one occurrence of each token.
+    curve_out.to_parquet(
+        config.PROCESSED / "policy_curve.parquet", index=False
+    )
+    band_out.to_parquet(
+        config.PROCESSED / "policy_bands.parquet", index=False
+    )
+    sweep_out.to_parquet(config.PROCESSED / "cost_sweep.parquet", index=False)
+    (config.PROCESSED / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+
+    print(f"[6/6] wrote 4 policy artifacts to {config.PROCESSED}")
+
+
 def main(argv=None) -> None:
     """Parse `argv` and run one subcommand. No default: a bare invocation is
-    an error rather than a silent choice of one of the four.
+    an error rather than a silent choice of one of the five.
     """
     parser = argparse.ArgumentParser(
         prog="python -m dont_email_everyone.pipeline",
@@ -1547,8 +2111,19 @@ def main(argv=None) -> None:
         ),
     )
     subcommands.add_parser(
+        "policy",
+        help=(
+            "value the top-k targeting policies and write the four Phase 5 "
+            "policy artifacts (reads what train and analyze wrote; fits "
+            "nothing)"
+        ),
+    )
+    subcommands.add_parser(
         "all",
-        help="run ingest then analyze then train -- the fresh-clone path",
+        help=(
+            "run ingest then analyze then train then policy -- the "
+            "fresh-clone path"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -1558,10 +2133,13 @@ def main(argv=None) -> None:
         analyze()
     elif args.command == "train":
         train()
+    elif args.command == "policy":
+        policy()
     elif args.command == "all":
         ingest.build_all()
         analyze()
         train()
+        policy()
     else:
         raise ValueError(
             f"unrecognised subcommand {args.command!r}; argparse should have "

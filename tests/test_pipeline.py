@@ -1127,7 +1127,7 @@ def test_train_raises_when_the_committed_ate_is_absent(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_cli_help_lists_all_four_subcommands():
+def test_cli_help_lists_every_subcommand():
     result = subprocess.run(
         [sys.executable, "-m", "dont_email_everyone.pipeline", "--help"],
         cwd=config.ROOT,
@@ -1135,7 +1135,7 @@ def test_cli_help_lists_all_four_subcommands():
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    for subcommand in ("ingest", "analyze", "train", "all"):
+    for subcommand in ("ingest", "analyze", "train", "policy", "all"):
         assert subcommand in result.stdout, f"--help does not name {subcommand}"
 
 
@@ -1157,6 +1157,7 @@ def test_ingest_subcommand_delegates_to_build_all(monkeypatch):
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
     monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
+    monkeypatch.setattr(pipeline, "policy", lambda: calls.append("policy"))
     pipeline.main(["ingest"])
     assert calls == ["build_all"], (
         "the ingest subcommand must delegate to the unmodified "
@@ -1169,11 +1170,14 @@ def test_all_subcommand_runs_ingest_then_analyze_then_train(monkeypatch):
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
     monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
+    monkeypatch.setattr(pipeline, "policy", lambda: calls.append("policy"))
     pipeline.main(["all"])
-    assert calls == ["build_all", "analyze", "train"], (
+    assert calls == ["build_all", "analyze", "train", "policy"], (
         "`all` must rebuild the inputs before analysing them and analyse "
         "before training; the reverse order would analyse the previous "
-        "run's artifacts, and train() reads the ate.parquet analyze writes"
+        "run's artifacts, and train() reads the ate.parquet analyze writes. "
+        "policy() comes last for the same kind of reason: it ranks with the "
+        "scored_holdout.parquet train() writes and fits nothing itself"
     )
 
 
@@ -1182,6 +1186,7 @@ def test_analyze_subcommand_does_not_reingest(monkeypatch):
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
     monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
+    monkeypatch.setattr(pipeline, "policy", lambda: calls.append("policy"))
     pipeline.main(["analyze"])
     assert calls == ["analyze"]
 
@@ -1191,6 +1196,7 @@ def test_train_subcommand_neither_reingests_nor_reanalyses(monkeypatch):
     monkeypatch.setattr(ingest, "build_all", lambda: calls.append("build_all"))
     monkeypatch.setattr(pipeline, "analyze", lambda: calls.append("analyze"))
     monkeypatch.setattr(pipeline, "train", lambda: calls.append("train"))
+    monkeypatch.setattr(pipeline, "policy", lambda: calls.append("policy"))
     pipeline.main(["train"])
     assert calls == ["train"], (
         "`train` reads the committed ate.parquet rather than regenerating "
@@ -1251,10 +1257,13 @@ def test_pipeline_pairs_every_savefig_with_a_close():
     assert body.count("savefig(") == body.count("plt.close(") == 15
 
 
-# 6 = analyze()'s balance/ate/coverage plus train()'s model_results,
-# permutation_null and scored_holdout. Each write is an explicit statement
-# rather than a loop precisely so this count means something: a loop would
-# write three artifacts from one occurrence of each token.
+# 9 = analyze()'s balance/ate/coverage, train()'s model_results,
+# permutation_null and scored_holdout, and policy()'s policy_curve,
+# policy_bands and cost_sweep. Each write is an explicit statement rather
+# than a loop precisely so this count means something: a loop would write
+# three artifacts from one occurrence of each token. The three JSON blocks
+# are not counted here -- ate.json, model.json and manifest.json are
+# `write_text` calls and carry no index to suppress.
 def test_pipeline_writes_every_parquet_without_an_index():
     body = _pipeline_body()
-    assert body.count("to_parquet(") == body.count("index=False") == 6
+    assert body.count("to_parquet(") == body.count("index=False") == 9
