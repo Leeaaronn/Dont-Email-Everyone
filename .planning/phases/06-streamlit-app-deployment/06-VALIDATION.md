@@ -94,7 +94,7 @@ Every row now names the plan and task that discharges it. `Status` is an executi
 | C1 / D-01 | APP-01 | Only the two `unproven_`-free rankings are offered; no unproven name appears on screen | integration (AppTest) | `pytest tests/test_app.py::test_only_published_rankings_are_offered -x` | **06-04 T3** | ❌ W0 | ⬜ pending |
 | C1 / D-02 | APP-01 | The shipped ranking is labelled pre-registered and the sensitivity labelled not-adopted, **at the point of choice** | integration (AppTest) | `pytest tests/test_app.py::test_ranking_status_travels_with_the_control -x` | **06-04 T3** | ❌ W0 | ⬜ pending |
 | C2 | APP-01 | The curve marks the **selected** point at the artifact's own (k, value) — not merely "a line exists" | unit (figure introspection) | `pytest tests/test_plots.py::test_policy_curve_marks_the_selected_point_at_the_artifact_value -x` | **06-03 T2** | ❌ W0 | ⬜ pending |
-| C2 / D-06 | APP-01 | Committed PNGs regenerate **byte-identical** with `selected=None` and after the D-04 relocation | integration | `pytest tests/test_plots.py::test_policy_figures_are_byte_identical_after_relocation -x` | **06-03 T3** | ❌ W0 — research measured SHA-256 match on both | ⬜ pending |
+| C2 / D-06 | APP-01 | Committed PNGs regenerate unchanged with `selected=None` and after the D-04 relocation | integration | `git status --short data/processed reports/figures` is empty after `pipeline all` (06-03 T3 regeneration gate) | **06-03 T3** | ❌ W0 — research measured SHA-256 match on both | ⬜ pending |
 | C2 / D-08 | APP-01 | The covers-zero hatching and legend entry are the ones `plots.py` already draws — no second encoding in the app | unit (source scan) | `pytest tests/test_app.py::test_app_adds_no_second_covers_zero_encoding -x` | **06-05 T3** | ❌ W0 | ⬜ pending |
 | C3 / D-10 | APP-01 | Cost and margin carry "ASSUMED, not measured"; `economics.py` still has no default at any level | unit + AppTest | `pytest tests/test_app.py::test_cost_and_margin_are_labelled_assumptions tests/test_economics.py -x` | **06-04 T3** | partial — `test_economics.py` ✅, app half ❌ W0 | ⬜ pending |
 | C3 | APP-01 | `k*` demonstrably moves with cost/margin | integration (AppTest) | `pytest tests/test_app.py::test_optimal_depth_moves_with_cost -x` — **`slow`**, run via `-m slow` and the full suite | **06-06 T3** | ❌ W0 — research measured 80% at (0.001, 0.40) → 16% at (0.30, 0.25), both reproducing `manifest.cost_exhibit.illustrative_pairs` | ⬜ pending |
@@ -112,6 +112,13 @@ Every row now names the plan and task that discharges it. `Status` is an executi
 | UI | APP-01 | Figure legibility with the moving marker at several depths and both rankings | **manual only** | — | **06-07 T2** | **Human checkpoint** | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+
+> **C2 / D-06 — no byte-assertion test.** This row provisionally named a
+> `test_policy_figures_are_byte_identical_after_relocation`. No such test is written: `tests/test_artifacts.py` and
+> `tests/test_plots.py` both state as repo policy that PNG and Parquet bytes are never asserted, because
+> matplotlib and pyarrow embed run-specific metadata. D-06 is discharged instead by 06-03 T3's regeneration
+> gate — run `pipeline all`, then require `git status --short data/processed reports/figures` to come back
+> empty — which is what 06-CONTEXT D-06 literally asks for. See 06-03-PLAN.md T2 for the rename and its reason.
 
 ---
 
