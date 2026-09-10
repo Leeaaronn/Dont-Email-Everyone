@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-09-10T04:42:48.846Z"
+stopped_at: Completed 05-08-PLAN.md (figure legibility checkpoint approved, no changes)
+last_updated: "2026-09-10T07:19:09.155Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 35
-  completed_plans: 32
+  completed_plans: 34
   percent: 57
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [█████████░] 91%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -85,6 +85,7 @@ Progress: [█████████░] 91%
 | Phase 05 P04 | 12min | 3 tasks | 2 files |
 | Phase 05 P06 | 22min | 3 tasks | 7 files |
 | Phase 05 P07 | 40min | 3 tasks | 5 files |
+| Phase 05 P08 | 153min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -210,6 +211,11 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-06: R = 500 kept for the committed bands after an R = 2000 check on the spend band: endpoints move up to 7.6 percent in width but no published verdict changes
 - [Phase 05]: 05-07: D-05 discharged with a number: the argmax policy is valued from the randomization on all 32,001 holdout rows at weight 3, and its optimism is decomposed rather than asserted
 - [Phase 05]: 05-07: The winners-curse residual also carries the difference between the two arms' calibration, so a share-weighted blended comparator is reported beside it
+- [Phase 05]: 05-08: the zero-spanning region on a policy curve is shaded per contiguous run via axvspan, never fill_between(where=) -- a where-mask draws no polygon for a one-point run, and the spend cell has exactly one (k = 0.51), which published a continuous significant window across k = 0.49-0.59 that the data does not support
+- [Phase 05]: 05-08: a figure that encodes an honesty claim gets a test comparing the drawn encoding against the source data element by element, in BOTH directions -- 'a filled region exists' and 'the filled region is the right region' are different assertions, and only the second catches the bug above
+- [Phase 05]: 05-08: every title's rendered extent is measured against the canvas and the type stepped down until it fits, raising rather than publishing clipped -- Phase 4's clipped-label defect recurred here in a new artist, so the repair is class-level (_fit_titles plus an extent test) not instance-level
+- [Phase 05]: 05-08: optimism_plot panels by OUTCOME, not by unit as calibration_plot does -- visit runs to 8.85 pp while the whole conversion cell lives in 0.74-0.84 pp, so on a shared pp axis the conversion gap is about 1 percent of the canvas
+- [Phase 05]: 05-08: the anchor's point estimate and its 95 percent interval are ONE legend string on both policy curves, so the number cannot be quoted from the figure without its uncertainty
 
 ### Pending Todos
 
@@ -234,6 +240,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T04:42:40.423Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-09-10T07:19:09.143Z
+Stopped at: Completed 05-08-PLAN.md (figure legibility checkpoint approved, no changes)
 Resume file: None
