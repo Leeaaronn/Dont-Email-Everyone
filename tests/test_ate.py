@@ -246,6 +246,21 @@ def test_outcomes_constant_is_immutable():
     assert list(ate.OUTCOMES) == ["visit", "conversion", "spend"]
 
 
+def test_outcomes_is_re_exported_not_re_wrapped():
+    assert ate.OUTCOMES is config.OUTCOMES, (
+        "ate.OUTCOMES must BE config.OUTCOMES, not merely equal it. The "
+        "definition moved to config.py under D-04 so plots.py could be "
+        "imported without statsmodels; what is left here is a re-export. "
+        "Re-wrapping instead -- a fresh MappingProxyType over a copy of the "
+        "dict -- would satisfy every equality assertion in this suite, "
+        "including test_outcomes_constant_is_immutable directly above, "
+        "while leaving two objects that can be edited apart. One would "
+        "decide how the ATE table renders and the other how the forest plot "
+        "scales its axis, and nothing would fail until a figure quietly drew "
+        "dollars on a percentage-point axis."
+    )
+
+
 def test_table_columns_are_primitive_and_complete(table):
     expected = {
         "arm",

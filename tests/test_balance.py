@@ -327,3 +327,47 @@ def test_pvalue_functions_do_not_mutate_input(analysis_df):
     balance.omnibus_lr_test(analysis_df)
     assert analysis_df.shape == before_shape
     assert list(analysis_df.columns) == before_columns
+
+
+# --------------------------------------------------------------------------
+# Module boundary
+# --------------------------------------------------------------------------
+
+
+def _balance_source():
+    return (config.ROOT / "dont_email_everyone" / "balance.py").read_text(
+        encoding="utf-8"
+    )
+
+
+def _balance_body():
+    # Comment LINES only -- docstrings are NOT stripped, matching the
+    # `_features_body()` / `_models_body()` convention. The shim's own
+    # comment block quotes the old `= 0.1` literal, so a raw `read_text`
+    # here would match the very comment explaining why it is gone.
+    return "\n".join(
+        line
+        for line in _balance_source().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_smd_threshold_is_re_exported_from_config():
+    assert balance.SMD_THRESHOLD == config.SMD_THRESHOLD, (
+        "the threshold this module checks against and the one love_plot "
+        "draws must be one number; D-04 moved the definition to config.py "
+        "so plots.py could reach it without importing statsmodels"
+    )
+    body = _balance_body()
+    offenders = [
+        line
+        for line in body.splitlines()
+        if line.startswith("SMD_THRESHOLD") and "config.SMD_THRESHOLD" not in line
+    ]
+    assert offenders == [], (
+        f"balance.py binds SMD_THRESHOLD to something other than "
+        f"config.SMD_THRESHOLD: {offenders}. Restating the literal here "
+        "recreates the second definition the relocation removed -- the "
+        "checked number and the drawn number could then diverge, and the "
+        "Love plot would certify a criterion the balance table fails."
+    )

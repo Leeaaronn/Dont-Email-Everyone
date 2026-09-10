@@ -36,6 +36,8 @@ import copy
 import inspect
 import json
 import re
+import subprocess
+import sys
 
 import matplotlib
 import pytest
@@ -1920,3 +1922,46 @@ def test_plots_module_writes_nothing(
         f"Uncalled: {sorted(public - set(called))}. A factory left out is a "
         "factory whose purity nothing checks."
     )
+
+
+def test_plots_import_closure_excludes_the_analysis_stack():
+    # MUST be a subprocess, not an in-process sys.modules check. By the time
+    # this file runs, the pytest session has already imported statsmodels --
+    # through tests/test_ate.py and through this file's own `ate` import --
+    # so an in-process assertion would pass on a plots.py that still drags
+    # the whole analysis stack in. Same reason
+    # tests/test_pipeline.py::test_written_parquets_load_without_duckdb_or_pandera
+    # is spawned clean.
+    #
+    # What this buys: before the D-04 relocation, importing plots.py left
+    # 2,046 modules in sys.modules here (373 statsmodels, 540 scipy, 23
+    # patsy); after, 434 with all six packages absent. ROADMAP criterion 4
+    # requires the serve-time set to exclude statsmodels, and the app is
+    # required to reuse these committed figure factories -- so without this
+    # property the two requirements contradict each other.
+    #
+    # Deliberately NOT asserting a module count. The count moves with any
+    # dependency upgrade, and pinning it would make this test fail for a
+    # reason that has nothing to do with the property being protected. The
+    # six absences are what criterion 4 actually needs.
+    banned = ("statsmodels", "scipy", "patsy", "sklearn", "duckdb", "pandera")
+    script = (
+        "import sys\n"
+        "import dont_email_everyone.plots\n"
+        "for pkg in " + repr(banned) + ":\n"
+        "    assert pkg not in sys.modules, pkg + ' is in the import closure'\n"
+        "print(len(sys.modules), 'ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=config.ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        "importing dont_email_everyone.plots in a clean interpreter pulled "
+        "in a package the Streamlit serve-time set does not install, so the "
+        "deployed app would fail at import on a figure it is required to "
+        f"draw:\n{result.stderr}"
+    )
+    assert "ok" in result.stdout, result.stdout
