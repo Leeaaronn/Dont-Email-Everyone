@@ -98,7 +98,7 @@ completed: 2026-09-09
 2. **Task 2: the four artifacts** — `35ee7b8` (feat)
 3. **Rule-1 fix found during Task 3: `relative_to` outside the repo** — `7560d4e` (fix)
 4. **Task 3: artifact and pipeline tests** — `174879b` (test)
-5. **The stale 88-of-101 figure in ROADMAP's goal amendment** — `bc1f5ec` (docs)
+5. **The stale 88-of-101 figure in ROADMAP's goal amendment** — `075e75e` (docs)
 
 ## Files Created/Modified
 
@@ -269,7 +269,7 @@ Ranking `uplift_womens_visit`, R = 500, from `policy_bands.parquet` as committed
 - **Fix:** The amendment now carries 89 with its k range, a note that the figure was re-measured from `policy_bands.parquet` in 05-06, and the two superseded numbers with the reason they differ.
 - **Files modified:** `.planning/ROADMAP.md`
 - **Verification:** Recomputed from the committed artifact; recorded in measurement 7 above.
-- **Commit:** `bc1f5ec`
+- **Commit:** `075e75e`
 
 ### Deliberate divergences from the plan text
 
@@ -320,7 +320,7 @@ None. `policy()` adds no network endpoint, no auth path and no schema at a trust
 - `data/processed/manifest.json` — FOUND (10,282 bytes)
 - `dont_email_everyone/pipeline.py` — FOUND (modified; `def policy()` present, `policy` registered and dispatched, `all` chains it fourth)
 - `tests/test_artifacts.py`, `tests/test_pipeline.py` — FOUND (modified)
-- Commits `056fce7`, `35ee7b8`, `7560d4e`, `174879b`, `bc1f5ec` — all FOUND in `git log`
+- Commits `056fce7`, `35ee7b8`, `7560d4e`, `174879b`, `075e75e` — all FOUND in `git log`
 - Task 1 verify 1 — prints `policy() present`
 - Task 1 verify 2 — `--help | grep -c policy` returns 5
 - Task 2 verify 1 — the manifest one-liner passes and prints the spend block
