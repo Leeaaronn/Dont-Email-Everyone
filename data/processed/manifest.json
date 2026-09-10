@@ -1,0 +1,232 @@
+{
+  "generated_by": "dont_email_everyone.pipeline.policy",
+  "generated_from": [
+    "scored_holdout.parquet",
+    "ate.parquet",
+    "model.json"
+  ],
+  "frame": {
+    "n_customers": 21347,
+    "n_targeted": 4269,
+    "capacity_k": 0.2,
+    "weight": 2.0,
+    "ranking": "uplift_womens_visit",
+    "arm": "Womens E-Mail",
+    "outcomes": [
+      "visit",
+      "conversion",
+      "spend"
+    ],
+    "n_resamples": 500,
+    "band_level": 0.95,
+    "seed": 20260902
+  },
+  "headline": {
+    "contrast": "vs_random_send_of_the_same_size",
+    "per_outcome": {
+      "visit": {
+        "total": 300.0000000000001,
+        "total_lo": 212.9500000000001,
+        "total_hi": 399.05,
+        "per_targeted": 0.07027406886858752,
+        "per_targeted_lo": 0.04988287655188571,
+        "per_targeted_hi": 0.0934762239400328,
+        "vs_nobody": 0.014053496978498156,
+        "vs_nobody_lo": 0.009975640605237274,
+        "vs_nobody_hi": 0.018693493230898955,
+        "vs_everyone": -0.02538998454115332,
+        "vs_everyone_lo": -0.03232772754953858,
+        "vs_everyone_hi": -0.016765821895348292,
+        "vs_random": 0.00616480067456786,
+        "vs_random_lo": 0.0024350025764744523,
+        "vs_random_hi": 0.010484377195858896
+      },
+      "conversion": {
+        "total": 24.000000000000014,
+        "total_lo": 3.9999999999999964,
+        "total_hi": 52.00000000000001,
+        "per_targeted": 0.005621925509487003,
+        "per_targeted_lo": 0.000936987584914499,
+        "per_targeted_hi": 0.0121808386038885,
+        "vs_nobody": 0.0011242797582798527,
+        "vs_nobody_lo": 0.0001873799597133085,
+        "vs_nobody_hi": 0.002435939476273013,
+        "vs_everyone": -0.002435939476273012,
+        "vs_everyone_lo": -0.0043097390734061,
+        "vs_everyone_hi": 9.368997985665429e-05,
+        "vs_random": 0.0004122359113692797,
+        "vs_random_lo": -0.0003934979153979482,
+        "vs_random_hi": 0.0016400430973907332
+      },
+      "spend": {
+        "total": 3971.879999999996,
+        "total_lo": 197.2425000000023,
+        "total_hi": 9257.833999999992,
+        "per_targeted": 0.93040056219255,
+        "per_targeted_lo": 0.046203443429375095,
+        "per_targeted_hi": 2.168618880299834,
+        "vs_nobody": 0.18606267859652392,
+        "vs_nobody_lo": 0.009239822925938179,
+        "vs_nobody_hi": 0.4336831404881244,
+        "vs_everyone": -0.2362842553988852,
+        "vs_everyone_lo": -0.525646648240971,
+        "vs_everyone_hi": 0.10205263034618471,
+        "vs_random": 0.10159329179744209,
+        "vs_random_lo": -0.029910549491731792,
+        "vs_random_hi": 0.3034145172623786
+      }
+    },
+    "caveat": "With genuinely free email the correct action is to email everyone, not to target: the womens arm's average treatment effect is positive on every outcome measured here, so a top-k policy cannot beat a blanket send when a send is free. Swept over three outcomes, three rankings and all 101 grid points at 500 bootstrap replicates, not one k produces a versus-everyone interval that excludes zero from above. The point estimate of that contrast is positive at some k; the interval never is, and the claim made here is about the interval. This headline is therefore about spending a FIXED BUDGET of sends well -- the decision a capacity-constrained marketer actually faces -- which is why the comparator is a random send of the same size. Email is not free in practice, and the cost exhibit says where the price begins to bite: the optimal depth does not move at all until the cost-to-margin ratio reaches 0.068, and falls to zero only at 1.397.",
+    "reproduce": "Read data/processed/scored_holdout.parquet and keep the 21347 rows whose segment is 'Womens E-Mail' or 'No E-Mail'. Rank them by the uplift_womens_visit column, descending, breaking ties with a numpy default_rng(20260902).permutation applied before a stable argsort -- evaluation._ranked_arrays is the one implementation of that ordering. Take the first int(21347 * k) rows; at k = 0.2 that is 4269. Then total = 2.0 * (the sum of the outcome column over the rows of that head whose segment is 'Womens E-Mail', minus the sum over the rows whose segment is 'No E-Mail'). vs_nobody is total / 21347 and per_targeted is total / 4269. No model file is read and nothing is refitted: 2.0 is the Horvitz-Thompson weight the two-arm design fixes at 1 / P(womens | womens or control) = 1 / (1/2)."
+  },
+  "cost_exhibit": {
+    "ranking": "uplift_womens_visit",
+    "outcome": "spend",
+    "k_star_at_zero_cost": 0.8,
+    "first_breakpoint": 0.068,
+    "first_ratio_with_k_star_zero": 1.397,
+    "k_star_at_ratio_1_5": 0.0,
+    "n_distinct_k_star": 6,
+    "profit_unit": "per_unit_of_gross_margin",
+    "illustrative_pairs": [
+      {
+        "cost_per_email": 0.001,
+        "gross_margin": 0.4,
+        "cost_over_margin": 0.0025,
+        "k_star": 0.8,
+        "profit_at_k_star": 0.1894288846207898,
+        "profit_unit": "dollars_per_population_customer"
+      },
+      {
+        "cost_per_email": 0.1,
+        "gross_margin": 0.4,
+        "cost_over_margin": 0.25,
+        "k_star": 0.54,
+        "profit_at_k_star": 0.12923961212348323,
+        "profit_unit": "dollars_per_population_customer"
+      },
+      {
+        "cost_per_email": 0.3,
+        "gross_margin": 0.25,
+        "cost_over_margin": 1.2,
+        "k_star": 0.16,
+        "profit_at_k_star": 0.007866866538623687,
+        "profit_unit": "dollars_per_population_customer"
+      }
+    ]
+  },
+  "sensitivity": {
+    "uplift_womens_conversion": {
+      "published": true,
+      "per_outcome": {
+        "visit": {
+          "total": 352.0,
+          "total_lo": 250.95000000000013,
+          "total_hi": 445.0499999999998,
+          "per_targeted": 0.08245490747247598,
+          "per_targeted_lo": 0.05878425860857347,
+          "per_targeted_hi": 0.10425158116654948,
+          "vs_nobody": 0.01648943645477116,
+          "vs_nobody_lo": 0.011755750222513708,
+          "vs_nobody_hi": 0.020848362767601995,
+          "vs_everyone": -0.022954045064880316,
+          "vs_everyone_lo": -0.03129713777111539,
+          "vs_everyone_hi": -0.015503349416779886,
+          "vs_random": 0.008600740150840865,
+          "vs_random_lo": 0.004247903686700713,
+          "vs_random_hi": 0.012369888040474057
+        },
+        "conversion": {
+          "total": 36.00000000000001,
+          "total_lo": 10.000000000000009,
+          "total_hi": 64.00000000000001,
+          "per_targeted": 0.0084328882642305,
+          "per_targeted_lo": 0.002342468962286252,
+          "per_targeted_hi": 0.014991801358632,
+          "vs_nobody": 0.0016864196374197782,
+          "vs_nobody_lo": 0.0004684498992832721,
+          "vs_nobody_hi": 0.002998079355412939,
+          "vs_everyone": -0.0018737995971330867,
+          "vs_everyone_lo": -0.004028669133836136,
+          "vs_everyone_hi": 0.0003302571789947045,
+          "vs_random": 0.0009743757905092052,
+          "vs_random_lo": -6.605143579894171e-05,
+          "vs_random_hi": 0.002127230992645336
+        },
+        "spend": {
+          "total": 5222.499999999998,
+          "total_lo": 2021.7759999999994,
+          "total_hi": 9249.125499999996,
+          "per_targeted": 1.2233544155539935,
+          "per_targeted_lo": 0.47359475286952435,
+          "per_targeted_hi": 2.1665789412040284,
+          "vs_nobody": 0.24464795990068855,
+          "vs_nobody_lo": 0.09471007635733356,
+          "vs_nobody_hi": 0.4332751908933338,
+          "vs_everyone": -0.17769897409472102,
+          "vs_everyone_lo": -0.5237292125357197,
+          "vs_everyone_hi": 0.16433772895488852,
+          "vs_random": 0.16017857310160663,
+          "vs_random_lo": 0.0038015552536656136,
+          "vs_random_hi": 0.3239092706235068
+        }
+      }
+    },
+    "unproven_uplift_womens_spend": {
+      "published": false,
+      "per_outcome": {
+        "visit": {
+          "total": 132.00000000000023,
+          "total_lo": 38.94999999999999,
+          "total_hi": 226.10000000000005,
+          "per_targeted": 0.03092059030217855,
+          "per_targeted_lo": 0.009123916608104939,
+          "per_targeted_hi": 0.05296322323729211,
+          "vs_nobody": 0.006183538670539196,
+          "vs_nobody_lo": 0.0018246123577083425,
+          "vs_nobody_hi": 0.010591652222794774,
+          "vs_everyone": -0.03325994284911228,
+          "vs_everyone_lo": -0.0413664683562093,
+          "vs_everyone_hi": -0.025202604581440018,
+          "vs_random": -0.0017051576333911005,
+          "vs_random_lo": -0.005550194406708205,
+          "vs_random_hi": 0.0022682344123296015
+        },
+        "conversion": {
+          "total": 26.000000000000014,
+          "total_lo": -1.9999999999999982,
+          "total_hi": 48.000000000000014,
+          "per_targeted": 0.006090419301944252,
+          "per_targeted_lo": -0.0004684937924572495,
+          "per_targeted_hi": 0.011243851018974002,
+          "vs_nobody": 0.001217969738136507,
+          "vs_nobody_lo": -9.368997985665425e-05,
+          "vs_nobody_hi": 0.0022485595165597045,
+          "vs_everyone": -0.002342249496416358,
+          "vs_everyone_lo": -0.004497119033119409,
+          "vs_everyone_hi": -4.450274043191249e-05,
+          "vs_random": 0.0005059258912259339,
+          "vs_random_lo": -0.0006469293109101978,
+          "vs_random_hi": 0.001433925141706094
+        },
+        "spend": {
+          "total": 3178.879999999998,
+          "total_lo": -26.1429999999987,
+          "total_hi": 6466.740499999999,
+          "per_targeted": 0.7446427734832508,
+          "per_targeted_lo": -0.006123916608104639,
+          "per_targeted_hi": 1.514813890840946,
+          "vs_nobody": 0.14891460158336056,
+          "vs_nobody_lo": -0.0012246685716961962,
+          "vs_nobody_hi": 0.30293439359160534,
+          "vs_everyone": -0.2734323324120491,
+          "vs_everyone_lo": -0.6341662762917513,
+          "vs_everyone_hi": 0.08924757577177117,
+          "vs_random": 0.06444521478427861,
+          "vs_random_lo": -0.07981718274230584,
+          "vs_random_hi": 0.19601162692650007
+        }
+      }
+    }
+  }
+}
