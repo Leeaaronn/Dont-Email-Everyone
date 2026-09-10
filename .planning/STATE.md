@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-09-10T03:03:12.085Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-09-10T03:25:48.816Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 35
-  completed_plans: 30
+  completed_plans: 31
   percent: 57
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -82,6 +82,7 @@ Progress: [█████████░] 86%
 | Phase 05 P02 | 6min | 2 tasks | 2 files |
 | Phase 05 P03 | 19min | 3 tasks | 4 files |
 | Phase 05 P05 | 8min | 2 tasks | 2 files |
+| Phase 05 P04 | 12min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -200,6 +201,8 @@ Recent decisions affecting current work:
 - [Phase 05-03]: no `git checkout` restore was performed after the train re-run -- the thirteen figures and the other three artifacts came back byte-identical, so git status listed only the widened artifact and threat T-05-08 (a restore hiding a real change) never arose
 - [Phase 05]: cost and margin have no default anywhere in economics.py; cost_margin_sweep takes neither, only the c/m ratio — D-10: Hillstrom carries no cost data, so any default would be a fabricated constant the headline silently inherits. Enforced at three levels: namespace sweep (05-01), inspect.Parameter.empty on every cost/margin parameter, and TypeError on omission.
 - [Phase 05]: optimal_k resolves ties to the smallest k, guaranteed by a strictly-increasing-grid guard rather than by np.argmax alone — The cheapest campaign among equally profitable ones. On a descending grid np.argmax's first-maximum behaviour would silently invert the stated rule, so _guard_curve makes the docstring true.
+- [Phase 05]: 05-04: POLICY_WEIGHT = 2, derived from the two-arm womens+control frame, never transcribed from criterion 1's design 1/3 -- a 3 inflates V(email everyone) by 50%
+- [Phase 05]: 05-04: per_targeted divides by the realized int(n*k) count, not the exact k; both figures recorded (spend +0.930401 vs +0.930313 at k=0.20)
 
 ### Pending Todos
 
@@ -224,6 +227,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T03:03:12.071Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-09-10T03:25:48.808Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
