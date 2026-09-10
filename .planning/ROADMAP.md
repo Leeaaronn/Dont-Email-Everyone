@@ -127,7 +127,35 @@ Plans:
   4. Committed artifacts (`scored_holdout.parquet`, precomputed bootstrap bands, `ate.json`, `manifest.json`) are small and format-stable, and are sufficient to reproduce every headline number with arithmetic alone — no model file required.
   5. `evaluation.py` and `economics.py` import neither Streamlit nor any file I/O, enforced by a test, so the README's numbers and the app's numbers can never come from different code.
 
-**Plans**: TBD
+**Plans:** 0/9 plans executed
+
+Plans:
+**Wave 1** *(no shared files; independently executable)*
+
+- [ ] 05-01-PLAN.md — Pre-register the k = 0.20 anchor on provenance grounds; create economics.py with HEADLINE_CAPACITY, emails_at_capacity and criterion 5's two purity tests (wave 1)
+- [ ] 05-02-PLAN.md — evaluation.stratified_indices generalizing the resample engine to any number of arms, with bootstrap_indices delegating at level_order=(1, 0) and a bit-identity regression test (wave 1)
+- [ ] 05-03-PLAN.md — D-15: two additive lines in pipeline.train() so both arms score all 32,001 holdout rows; regenerate scored_holdout.parquet and prove every Phase 4 number bit-identical (wave 1)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05-04-PLAN.md — POLICY_WEIGHT = 2 derived from the frame, policy_value_curve with all three contrasts, and policy_value_band on caller-supplied shared draws (wave 2)
+- [ ] 05-05-PLAN.md — economics.profit_curve / optimal_k / cost_margin_sweep, with cost and margin as required parameters that have no defaults anywhere (wave 2)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-06-PLAN.md — pipeline.policy() and the four committed artifacts: policy_curve.parquet, policy_bands.parquet, cost_sweep.parquet and manifest.json (wave 3)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 05-07-PLAN.md — D-05 discharged with a number: the three-arm argmax value, the naive-vs-honest gap, the Jensen gap and the isolated winner's curse (wave 4)
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 05-08-PLAN.md — the policy-curve, cost-sweep and optimism figures, with a blocking legibility checkpoint (wave 5)
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 05-09-PLAN.md — reports/policy.md and its twelve assertions, with a blocking accuracy checkpoint (wave 6)
 
 ### Phase 6: Streamlit App & Deployment
 
@@ -179,7 +207,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
-| 5. Business & Policy Layer | 0/TBD | Not started | - |
+| 5. Business & Policy Layer | 0/9 | Planned     | - |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 
