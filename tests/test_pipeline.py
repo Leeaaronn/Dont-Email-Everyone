@@ -466,6 +466,21 @@ def test_scored_holdout_carries_every_score_column_as_float32(trained):
             f"exactly one of {plain} / {prefixed} must be present; the "
             "prefix is applied per cell from the ship decision"
         )
+        # The `_all` family carries the identical labelling contract,
+        # because its name is DERIVED from the already-prefixed one. Same
+        # xor, and the two families must AGREE about which spelling they
+        # use -- a cell whose masked column is unproven_ and whose `_all`
+        # column is not would let a failed cell reach a consumer unlabelled
+        # through the newer family.
+        plain_all = f"{plain}_all"
+        prefixed_all = f"{prefixed}_all"
+        assert (plain_all in scored.columns) != (
+            prefixed_all in scored.columns
+        ), f"exactly one of {plain_all} / {prefixed_all} must be present"
+        assert (plain in scored.columns) == (plain_all in scored.columns), (
+            f"{plain} and {plain_all} disagree about the unproven_ prefix; "
+            "both spellings come from ONE ship decision and must match"
+        )
         for name in (f"m0_{arm}_{outcome}", f"m1_{arm}_{outcome}",
                      f"response_{arm}_{outcome}"):
             assert name in scored.columns, f"missing score column {name}"
@@ -476,9 +491,24 @@ def test_scored_holdout_carries_every_score_column_as_float32(trained):
         if c.startswith(("uplift_", "unproven_uplift_", "m0_", "m1_",
                          "response_"))
     ]
-    assert len(score_columns) == 24, (
-        f"{len(score_columns)} score columns, expected 24 (6 uplift + 12 "
-        "base scores + 6 response baselines)"
+    # DERIVED from the cell list, never retyped. Per primary cell the
+    # artifact carries five score columns: the arm-masked uplift, the same
+    # uplift on every holdout row (`_all`), the two base-model scores, and
+    # the response baseline. Writing the product out as its four named
+    # parts keeps the arithmetic auditable while leaving the total a
+    # function of PRIMARY_CELLS, so adding a cell moves the expectation
+    # instead of breaking a literal.
+    expected_score_columns = (
+        len(PRIMARY_CELLS)  # uplift, masked to the arm's own frame
+        + len(PRIMARY_CELLS)  # uplift on ALL holdout rows
+        + 2 * len(PRIMARY_CELLS)  # m0 and m1
+        + len(PRIMARY_CELLS)  # response baseline
+    )
+    assert len(score_columns) == expected_score_columns, (
+        f"{len(score_columns)} score columns, expected "
+        f"{expected_score_columns} ({len(PRIMARY_CELLS)} uplift + "
+        f"{len(PRIMARY_CELLS)} uplift _all + {2 * len(PRIMARY_CELLS)} base "
+        f"scores + {len(PRIMARY_CELLS)} response baselines)"
     )
     assert {str(scored[c].dtype) for c in score_columns} == {"float32"}, (
         "score columns must be float32: float64 nearly doubles the "
@@ -521,6 +551,13 @@ def test_scored_holdout_response_column_equals_m1(trained):
 
 @pytest.mark.slow
 def test_scored_holdout_masks_rows_outside_an_arm(trained):
+    # UNCHANGED by plan 05-03, and checked rather than assumed. The two
+    # `next(...)` lookups below select on `endswith("uplift_mens_visit")`,
+    # which never matches a `..._all` name, so this test still reads the
+    # MASKED column and the mask invariant it pins is still literally true
+    # of that column. That is precisely why D-15 chose an additive shape:
+    # the new scores arrive as new names rather than as numbers written
+    # into the NaN cells this test exists to protect.
     scored = trained.scored
     mens_column = next(
         c for c in scored.columns if c.endswith("uplift_mens_visit")
@@ -549,10 +586,23 @@ def test_scored_holdout_masks_rows_outside_an_arm(trained):
 
 @pytest.mark.slow
 def test_unproven_prefix_matches_the_ships_flag(trained):
+    columns = trained.scored.columns
+    # TWO families carry the label since plan 05-03, and each is checked
+    # against the same expectation on its own. A bare
+    # `startswith("unproven_uplift_")` would sweep the `_all` columns into
+    # this set and break the equality below against the cell names, so the
+    # masked set excludes them explicitly and the `_all` set is asserted
+    # separately. The labelling contract is identical for both families: a
+    # failed cell loses its label in NEITHER.
     prefixed = {
         c.removeprefix("unproven_uplift_")
-        for c in trained.scored.columns
-        if c.startswith("unproven_uplift_")
+        for c in columns
+        if c.startswith("unproven_uplift_") and not c.endswith("_all")
+    }
+    prefixed_all = {
+        c.removeprefix("unproven_uplift_").removesuffix("_all")
+        for c in columns
+        if c.startswith("unproven_uplift_") and c.endswith("_all")
     }
     eligible = trained.results[trained.results["eligible"]]
     did_not_ship = {
@@ -567,6 +617,114 @@ def test_unproven_prefix_matches_the_ships_flag(trained):
         f"eligible cells that did not ship {sorted(did_not_ship)}. The "
         "prefix and the ships flag must come from ONE decision, or they "
         "drift and a failed cell loses its label"
+    )
+    assert prefixed_all == did_not_ship, (
+        f"the unproven_ `_all` columns {sorted(prefixed_all)} do not match "
+        f"the eligible cells that did not ship {sorted(did_not_ship)}. The "
+        "`_all` family is derived from the same already-prefixed name, so "
+        "a mismatch here means the derivation was broken and the newer "
+        "family can reach a consumer without its label"
+    )
+
+
+@pytest.mark.slow
+def test_all_columns_agree_with_the_masked_columns_where_both_are_defined(
+    trained,
+):
+    """The `_all` family invented nothing (CONTEXT.md D-15).
+
+    This is the additive proof for the one column family plan 05-03 added
+    to a Phase 4 artifact after Phase 4 closed. Three properties together
+    say the addition is a widening and not a change:
+
+    (a) the `_all` column is defined on every holdout row -- which is the
+        whole point, since an argmax over the two arms has to be defined on
+        the TREATED rows an IPW policy value counts;
+    (b) wherever the masked column IS defined, the two columns agree
+        EXACTLY;
+    (c) the `_all` column is defined strictly more often, so the addition
+        is doing work rather than duplicating a column under a new name.
+
+    (b) asserts exact equality rather than a tolerance, and exact is the
+    right assertion here. Both columns are `float32` renderings of the SAME
+    fitted `m0`/`m1` through the same `models.uplift` call; only the row
+    set differs, and a per-row prediction does not depend on how many other
+    rows were passed alongside it. Any difference at all would therefore
+    mean the wider column came from a different fit -- a refit, a reordered
+    feature space, or the other arm's estimators -- which is exactly the
+    failure this test exists to catch, and a tolerance would hide the small
+    end of it.
+    """
+    scored = trained.scored
+    for arm, outcome in PRIMARY_CELLS:
+        masked_name = next(
+            c for c in scored.columns if c.endswith(f"uplift_{arm}_{outcome}")
+        )
+        all_name = f"{masked_name}_all"
+        assert all_name in scored.columns, f"missing {all_name}"
+
+        masked = scored[masked_name].to_numpy()
+        every = scored[all_name].to_numpy()
+
+        assert int(np.isnan(every).sum()) == 0, (
+            f"{all_name} has {int(np.isnan(every).sum())} missing values; "
+            "it must cover every holdout row or the cross-arm argmax is "
+            "undefined on exactly the rows it is needed for"
+        )
+        defined = ~np.isnan(masked)
+        assert np.array_equal(masked[defined], every[defined]), (
+            f"{all_name} disagrees with {masked_name} on rows where both "
+            "are defined. They are float32 renderings of the same "
+            "predictions from the same two fitted estimators, so they must "
+            "be bit-identical; a difference means the wider column came "
+            "from a different fit, not from a wider row set"
+        )
+        assert int(defined.sum()) < int((~np.isnan(every)).sum()), (
+            f"{all_name} is defined on {int((~np.isnan(every)).sum())} "
+            f"rows against {masked_name}'s {int(defined.sum())}; the wider "
+            "column must cover strictly more rows or it adds nothing"
+        )
+
+
+def test_scored_holdout_column_count_is_the_committed_width():
+    # Reads the artifact as COMMITTED on disk -- no `trained` fixture and
+    # no refit -- so a stale file cannot sit in the repo backing a fresh
+    # claim in a later phase. This is the test that tells plan 05-07 its
+    # input exists at the width it expects.
+    scored = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    carried = (
+        "segment",
+        "split",
+        "history_segment",
+        *config.PRE_TREATMENT_FEATURES,
+        "visit",
+        "conversion",
+        "spend",
+    )
+    # Both widths are DERIVED from the code that writes them. The
+    # pre-existing width is the carried identity and outcome columns plus
+    # four score families per primary cell; plan 05-03 adds exactly one
+    # more family. Neither width is typed as a literal anywhere here.
+    pre_existing = len(carried) + 4 * len(PRIMARY_CELLS)
+    expected_width = pre_existing + len(PRIMARY_CELLS)
+    assert scored.shape[1] == expected_width, (
+        f"the committed scored_holdout.parquet has {scored.shape[1]} "
+        f"columns against the expected {expected_width} "
+        f"({pre_existing} pre-existing + {len(PRIMARY_CELLS)} `_all` "
+        "uplift columns). Regenerate it with "
+        "`python -m dont_email_everyone.pipeline train`."
+    )
+
+    # The row count is read off the analysis table rather than typed. The
+    # split gives each segment `size // 2` train rows and the remainder to
+    # holdout, so the two odd-sized arms each contribute one extra holdout
+    # row and the total is NOT half of 64,000 -- a literal here has already
+    # been wrong in this project's planning documents.
+    analysis = pd.read_parquet(config.PROCESSED / "analysis_table.parquet")
+    expected_rows = int((analysis["split"] == "holdout").sum())
+    assert len(scored) == expected_rows, (
+        f"the committed scored_holdout.parquet has {len(scored)} rows "
+        f"against the analysis table's own {expected_rows} holdout rows"
     )
 
 
