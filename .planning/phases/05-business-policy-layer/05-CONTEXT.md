@@ -98,8 +98,22 @@ decision below is shaped by that fact.
   the capacity framing, and under a capacity constraint "email everyone" is not on the menu — the
   decision actually facing the marketer is how to spend a fixed budget of N sends. The vs-random
   contrast is the one D-06's own sentence describes. It is also the contrast under which the model
-  demonstrably works: the visit contrast excludes zero at **88 of 101** grid points (k = 0.06 to
-  0.93), and spend at 16 points (k = 0.14 to 0.59).
+  demonstrably works: the visit contrast excludes zero at **89 of 101** grid points (k = 0.06 to
+  0.94), and spend at **15**, of which only **14 lie ABOVE zero** (k = 0.14–0.17, 0.49–0.50,
+  0.52–0.59).
+
+  > **CORRECTED 2026-09-10 from plan 05-08's measurement.** This block previously read "88 of 101
+  > (k = 0.06 to 0.93)" for visit and "16 points (k = 0.14 to 0.59)" for spend. Both were wrong.
+  > Visit is 89 points ending at k = 0.94 under the shipped three-level shared draw. Spend is
+  > **15** points, and the count alone is misleading: the fifteenth sits at **k = 0.99 and lies
+  > entirely BELOW zero** — it is a significant *loss*, not a significant gain. Quote "14 above
+  > zero", never a bare "15 excludes zero", and never the old 16.
+  >
+  > The visit count has now moved three times as the draw construction was corrected — 88
+  > (research, two-level) → 87 (05-04's test matrix) → **89** (shipped three-level). Treat any
+  > grid count in this document as provisional and re-measure from `policy_bands.parquet`.
+  > 05-06's R=500-vs-2000 check separately moved the spend count, so **do not quote a spend grid
+  > count as a hard integer at all** — say what it is at the committed R and say that it moves.
 
   **The zero-cost caveat must be stated, not buried.** With genuinely free email the correct action
   is to email everyone; this result is about spending a fixed budget well. State that plainly
