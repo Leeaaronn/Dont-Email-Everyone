@@ -427,11 +427,14 @@ FIGURE_DIVERGENCE_LEARNERS = ("linear", "rf_leaf200", "rf_default")
 # Qini axis label is keyed by UNIT, which is right for the scale and wrong
 # for the noun: `visit` and `conversion` share the unit "pp", so both inherit
 # the wording written for `visit`. The label is corrected per figure below.
-OUTCOME_NOUN = {
-    "visit": "visits",
-    "conversion": "conversions",
-    "spend": "spend",
-}
+#
+# The mapping itself MOVED into plots.py in plan 05-08, where the Phase 5
+# policy axes also name an outcome, and this name is bound to that one
+# rather than holding a second copy. Two dicts of three entries drifting
+# apart would put a corrected Qini axis and a policy axis on different
+# nouns for the same outcome, which is the defect the correction exists to
+# stop, one level up.
+OUTCOME_NOUN = plots.OUTCOME_NOUN
 
 # The monotonicity cells whose predicted-uplift tail is long enough that a
 # linear y axis renders the scatter as a block of ink, mapped to the symlog
