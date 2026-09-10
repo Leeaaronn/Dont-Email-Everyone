@@ -157,17 +157,18 @@ def test_evaluation_module_is_pure():
 
 # `uplift_at_k` and `tie_diagnostics` joined the call list below in plan
 # 03-02; `bootstrap_indices`, `qini_bootstrap_band` and `qini_random_band`
-# in plan 03-05; `stratified_indices` in plan 05-02. All eight public
-# functions are called, so "every public function" is literally true rather
-# than a claim about whichever ones happened to be here first.
+# in plan 03-05; `stratified_indices` in plan 05-02; `policy_value_curve`
+# and `policy_value_band` in plan 05-04. All ten public functions are
+# called, so "every public function" is literally true rather than a claim
+# about whichever ones happened to be here first.
 #
 # 03-05 was the last plan in PHASE 3 to add public surface here, and the
 # list did NOT then stop growing: D-14's `stratified_indices` arrived two
-# phases later and was added to this call list in the same commit that
-# added the function. That is the rule working rather than an exception to
-# it -- a call list that quietly stops growing turns this guarantee into a
-# guarantee about history. Any later plan adding a function must extend it
-# too.
+# phases later, and 05-04's policy pair two plans after that. Each was
+# added to this call list in the same commit that added the function. That
+# is the rule working rather than an exception to it -- a call list that
+# quietly stops growing turns this guarantee into a guarantee about
+# history. Any later plan adding a function must extend it too.
 #
 # The two bands run at R=4. The defaults would allocate a resample matrix
 # far larger than a boundary check needs, and the property under test here
@@ -178,7 +179,7 @@ def test_evaluation_module_is_pure():
 def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     """Call every public function from an empty directory; it stays empty.
 
-    All eight are called below; the comment above records why each is here.
+    All ten are called below; the comment above records why each is here.
     """
     monkeypatch.chdir(tmp_path)
     score, treatment, outcome = _two_arm_arrays(n=500, seed=3)
@@ -190,6 +191,13 @@ def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     evaluation.stratified_indices(treatment, 4)
     evaluation.qini_bootstrap_band(score, treatment, outcome, n_resamples=4)
     evaluation.qini_random_band(treatment, outcome, n_resamples=4)
+    evaluation.policy_value_curve(score, treatment, outcome)
+    evaluation.policy_value_band(
+        score,
+        treatment,
+        outcome,
+        indices=evaluation.stratified_indices(treatment, 4),
+    )
 
     assert list(tmp_path.iterdir()) == [], (
         "evaluation.py wrote to disk. Only the orchestrator touches the "
@@ -2503,11 +2511,10 @@ def test_policy_weight_is_the_conditioned_design_propensity():
     right = evaluation.policy_value_curve(score, treatment, spend)
     wrong = evaluation.policy_value_curve(score, treatment, spend, weight=3.0)
 
-    assert right.weight == 2.0, (
-        f"POLICY_WEIGHT is {right.weight!r}; on the two-arm frame the "
-        "Horvitz-Thompson weight is 1 / P(A = womens | A in {womens, "
-        "control}) = 2."
-    )
+    # The two cross-checks run BEFORE the equality on the constant, so a
+    # transposed weight fails with its measured inflation in the message
+    # rather than with a bare "3.0 != 2.0". The equality is the cheap
+    # signal; the cross-checks are what make this canary non-vacuous.
     assert right.v_all == pytest.approx(arm_mean, rel=WEIGHT_CANARY_TOLERANCE), (
         f"V(email everyone) is {right.v_all!r} against a womens-arm mean "
         f"spend of {arm_mean!r} measured on the same rows. Emailing "
@@ -2535,6 +2542,12 @@ def test_policy_weight_is_the_conditioned_design_propensity():
     ), (
         "the weight-3 implied ATE also agrees with ate.parquet, so this "
         "cross-check cannot distinguish the two weights and proves nothing."
+    )
+
+    assert right.weight == 2.0, (
+        f"POLICY_WEIGHT is {right.weight!r}; on the two-arm frame the "
+        "Horvitz-Thompson weight is 1 / P(A = womens | A in {womens, "
+        "control}) = 2."
     )
 
 
@@ -2843,3 +2856,58 @@ def test_policy_band_contains_the_point_estimate_on_real_data():
         "its own point estimate over a tenth of the grid is not a "
         "precision interval for that estimate."
     )
+
+
+# The load-bearing prose of the policy estimator, pinned the way
+# `UPLIFT_AT_K_PHRASES` pins the uplift-at-k conventions above. Each entry
+# is a sentence a later reader could delete as "verbose" without breaking
+# a single arithmetic test, and each one is the only place its fact is
+# written down:
+#
+#   the weight derivation           why 2 and not the criterion's literal 3
+#   1.7227                          what a transcribed 3 would publish
+#   the three unit names            decision (g)'s Pitfall-8 hazard, now
+#                                   with a THIRD unit in the same module
+#   the two per-targeted figures    the divide-by-realized-count decision,
+#                                   with the research document's
+#                                   divide-by-exact-k figure recorded
+#                                   beside it so the gap reads as resolved
+#   D-08a                           why a non-positive vs-everyone
+#                                   contrast is arithmetic, not a bug
+POLICY_PROSE_PHRASES = (
+    "Horvitz-Thompson",
+    "(1/3) / (2/3) = 1/2",
+    "1.7227",
+    "per TREATED customer",
+    "per POPULATION customer",
+    "per TARGETED customer",
+    "0.930401",
+    "0.930313",
+    "D-08a",
+)
+
+
+def test_policy_prose_pins_the_weight_the_units_and_the_denominator():
+    """The three facts that live only in prose, kept un-deletable.
+
+    Read from the FULL source rather than from the non-comment body,
+    because the weight derivation deliberately sits in the comment block
+    above `POLICY_WEIGHT` where a reader meets it before the constant.
+
+    None of these phrases can be checked by arithmetic. A future agent who
+    tidies the derivation away leaves a bare `POLICY_WEIGHT = 2.0` that
+    reads like a transcription error against ROADMAP criterion 1's own
+    "(1/3)", and the most likely repair is to "fix" it to 3 -- which is
+    precisely the 50% inflation `test_policy_weight_is_the_conditioned_
+    design_propensity` exists to catch. This test keeps the reasoning next
+    to the number so the repair is never attempted.
+    """
+    source = _evaluation_source()
+    for phrase in POLICY_PROSE_PHRASES:
+        assert phrase in source, (
+            f"`{phrase}` has left evaluation.py. It is the only written "
+            "record of one of: why the IPW weight is 2 on this frame, what "
+            "a transcribed 3 would publish, which of the module's three "
+            "units a number carries, or why the per-targeted figure "
+            "divides by the realized count."
+        )
