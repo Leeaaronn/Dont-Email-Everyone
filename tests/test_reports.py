@@ -834,3 +834,649 @@ def test_policy_anchor_matches_the_constant():
         "lands, no optimality criterion was applied to it, and a write-up "
         "that leaves that unsaid invites the reader to assume otherwise."
     )
+
+
+# --------------------------------------------------------------------------
+# Plan 05-09: the results half of `reports/policy.md`
+#
+# Everything above this line was written in 05-01, when the document held
+# nothing but its pre-registration. These twelve assertions arrive with the
+# results, and they take `model.md`'s three shapes -- ordering, tracing,
+# anti-overclaim -- plus the five bans this phase's own decisions require.
+#
+# Two conventions are load-bearing throughout and are stated once here.
+#
+# EVERY EXPECTED NUMBER IS DERIVED FROM AN ARTIFACT, never retyped. A
+# literal in this file would be a third copy of a figure that already
+# exists in `manifest.json` and in the prose, and a third copy is a third
+# thing that can drift. `_quote` below is the document's ONE spelling rule
+# for a policy scalar, so "the write-up quotes this number" is a mechanical
+# question rather than a matter of matching formatting by eye.
+#
+# EVERY WINDOW IS SYMMETRIC. 04-09 measured the alternative: a
+# forward-only window demands that a qualifier be repeated after every
+# backward reference to the number it qualifies, which is a demand about
+# typing rather than about honesty. A qualifier in the same passage is the
+# property these tests are for, and a passage has two sides.
+# --------------------------------------------------------------------------
+
+POLICY_ANCHOR_HEADING = (
+    "## Capacity anchor, stated before the policy value was computed"
+)
+
+# D-08a requires this caveat to sit in the SAME PASSAGE as the headline,
+# not merely somewhere in the file: a reader who stops at the headline
+# sentence has already taken the reading the caveat exists to prevent.
+HEADLINE_CAVEAT_PHRASES = ("genuinely free email", "fixed budget")
+
+CAVEAT_WINDOW = 2_000
+ANCHOR_CAPACITY = 0.20
+
+
+def _manifest():
+    return json.loads(
+        (config.PROCESSED / "manifest.json").read_text(encoding="utf-8")
+    )
+
+
+def _policy_curve():
+    return pd.read_parquet(config.PROCESSED / "policy_curve.parquet")
+
+
+def _curve_row(curve, ranking, outcome, k):
+    rows = curve[
+        (curve["ranking"] == ranking)
+        & (curve["outcome"] == outcome)
+        & ((curve["k"] - k).abs() < 1e-9)
+    ]
+    assert len(rows) == 1, (
+        f"expected exactly one {ranking}/{outcome} row at k={k}, "
+        f"found {len(rows)}"
+    )
+    return rows.iloc[0]
+
+
+def _quote(value, outcome):
+    """The document's one spelling for a policy contrast or per-email figure.
+
+    Six decimal places, an explicit sign, and a currency marker on the
+    spend outcome only. Fixed here rather than in the prose so that a
+    number quoted at four decimals, or without its sign, or without its
+    dollar sign, fails a test instead of reading as a house style.
+    """
+    sign = "+" if value >= 0 else "-"
+    if outcome == "spend":
+        return f"{sign}${abs(value):.6f}"
+    return f"{sign}{abs(value):.6f}"
+
+
+def _quote_total(value, outcome):
+    """The spelling for a frame total, which is a count or an amount.
+
+    Two decimals and thousands separators, because these are the numbers
+    ROADMAP criterion 4 exists for: a reader reproduces them on a
+    calculator from `scored_holdout.parquet`, and six decimal places on a
+    count of visits would be noise dressed as precision.
+    """
+    return f"${value:,.2f}" if outcome == "spend" else f"{value:,.2f}"
+
+
+def test_policy_report_states_the_anchor_before_any_result():
+    """The anchor section sits above every quoted policy number.
+
+    The direct analogue of
+    test_model_report_states_the_ship_rule_before_results, and the
+    assertion 05-01 deliberately did NOT write: at that point the document
+    held no result, so an ordering test would have passed on any file and
+    tested nothing. It arrives here, in the commit that adds the first
+    result.
+
+    The markers are derived from `manifest.json`, so this cannot be
+    satisfied by moving a heading. Proved non-vacuous by transposition in
+    plan 05-09: moving the anchor section below the results makes it fail
+    naming the offending offsets.
+
+    The `## Result in brief` signpost sits ABOVE the anchor and carries no
+    policy number at all, by design -- that is what lets a fast entry
+    point coexist with a pre-registration that is genuinely prior to every
+    figure in the document.
+    """
+    text = _policy_report_text()
+    flat = _flat(text)
+
+    anchor_at = flat.find(POLICY_ANCHOR_HEADING)
+    assert anchor_at != -1, (
+        "no capacity-anchor section found in reports/policy.md"
+    )
+
+    headline = _manifest()["headline"]["per_outcome"]
+    markers = [
+        _quote(headline["visit"]["vs_random"], "visit"),
+        _quote(headline["spend"]["vs_random"], "spend"),
+        _quote(headline["spend"]["vs_everyone"], "spend"),
+        _quote(headline["visit"]["per_targeted"], "visit"),
+    ]
+    for marker in markers:
+        marker_at = flat.find(marker)
+        assert marker_at != -1, (
+            f"{marker} is a headline figure in manifest.json and never "
+            "appears in the write-up"
+        )
+        assert anchor_at < marker_at, (
+            f"the capacity anchor is at offset {anchor_at} and the result "
+            f"{marker} is at {marker_at}. A capacity chosen after the "
+            "result it reports is not a pre-registration, and this "
+            "document's whole defence of its anchor is that the choice "
+            "was prior to the number."
+        )
+
+
+def test_policy_report_traces_its_headline_numbers_to_the_artifact():
+    """T-05-28: every headline scalar is quoted at the artifact's value.
+
+    Fifteen scalars per outcome, forty-five in all, derived from
+    `manifest.json` rather than pinned here. This is the assertion that
+    stops a figure being carried across from `05-RESEARCH.md`: that file's
+    per-targeted numbers were computed under a different denominator
+    convention than the artifact uses -- dividing by the exact k rather
+    than by the realized email count -- and differ in the fourth decimal
+    place, which is invisible to a reader and fatal to a claim that every
+    number here is reproducible.
+    """
+    flat = _flat(_policy_report_text())
+    headline = _manifest()["headline"]["per_outcome"]
+    assert set(headline) == {"visit", "conversion", "spend"}, sorted(headline)
+
+    point_keys = (
+        "per_targeted", "per_targeted_lo", "per_targeted_hi",
+        "vs_nobody", "vs_nobody_lo", "vs_nobody_hi",
+        "vs_everyone", "vs_everyone_lo", "vs_everyone_hi",
+        "vs_random", "vs_random_lo", "vs_random_hi",
+    )
+    for outcome, block in headline.items():
+        for key in ("total", "total_lo", "total_hi"):
+            literal = _quote_total(block[key], outcome)
+            assert literal in flat, (
+                f"headline.{outcome}.{key} is {literal} in manifest.json "
+                "and does not appear in the write-up. A headline the "
+                "artifact carries that the write-up does not quote is a "
+                "headline nobody can check."
+            )
+        for key in point_keys:
+            literal = _quote(block[key], outcome)
+            assert literal in flat, (
+                f"headline.{outcome}.{key} is {literal} in manifest.json "
+                "and does not appear in the write-up at that precision."
+            )
+
+
+def test_policy_report_states_the_zero_cost_caveat_beside_the_headline():
+    """D-08a: the caveat sits in the same passage as the number.
+
+    Presence somewhere in the file is not the property. With genuinely
+    free email the correct action is to email everyone, and a reader who
+    meets the headline without that sentence has taken a reading the rest
+    of the document then has to walk back. The window is symmetric for the
+    reason recorded at the top of this section.
+    """
+    flat = _flat(_policy_report_text())
+    headline = _manifest()["headline"]["per_outcome"]
+
+    for outcome in ("visit", "spend"):
+        literal = _quote(headline[outcome]["vs_random"], outcome)
+        occurrences = [m.start() for m in re.finditer(re.escape(literal), flat)]
+        assert occurrences, (
+            f"the {outcome} headline contrast {literal} never appears in "
+            "the write-up"
+        )
+        for at in occurrences:
+            passage = flat[max(0, at - CAVEAT_WINDOW): at + CAVEAT_WINDOW]
+            for phrase in HEADLINE_CAVEAT_PHRASES:
+                assert phrase in passage, (
+                    f"the headline figure {literal} at offset {at} is "
+                    f"quoted without {phrase!r} anywhere in the "
+                    f"surrounding {CAVEAT_WINDOW} characters. D-08a "
+                    "requires the zero-cost caveat in the same passage as "
+                    "the headline, because the number means something "
+                    "different without it: this is a fixed-budget result, "
+                    "and with free email the correct action is to email "
+                    "everyone."
+                )
+
+
+def test_policy_report_reports_the_vs_everyone_contrast_honestly():
+    """T-05-27 and Pitfall 2: the negative contrast is faced, not dressed up.
+
+    Four things, and dropping any one of them leaves the document able to
+    imply the claim the project's own title invites. The contrast is
+    named; the interval claim is stated as an INTERVAL claim; the sign
+    identity that explains it is present; and the sentence the data does
+    not support is banned as a regex.
+
+    The precision here matters and was got wrong twice in this phase's own
+    planning documents. The vs-everyone POINT ESTIMATE is positive at some
+    depths -- 20 to 37 of 101 on the headline ranking, all at k >= 0.49 --
+    so "non-positive at every k" is a checkable falsehood. The claim that
+    holds is about the band: across all 909 committed band rows, none
+    excludes zero from above.
+    """
+    flat = _flat(_policy_report_text())
+
+    assert "emailing everyone" in flat, (
+        "the versus-everyone contrast is never named. Criterion 1 requires "
+        "the policy to be differenced against it, and omitting the "
+        "unflattering half of a required comparison is the failure this "
+        "test exists for."
+    )
+    assert "from above is 0 of 909" in flat, (
+        "the write-up does not state the interval claim in the form the "
+        "artifacts support: 0 of the 909 committed band rows exclude zero "
+        "from above on the versus-everyone contrast."
+    )
+    assert "minus the incremental outcome of the bottom" in flat, (
+        "the sign identity is missing. delta_all(k) is minus the "
+        "incremental outcome of the customers below the cut, which is why "
+        "beating a blanket send at zero cost requires a segment email "
+        "measurably harms. Without it the negative result reads as a "
+        "model failure rather than as arithmetic."
+    )
+
+    banned = re.compile(
+        r"earns?\s+\+?\$?\d[\d.,]*\s+more than emailing everyone", re.I
+    )
+    match = banned.search(flat)
+    assert match is None, (
+        f"the write-up contains {match.group(0)!r}. No "
+        "capacity in this data produces a versus-everyone interval that "
+        "excludes zero from above, so a positive dollar claim against "
+        "emailing everyone is not supported however the sentence is "
+        "phrased."
+    )
+
+
+def test_policy_report_never_publishes_a_ratio_as_an_interval():
+    """The efficiency ratio and the capture fraction are point estimates.
+
+    Both divide one estimated quantity by another whose denominator can
+    approach zero, so their bootstrap intervals are wide, asymmetric and
+    cover zero -- which is a statement about the arithmetic of ratios and
+    not about the targeting rule. Printing those bounds beside a tidy
+    multiple invites exactly the misreading the bounds exist to prevent.
+
+    Both ratios are DERIVED here from `policy_curve.parquet`, so this test
+    also traces them: a ratio recomputed by hand into the prose, or left
+    stale after a re-run, fails on the first assertion rather than on the
+    interval ban.
+    """
+    text = _policy_report_text()
+    flat = _flat(text)
+    curve = _policy_curve()
+    ranking = _manifest()["frame"]["ranking"]
+
+    expected = []
+    for outcome in ("visit", "spend"):
+        head = _curve_row(curve, ranking, outcome, ANCHOR_CAPACITY)
+        full = _curve_row(curve, ranking, outcome, 1.0)
+        expected.append(f"{head['per_targeted'] / full['per_targeted']:.4f}x")
+        expected.append(
+            f"{head['delta_none'] / full['delta_none'] * 100:.2f}%"
+        )
+
+    bracketed = re.compile(r"\[[^\]]*\d[^\]]*\]")
+    for literal in expected:
+        occurrences = [
+            m.start() for m in re.finditer(re.escape(literal), flat)
+        ]
+        assert occurrences, (
+            f"{literal} is computable from policy_curve.parquet and never "
+            "appears in the write-up, so either the ratio is unreported or "
+            "the reported one has drifted from the artifact"
+        )
+        for at in occurrences:
+            adjacent = flat[max(0, at - 200): at + 200]
+            assert not bracketed.search(adjacent), (
+                f"a bracketed interval sits next to the ratio {literal} at "
+                f"offset {at}: {bracketed.search(adjacent).group(0)!r}. A "
+                "ratio of two noisy quantities is published here as a "
+                "point estimate only."
+            )
+            assert "95%" not in adjacent, (
+                f"the ratio {literal} at offset {at} is quoted next to a "
+                "95% interval"
+            )
+
+    assert "denominator is itself an estimate" in flat, (
+        "the write-up reports ratios without saying why they carry no "
+        "interval. Stating the reason is what stops a later editor "
+        "'fixing' the omission by adding one."
+    )
+
+
+def test_policy_report_does_not_overclaim_spend_significance():
+    """The headline contrast is detectable on visit and not on spend.
+
+    Added 2026-09-09 from plan-check finding 5, and mirroring
+    test_policy_report_reports_the_vs_everyone_contrast_honestly -- the
+    same honesty discipline pointed at the contrast this phase CHOSE
+    rather than at the one it rejected, which is the harder direction to
+    aim it.
+
+    Both intervals are read from `manifest.json`, never from the plan and
+    never from `05-RESEARCH.md`. If a future re-run makes the spend
+    interval exclude zero, this test still exists and simply passes on the
+    stronger claim: the assertions are that the interval travels with the
+    number and that a bare verb of victory is not used for spend, neither
+    of which becomes wrong if the result strengthens.
+    """
+    flat = _flat(_policy_report_text())
+    spend = _manifest()["headline"]["per_outcome"]["spend"]
+    point = _quote(spend["vs_random"], "spend")
+    lo = _quote(spend["vs_random_lo"], "spend")
+    hi = _quote(spend["vs_random_hi"], "spend")
+
+    occurrences = [m.start() for m in re.finditer(re.escape(point), flat)]
+    assert occurrences, (
+        f"the spend headline contrast {point} never appears in the write-up"
+    )
+    for at in occurrences:
+        passage = flat[max(0, at - 1_200): at + 1_200]
+        for bound in (lo, hi):
+            assert bound in passage, (
+                f"the spend headline figure {point} at offset {at} is "
+                f"quoted without {bound} within the surrounding 1,200 "
+                "characters. At the pre-registered anchor this interval "
+                "covers zero, so the point estimate alone states more than "
+                "the data supports."
+            )
+
+    # Ban the CLAIM, in both word orders. The honest sentences in this
+    # document deliberately avoid these verbs for the spend outcome and
+    # say "produces more revenue ... by a margin it cannot detect"
+    # instead, so the ban costs the write-up nothing it should be saying.
+    for pattern in (
+        r"(spend|revenue|dollar)[^.]{0,200}?"
+        r"\b(beats?|outperforms?|earns? more than)\b[^.]{0,140}?random send",
+        r"\b(beats?|outperforms?|earns? more than)\b[^.]{0,140}?"
+        r"random send[^.]{0,140}?(spend|revenue|dollar)",
+    ):
+        match = re.search(pattern, flat, re.I)
+        assert match is None, (
+            f"the write-up claims {match.group(0)!r} if the spend "
+            "contrast beat a random send outright. At the anchor its 95% "
+            f"interval runs {lo} to {hi} and covers zero."
+        )
+
+    assert "and the spend contrast does not" in flat, (
+        "the write-up never states the asymmetry between its two headline "
+        "outcomes. The visit contrast excludes zero at the anchor and the "
+        "spend contrast does not, and a reader must not be left to assume "
+        "one interval from the other."
+    )
+
+
+def test_policy_report_does_not_extrapolate_to_the_full_list():
+    """D-11: no dollar figure is scaled to the 64,000-customer list.
+
+    Every headline number here stays something the experiment literally
+    measured on the 21,347-row evaluation frame. The per-email figure is
+    published so a reader can scale it themselves, with the extrapolation
+    stated as the reader's -- which is a different claim from making it.
+    """
+    flat = _flat(_policy_report_text())
+
+    mentions = [m.start() for m in re.finditer(r"64,000", flat)]
+    assert mentions, (
+        "the write-up never mentions the full 64,000-customer list, so "
+        "this test cannot tell a document that refuses to extrapolate "
+        "from one that never raised the question"
+    )
+    for at in mentions:
+        adjacent = flat[max(0, at - 250): at + 250]
+        money = re.search(r"\$\d", adjacent)
+        assert money is None, (
+            f"a dollar figure sits within 250 characters of the 64,000 "
+            f"mention at offset {at}. Nothing in this document is scaled "
+            "to the full list (D-11); the per-email figure is there so a "
+            "reader can do it themselves."
+        )
+
+    curve = _policy_curve()
+    manifest = _manifest()
+    head = _curve_row(
+        curve, manifest["frame"]["ranking"], "spend", ANCHOR_CAPACITY
+    )
+    assert _quote(head["per_targeted"], "spend") in flat, (
+        "the per-email spend figure is absent, so the document withholds "
+        "the number that makes the extrapolation the reader's to make"
+    )
+    assert "that extrapolation is the reader's" in flat, (
+        "the write-up does not hand the extrapolation to the reader "
+        "explicitly. Publishing a per-email figure without that sentence "
+        "leaves the campaign-scale multiplication implied."
+    )
+
+
+def test_policy_report_labels_every_unproven_number():
+    """D-03: the `unproven_` label travels with the number.
+
+    The four cells that did not clear Phase 4's bar may be valued and
+    shown as labelled sensitivity, and never as a headline. This bans the
+    CLAIM rather than the token: `argmax` and the mens cell names have to
+    be sayable, because D-04's justification is a sentence about them and
+    D-05's obligation is a measurement of one. 04-09 recorded the same
+    disposition for `argmax` in `model.md`, for the same reason -- a
+    literal token ban forbids the sentence a decision mandates.
+    """
+    flat = _flat(_policy_report_text())
+
+    for pattern, window, why in (
+        (
+            r"argmax",
+            1_200,
+            "the per-customer argmax policy is valued here and is NOT "
+            "shipped (D-04), so every passage that mentions it must carry "
+            "the label that keeps it out of a headline",
+        ),
+        (
+            r"uplift_mens_(visit|conversion|spend)",
+            600,
+            "all three mens cells failed their own permutation nulls",
+        ),
+        (
+            r"uplift_womens_spend",
+            600,
+            "womens/spend beat its response-model baseline and still fell "
+            "short of its null",
+        ),
+    ):
+        occurrences = list(re.finditer(pattern, flat))
+        assert occurrences, (
+            f"nothing matching {pattern!r} appears in the write-up, so "
+            "this assertion would pass vacuously"
+        )
+        for match in occurrences:
+            near = flat[
+                max(0, match.start() - window): match.start() + window
+            ]
+            assert "unproven" in near, (
+                f"{match.group(0)!r} at offset {match.start()} appears "
+                f"without 'unproven' within {window} characters. {why}."
+            )
+
+
+def test_policy_report_names_the_separation_of_ranking_from_valuation():
+    """05-CONTEXT's Specific Ideas: this must be explicit, not inferable.
+
+    A policy's value does not have to be estimated with the quantity used
+    to rank it. That is the move the whole phase rests on, and it is what
+    makes "your spend model failed its null" an objection to something the
+    headline does not use.
+    """
+    # Lowered, because two of the three phrases open a sentence and the
+    # third does not. Asserting on capitalization here would be asserting
+    # on where a paragraph break falls.
+    flat = _flat(_policy_report_text()).lower()
+
+    for phrase, why in (
+        (
+            "the ranking device and the value estimator are different "
+            "things",
+            "the separation is the intellectual move of the phase and "
+            "must be stated rather than left for a reader to infer",
+        ),
+        (
+            "unbiased value for whatever ranking it is handed",
+            "the reason the separation is legitimate is that the "
+            "estimator does not care where the ordering came from",
+        ),
+        (
+            "known-propensity",
+            "criterion 1 requires the value to come from the "
+            "randomization, and the estimator has to be named",
+        ),
+    ):
+        assert phrase in flat, (
+            f"the write-up does not state {phrase!r}. {why.capitalize()}."
+        )
+
+
+def test_policy_report_states_the_k_star_selection_caveat():
+    """The cost-optimal depth is an exhibit, never the recommendation.
+
+    k* maximises an estimated objective over the evaluation rows, so it
+    carries exactly the optimism the exogenous anchor avoids. Two
+    assertions, because they catch different failures.
+
+    The caveat is required at EVERY mention of the symbol, including the
+    forward reference in the pre-registration section. The (cost, margin)
+    pairing is asserted against the illustrative rows of
+    `cost_sweep.parquet` instead of against the symbol: a bare mention of
+    k* in a sentence about what it is has no cost and no margin to carry,
+    while a quoted optimal DEPTH always does, and pinning the pairing to
+    the artifact's own rows is what makes "never quoted without its (cost,
+    margin)" checkable rather than approximate.
+    """
+    text = _policy_report_text()
+    flat = _flat(text)
+
+    # The symbol is spelled `k*` in code spans and `k\*` in prose, so the
+    # raw text is searched with both readings rather than the flattened
+    # text -- `_flat` strips the asterisk and would leave a bare `k\`.
+    mentions = list(re.finditer(r"k\\?\*", text))
+    assert mentions, "the cost-optimal depth is never named in the write-up"
+    for match in mentions:
+        near = text[max(0, match.start() - 1_500): match.start() + 1_500]
+        assert "selected on the evaluation rows" in near, (
+            f"k* at offset {match.start()} appears without the selection "
+            "caveat within 1,500 characters. It is chosen by maximising "
+            "over the same rows it is evaluated on, which is the optimism "
+            "the pre-registered anchor exists to avoid."
+        )
+
+    sweep = pd.read_parquet(config.PROCESSED / "cost_sweep.parquet")
+    illustrative = sweep[sweep["illustrative"]]
+    assert len(illustrative) == 3, (
+        f"expected three illustrative rows in cost_sweep.parquet, found "
+        f"{len(illustrative)}"
+    )
+    for _, row in illustrative.iterrows():
+        cost = f"${row['cost_per_email']:.3f}"
+        margin = f"{row['gross_margin'] * 100:.0f}%"
+        optimum = f"{row['k_star'] * 100:.0f}%"
+        occurrences = [m.start() for m in re.finditer(re.escape(cost), flat)]
+        assert occurrences, (
+            f"the illustrative cost {cost} is a committed row of "
+            "cost_sweep.parquet and never appears in the write-up"
+        )
+        for at in occurrences:
+            adjacent = flat[max(0, at - 200): at + 200]
+            assert margin in adjacent and optimum in adjacent, (
+                f"the illustrative pair at {cost} (offset {at}) is quoted "
+                f"without its margin {margin} or its optimal depth "
+                f"{optimum} beside it. D-09's exhibit is only honest while "
+                "no optimal depth travels without the cost and margin that "
+                "produced it -- Hillstrom carries neither as data."
+            )
+
+
+def test_policy_report_keeps_the_regenerate_line_true():
+    """Phase 7 criterion 5, checked against the parser rather than trusted.
+
+    Copied from test_model_report_keeps_the_regenerate_line_true, with one
+    more subcommand to find: `policy` was registered in 05-06 and this
+    write-up names it as the way to rebuild this phase's four artifacts
+    alone. A report that claims the line while the subcommand list has
+    drifted is worse than one that omits it.
+    """
+    text = _policy_report_text()
+    assert "python -m dont_email_everyone.pipeline all" in text, (
+        "the write-up does not carry the regenerate line"
+    )
+    assert "python -m dont_email_everyone.pipeline policy" in text, (
+        "the write-up does not name the single-stage rebuild, which is the "
+        "command that regenerates this phase's own artifacts"
+    )
+
+    source = (config.ROOT / "dont_email_everyone" / "pipeline.py").read_text(
+        encoding="utf-8"
+    )
+    registered = set(re.findall(r'add_parser\(\s*\n?\s*"(\w+)"', source))
+    for subcommand in ("ingest", "analyze", "train", "policy", "all"):
+        assert subcommand in registered, (
+            f"the write-up's regenerate line chains through {subcommand!r}, "
+            f"which pipeline.main does not register (found: "
+            f"{sorted(registered)}). The claim in a committed document has "
+            "stopped being true."
+        )
+
+
+def test_policy_report_references_every_phase_5_figure():
+    """A committed figure no write-up references is one nobody will find.
+
+    The names are derived as a set difference over the committed
+    allowlist rather than copied, so this file still holds exactly one
+    list of figure names. The derivation is also a consistency check:
+    MODEL_FIGURES excludes POLICY_FIGURES by construction, so if the two
+    constants ever drift the difference stops equalling POLICY_FIGURES and
+    this fails before the reference loop runs.
+    """
+    derived = set(FIGURE_NAMES) - set(VALIDITY_FIGURES) - set(MODEL_FIGURES)
+    assert derived == set(POLICY_FIGURES), (
+        f"the Phase 5 figure set derived from the allowlist is {derived!r} "
+        f"but POLICY_FIGURES holds {set(POLICY_FIGURES)!r}"
+    )
+
+    text = _policy_report_text()
+    for figure in sorted(derived):
+        assert figure in text, (
+            f"reports/policy.md does not reference {figure}, which is "
+            "committed under reports/figures/ and named on the test "
+            "allowlist. Phase 7's README embeds these four, and a figure "
+            "no document introduces is a figure a reader meets without "
+            "its argument."
+        )
+
+
+def test_policy_report_has_no_classification_metric_headline():
+    """ROADMAP C5 and Phase 7 criterion 4, on this phase's write-up.
+
+    Each spelling is assembled by concatenation so this file does not trip
+    the repository-wide grep it exists to anticipate -- the precedent is
+    tests/test_evaluation.py's own purity sweep, and
+    test_model_report_has_no_classification_metric_headline applies the
+    identical construction to Phase 4's document.
+    """
+    banned = (
+        "accuracy" + "_score",
+        "roc" + "_auc",
+        "classification" + "_report",
+        "." + "score(",
+    )
+    text = _policy_report_text()
+    for token in banned:
+        assert token not in text, (
+            f"the write-up contains {token!r}. A targeting policy is "
+            "judged here on what the randomization delivered to the "
+            "customers it selected, and a classification-family figure "
+            "would be the wrong yardstick presented as a result."
+        )
