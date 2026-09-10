@@ -1,6 +1,11 @@
-# Pinned Python 3.11 runtime dependency set (RESEARCH.md Standard Stack).
-# Exact == pins only — never >= or ~= — verified together with
-# --only-binary=:all: on cp311-win_amd64, zero conflicts, zero source builds.
+# Pinned Python 3.11 SERVE-TIME dependency set (RESEARCH.md Standard Stack,
+# 06-RESEARCH.md Pattern 1). Exact == pins only — never >= or ~= — verified
+# together with --only-binary=:all: on cp311-win_amd64, zero conflicts, zero
+# source builds. These five resolve to 43 packages on a clean target.
+#
+# The analysis stack lives in requirements-pipeline.txt and pytest in
+# requirements-dev.txt; each layers on this one with -r, so every package is
+# pinned in EXACTLY ONE file and the two sets cannot drift apart.
 #
 # Recorded decisions:
 # (a) pyarrow is not in CLAUDE.md's explicit modeling-library allowlist, but
@@ -10,15 +15,32 @@
 #     first principles, not library calls"); pyarrow is admitted here as an
 #     I/O engine, the same category as the joblib/patsy/pydantic transitives
 #     that arrive with scikit-learn/statsmodels/pandera.
-# (b) numpy and scipy are capped by the Python 3.11 floor: numpy >=2.5 and
-#     scipy >=1.18 both require Python >=3.12, so 2.4.6 / 1.17.1 are the
-#     newest cp311 builds. Pinning makes the cap visible, not incidental.
+# (b) numpy is capped by the Python 3.11 floor: numpy >=2.5 requires Python
+#     >=3.12, so 2.4.6 is the newest cp311 build. Pinning makes the cap
+#     visible, not incidental. (The scipy half of this decision moved to
+#     requirements-pipeline.txt with the scipy pin.)
+# (c) THIS FILE IS THE SERVE-TIME SET. Streamlit Community Cloud searches the
+#     entrypoint's own directory and then the repository root for a
+#     dependency file, and installs ONLY THE FIRST ONE IT FINDS. The
+#     entrypoint sits at the repo root, so this is that file. It must
+#     therefore never carry scikit-learn, statsmodels, duckdb or pandera:
+#     the deployment would install them, the app would run perfectly, and
+#     ROADMAP criterion 4 would be violated silently. Guarded by
+#     tests/test_app.py::test_serve_time_requirements_exclude_the_analysis_stack.
+# (d) pyarrow==25.0.1 is deliberate and must not be "simplified" to 25.0.0.
+#     streamlit 1.63.0 declares pyarrow!=25.0.0,<26,>=7.0 — it excludes
+#     25.0.0 specifically, and 25.0.1 is the allowed neighbour.
+# (e) matplotlib is listed explicitly because it is NOT a required streamlit
+#     dependency — it sits behind streamlit's `charts` extra, so a
+#     serve-time environment without this line has no figure backend.
+#
+# Watch item: the root pyproject.toml carries only [tool.pytest.ini_options]
+# and sits at Cloud's dependency-discovery priority 5, below requirements.txt
+# at priority 4, so it is never selected. But deleting THIS file would make
+# Cloud fall back to reading pyproject.toml as a Poetry manifest and fail.
+# Never delete this file.
 pandas==3.0.5
 numpy==2.4.6
-pandera[pandas]==0.32.1
-duckdb==1.5.5
 pyarrow==25.0.1
-scipy==1.17.1
-scikit-learn==1.9.0
-statsmodels==0.15.0
 matplotlib==3.11.1
+streamlit==1.63.0

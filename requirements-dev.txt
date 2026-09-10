@@ -1,2 +1,19 @@
--r requirements.txt
+-r requirements-pipeline.txt
+# ^ First line, deliberately: the development set is the analysis stack plus
+# the test runner. This is the file README.md's setup command installs, and
+# it still pulls the full analysis stack — and, through that file's own -r,
+# the serve-time set — unchanged.
+#
+# streamlit is NOT pinned here. It arrives transitively through
+# requirements.txt, which requirements-pipeline.txt pulls in — and it is a
+# genuine test dependency, because tests/test_app.py drives the app with
+# streamlit.testing.v1.AppTest. A second pin here would be the first step
+# toward the two sets disagreeing about a version; one pin per package is the
+# property this layering exists to make structural rather than disciplined.
+# Guarded by
+# tests/test_app.py::test_every_package_is_pinned_in_exactly_one_requirements_file.
+#
+# The `slow` pytest marker needs nothing here either: it is registered in
+# pyproject.toml's [tool.pytest.ini_options], and a marker is a pytest
+# facility, not a package.
 pytest==9.1.1

@@ -1,0 +1,23 @@
+-r requirements.txt
+# ^ First line, deliberately: the ANALYSIS STACK layers on the serve-time set
+# rather than restating it, so pandas/numpy/pyarrow/matplotlib/streamlit are
+# pinned in requirements.txt and never here — one pin per package across the
+# three files.
+#
+# This file is everything the pipeline needs to build the committed artifacts
+# and everything the serve-time app must NOT have. Community Cloud installs
+# the first dependency file it finds and never sees this one; that is the
+# entire point of the split. See requirements.txt recorded decision (c).
+#
+# Exact == pins only, --only-binary=:all:, cp311-win_amd64.
+#
+# Recorded decisions:
+# (b, scipy half) scipy is capped by the Python 3.11 floor: scipy >=1.18
+#     requires Python >=3.12, so 1.17.1 is the newest cp311 build. Pinning
+#     makes the cap visible, not incidental. (The numpy half of this decision
+#     stays in requirements.txt with the numpy pin.)
+pandera[pandas]==0.32.1
+duckdb==1.5.5
+scipy==1.17.1
+scikit-learn==1.9.0
+statsmodels==0.15.0
