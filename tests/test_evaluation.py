@@ -3300,3 +3300,52 @@ def test_ranking_order_is_the_one_ordering_the_curve_uses():
     np.testing.assert_allclose(
         by_hand, curve.v_pi[20], rtol=0.0, atol=1e-12
     )
+
+
+def test_hajek_reproduces_the_arm_means_on_the_committed_frame():
+    """The defining property, on the real data rather than on a synthetic.
+
+    Read from the committed artifact deliberately. The synthetic check
+    above proves the arithmetic; this one proves the property survives the
+    frame the headline is actually computed on, where the two arms came
+    out 10,694 and 10,653 rather than exactly equal. That inequality is
+    the whole reason the two estimators are distinguishable: Hajek's
+    `v_all` is the womens arm's own mean spend EXACTLY, and the
+    Horvitz-Thompson `v_all` is not, because it multiplies a fixed
+    reciprocal propensity by a sum over a realized arm whose size the
+    design only fixed in expectation.
+    """
+    scored = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    segment = scored["segment"].to_numpy()
+    frame = scored.loc[segment != config.ARMS["mens"]]
+    treatment = (
+        frame["segment"].to_numpy() == config.ARMS["womens"]
+    ).astype(float)
+    spend = frame["spend"].to_numpy(dtype=float)
+
+    variants = evaluation.policy_value_variants(
+        frame["uplift_womens_visit"].to_numpy(dtype=float),
+        treatment,
+        spend,
+        k=0.2,
+        weight=evaluation.POLICY_WEIGHT,
+        m0=frame["m0_womens_spend"].to_numpy(dtype=float),
+        m1=frame["m1_womens_spend"].to_numpy(dtype=float),
+    )
+
+    womens_arm_mean = float(spend[treatment == 1.0].mean())
+    control_arm_mean = float(spend[treatment == 0.0].mean())
+    assert variants.hajek.v_all == womens_arm_mean, (
+        f"the Hajek v_all is {variants.hajek.v_all} against a realized "
+        f"womens arm mean of {womens_arm_mean}. Equality here is not a "
+        "tolerance question: the ratio estimator divides by the same "
+        "count the mean divides by, so the two are the same arithmetic."
+    )
+    assert variants.hajek.v_none == control_arm_mean
+    assert variants.ht.v_all != womens_arm_mean, (
+        "the Horvitz-Thompson v_all landed exactly on the womens arm "
+        "mean. On this frame the arms hold 10,694 and 10,653 rows, so a "
+        "fixed weight of 2 over 21,347 cannot reproduce a mean over "
+        "10,694 -- an exact match means the two estimators have been "
+        "collapsed into one."
+    )

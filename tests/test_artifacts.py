@@ -798,3 +798,368 @@ def test_committed_policy_artifacts_are_not_stale():
         "than the committed scored artifact holds"
     )
     assert set(curve["weight"]) == {evaluation.POLICY_WEIGHT}
+
+
+# --------------------------------------------------------------------------
+# D-05: the optimism exhibit
+# --------------------------------------------------------------------------
+
+# The keys inside `optimism.decomposition` and `optimism.jensen` that are
+# NEUTRAL bookkeeping rather than a measured quantity, and so are exempt
+# from the `unproven_` rule. Written out rather than detected, because "a
+# key that holds a number" is exactly the property a future addition would
+# get wrong by holding a number under a name that reads like bookkeeping.
+NEUTRAL_OPTIMISM_KEYS = frozenset(
+    {"score_columns", "n_shared_control_rows"}
+)
+
+# `optimism.miscalibration` is the womens-only exhibit and its prefix is
+# DERIVED from its own score column, so this test catches over-labelling
+# as well as under-labelling. These are the stems the prefix attaches to.
+MISCALIBRATION_STEMS = (
+    "naive_at_capacity",
+    "honest_at_capacity",
+    "gap_at_capacity",
+    "ratio_at_capacity",
+    "naive_at_k_1",
+    "honest_at_k_1",
+    "gap_at_k_1",
+    "ratio_at_k_1",
+)
+
+
+def test_optimism_block_reproduces_the_cross_arm_metrics():
+    """Two artifacts, one measurement, two code paths that never met.
+
+    `model.json.cross_arm_metrics` was computed in Phase 4 on the 10,653
+    shared control rows from the unsuffixed score columns.
+    `manifest.json.optimism.jensen` is computed in Phase 5 on the same
+    rows from the `_all` columns plan 05-03 added. The two numbers have no
+    shared code below pandas, so their agreement is worth asserting rather
+    than assuming -- and a disagreement would mean 05-03's regeneration
+    was not the purely additive change D-15 required it to be.
+
+    The argmax share is recomputed here from the scored artifact instead,
+    because `cross_arm_metrics` does NOT carry one: it carries a
+    `sign_disagreement_fraction`, which is a different quantity. That
+    absence is recorded here so a future reader does not go looking for a
+    column the plan's prose implied was there.
+    """
+    manifest = _manifest()
+    model = json.loads(
+        (config.PROCESSED / "model.json").read_text(encoding="utf-8")
+    )
+    scored = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    control = scored["segment"].to_numpy() == config.CONTROL
+
+    for outcome, block in manifest["optimism"]["jensen"].items():
+        committed = model["cross_arm_metrics"][outcome]
+        assert block["n_shared_control_rows"] == committed["n_shared"]
+
+        columns = manifest["optimism"]["decomposition"][outcome][
+            "score_columns"
+        ]
+        means = block["unproven_arm_means"]
+        for arm in ("mens", "womens"):
+            np.testing.assert_allclose(
+                means[columns[arm]],
+                committed[f"{arm}_mean"],
+                rtol=1e-8,
+                err_msg=(
+                    f"the {outcome} {arm} mean uplift in manifest.json's "
+                    "jensen block disagrees with the one model.json "
+                    "committed on the same 10,653 rows"
+                ),
+            )
+        # 1e-6 rather than tighter: the two paths accumulate over 10,653
+        # rows in different orders and the measured disagreement is
+        # 1.4e-8 relative on conversion. Six significant figures is far
+        # beyond any precision a report quotes, and tightening it further
+        # would be pinning float64 summation order rather than agreement.
+        np.testing.assert_allclose(
+            block["unproven_correlation_between_arms"],
+            committed["corr_between_arms"],
+            rtol=1e-6,
+        )
+
+        mens = scored[columns["mens"]].to_numpy(dtype=float)[control]
+        womens = scored[columns["womens"]].to_numpy(dtype=float)[control]
+        np.testing.assert_allclose(
+            block["unproven_argmax_share_mens"],
+            float(np.mean(mens >= womens)),
+            rtol=0.0,
+            atol=1e-12,
+            err_msg=(
+                "the recorded argmax share disagrees with the share "
+                "recomputed from the committed scores on the shared "
+                "control rows"
+            ),
+        )
+        np.testing.assert_allclose(
+            block["unproven_mean_of_the_elementwise_max"],
+            float(np.maximum(mens, womens).mean()),
+            rtol=0.0,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            block["unproven_jensen_gap"],
+            float(np.maximum(mens, womens).mean())
+            - max(float(mens.mean()), float(womens.mean())),
+            rtol=0.0,
+            atol=1e-12,
+        )
+        assert block["unproven_jensen_gap"] > 0.0, (
+            f"the {outcome} Jensen gap is not positive. mean(max) is at "
+            "least max(mean) for any two arrays, so a non-positive value "
+            "means the maximum was taken along the wrong axis."
+        )
+
+
+def test_optimism_block_is_labelled_unproven():
+    """T-05-20, asserted in BOTH directions.
+
+    Under-labelling: every measured key in the argmax exhibit carries the
+    `unproven_` prefix, so the label travels with the number into every
+    chart, table and sentence downstream rather than sitting beside it as
+    a footnote somebody forgets to copy.
+
+    Over-labelling: the womens-only miscalibration keys carry the prefix
+    exactly where their own score column does and NOT otherwise. A label
+    applied to everything is a label that means nothing, and D-03's four
+    unproven cells are a specific list rather than a mood.
+
+    Placement: the whole block sits outside `headline`, and `headline`
+    names neither the argmax nor the curse.
+    """
+    manifest = _manifest()
+    optimism = manifest["optimism"]
+
+    assert "optimism" in manifest, "the optimism block is not top-level"
+    assert "optimism" not in manifest["headline"]
+    assert "estimator_robustness" not in manifest["headline"]
+    headline_text = json.dumps(manifest["headline"])
+    for token in ("argmax", "winners_curse", "unproven"):
+        assert token not in headline_text, (
+            f"the headline block names {token!r}. D-03 and D-04 keep every "
+            "argmax number out of the headline; the shipped policy targets "
+            "the womens arm only."
+        )
+
+    for name in ("decomposition", "jensen"):
+        for outcome, block in optimism[name].items():
+            for key in block:
+                if key in NEUTRAL_OPTIMISM_KEYS:
+                    continue
+                assert key.startswith("unproven_"), (
+                    f"optimism.{name}.{outcome}.{key} carries a number "
+                    "without the unproven_ prefix. Every conclusion in "
+                    "this exhibit rests on mens rankings that failed "
+                    "their own permutation nulls."
+                )
+
+    for outcome, block in optimism["miscalibration"].items():
+        column = block["score_column"]
+        expected = "unproven_" if column.startswith("unproven_") else ""
+        assert block["published"] is (expected == "")
+        for stem in MISCALIBRATION_STEMS:
+            assert f"{expected}{stem}" in block, (
+                f"optimism.miscalibration.{outcome} is missing "
+                f"{expected + stem!r}. The prefix is derived from the "
+                f"score column {column!r}, so a missing key means the "
+                "label and the column it came from have parted company."
+            )
+            wrong = stem if expected else f"unproven_{stem}"
+            assert wrong not in block, (
+                f"optimism.miscalibration.{outcome} carries {wrong!r} as "
+                f"well. Its score column is {column!r}, so exactly one "
+                "spelling is correct: a label on a published cell is as "
+                "wrong as a missing label on an unproven one."
+            )
+
+    assert "argmax_note" in optimism
+    note = optimism["argmax_note"]
+    for phrase in ("does NOT ship", "not a recommendation"):
+        assert phrase in note, (
+            f"the argmax note no longer contains {phrase!r}. It is the "
+            "only sentence in the artifact that says what this number is "
+            "not."
+        )
+
+
+def test_winners_curse_is_the_difference_of_the_two_gaps():
+    """The decomposition has to satisfy its own arithmetic.
+
+    The finding is the DECOMPOSITION, not any one of the three numbers.
+    A manifest in which they do not satisfy the identity is a manifest in
+    which one of them was edited by hand or computed on a different frame,
+    and either way the sentence built on it is false.
+
+    The blended residual is checked the same way. It subtracts each arm's
+    own gap weighted by how often the argmax prescribes that arm, which is
+    what separates the cost of choosing per customer from the difference
+    between the two models' calibration.
+    """
+    decomposition = _manifest()["optimism"]["decomposition"]
+    assert set(decomposition) == {"visit", "conversion", "spend"}
+
+    for outcome, block in decomposition.items():
+        np.testing.assert_allclose(
+            block["unproven_winners_curse"],
+            block["unproven_gap_argmax"] - block["unproven_gap_womens"],
+            rtol=0.0,
+            atol=1e-12,
+            err_msg=(
+                f"the {outcome} winner's curse is not gap_argmax minus "
+                "gap_womens in the committed manifest"
+            ),
+        )
+        shares = (
+            block["unproven_argmax_share_mens"],
+            block["unproven_argmax_share_womens"],
+        )
+        np.testing.assert_allclose(sum(shares), 1.0, rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(
+            block["unproven_gap_blended"],
+            shares[0] * block["unproven_gap_mens"]
+            + shares[1] * block["unproven_gap_womens"],
+            rtol=0.0,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            block["unproven_winners_curse_vs_blended"],
+            block["unproven_gap_argmax"] - block["unproven_gap_blended"],
+            rtol=0.0,
+            atol=1e-12,
+        )
+        for side in ("argmax", "womens", "mens"):
+            np.testing.assert_allclose(
+                block[f"unproven_gap_{side}"],
+                block[f"unproven_naive_{side}"]
+                - block[f"unproven_honest_{side}"],
+                rtol=0.0,
+                atol=1e-12,
+                err_msg=(
+                    f"the {outcome} {side} gap is not naive minus honest"
+                ),
+            )
+        assert (
+            block["unproven_honest_argmax_lo"]
+            <= block["unproven_honest_argmax"]
+            <= block["unproven_honest_argmax_hi"]
+        ), (
+            f"the {outcome} argmax point estimate sits outside its own "
+            "bootstrap band, which the shared draw makes impossible unless "
+            "the two were computed on different frames"
+        )
+
+
+def test_naive_exceeds_honest_at_the_anchor_on_spend():
+    """The qualitative finding, asserted as a direction and not a literal.
+
+    The research measured a 2.00x overstatement at the anchor. The
+    assertion here is `naive > honest` with a floor well below that, so a
+    regenerated artifact that moves the third decimal does not fail a test
+    about a qualitative claim -- and the measured ratio is printed in the
+    failure message so a real move is diagnosable without a rerun.
+
+    The k = 1 row is asserted the other way: in aggregate the same model
+    is essentially perfectly calibrated. Aggregate calibration and top-k
+    honesty are different properties and this pair is the exhibit that
+    separates them.
+    """
+    block = _manifest()["optimism"]["miscalibration"]["spend"]
+    naive = block["unproven_naive_at_capacity"]
+    honest = block["unproven_honest_at_capacity"]
+    ratio = block["unproven_ratio_at_capacity"]
+
+    assert naive > honest, (
+        f"the spend model's own belief at k = {block['k_capacity']} is "
+        f"{naive} against a measured {honest}; the exhibit exists because "
+        "the first exceeds the second"
+    )
+    assert ratio > 1.5, (
+        f"the measured overstatement ratio at the anchor is {ratio}, "
+        "below the 1.5 floor this test asserts. The research measured "
+        "2.00x. A ratio this far down is a change in the finding rather "
+        "than drift, and the write-up quotes the manifest's own number."
+    )
+    np.testing.assert_allclose(ratio, naive / honest, rtol=0.0, atol=1e-12)
+
+    aggregate = block["unproven_ratio_at_k_1"]
+    assert 0.95 < aggregate < 1.05, (
+        f"the aggregate calibration ratio is {aggregate}. The whole point "
+        "of this pair is that the same model is essentially calibrated at "
+        "k = 1 and badly optimistic at the top of its own ranking."
+    )
+
+
+def test_estimator_robustness_keeps_horvitz_thompson_as_the_headline():
+    """The robustness note agrees with the number the headline publishes.
+
+    Three estimators of one policy value, and the published one has to be
+    the one the headline block already carries. If they ever disagree, one
+    of the two blocks was computed on a different frame, a different k or
+    a different weight -- and the manifest would be quoting two values for
+    one quantity.
+    """
+    manifest = _manifest()
+    robustness = manifest["estimator_robustness"]
+    variants = robustness["variants"]
+
+    assert robustness["frame"]["ranking"] == manifest["frame"]["ranking"]
+    np.testing.assert_allclose(
+        robustness["frame"]["k"], manifest["frame"]["capacity_k"]
+    )
+    np.testing.assert_allclose(
+        variants["ht"]["delta_none"],
+        manifest["headline"]["per_outcome"][
+            robustness["frame"]["outcome"]
+        ]["vs_nobody"],
+        rtol=0.0,
+        atol=1e-12,
+        err_msg=(
+            "the Horvitz-Thompson variant disagrees with the headline "
+            "vs_nobody figure it is supposed to be a second view of"
+        ),
+    )
+
+    scored, mask = _policy_frame_rows()
+    frame = scored.loc[mask]
+    treated = frame["segment"].to_numpy() == config.ARMS["womens"]
+    arm_mean = float(
+        frame[robustness["frame"]["outcome"]].to_numpy(dtype=float)[
+            treated
+        ].mean()
+    )
+    assert variants["hajek"]["v_all"] == arm_mean, (
+        "the committed Hajek v_all is not the realized womens arm mean "
+        "exactly; that equality is the defining property of the ratio "
+        "estimator and the reason it is reported at all"
+    )
+    assert robustness["hajek_v_all_minus_womens_arm_mean"] == 0.0
+    assert robustness["ht_v_all_minus_womens_arm_mean"] != 0.0, (
+        "the Horvitz-Thompson v_all reproduced the arm mean exactly, "
+        "which on a frame whose arms hold different row counts means the "
+        "two estimators have been collapsed into one"
+    )
+
+    for name in ("ht", "hajek", "aipw"):
+        assert (
+            variants[name]["ci_lo"]
+            <= variants[name]["delta_none"]
+            <= variants[name]["ci_hi"]
+        )
+        np.testing.assert_allclose(
+            variants[name]["ci_width"],
+            variants[name]["ci_hi"] - variants[name]["ci_lo"],
+            rtol=0.0,
+            atol=1e-12,
+        )
+        # All three value the SAME policy, so they cannot disagree by
+        # more than a few percent without one of them being wrong.
+        assert abs(
+            variants[name]["delta_none"] - variants["ht"]["delta_none"]
+        ) < 0.05 * abs(variants["ht"]["delta_none"]) + 1e-9, (
+            f"the {name} variant differs from the Horvitz-Thompson value "
+            "by more than 5%; these are three estimators of one quantity"
+        )
