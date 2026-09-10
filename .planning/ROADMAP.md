@@ -127,7 +127,7 @@ Plans:
   4. Committed artifacts (`scored_holdout.parquet`, precomputed bootstrap bands, `ate.json`, `manifest.json`) are small and format-stable, and are sufficient to reproduce every headline number with arithmetic alone — no model file required.
   5. `evaluation.py` and `economics.py` import neither Streamlit nor any file I/O, enforced by a test, so the README's numbers and the app's numbers can never come from different code.
 
-**Plans:** 5/9 plans executed
+**Plans:** 6/9 plans executed
 
 Plans:
 **Wave 0** *(blocking gate — must be the phase's first commit)*
@@ -146,7 +146,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 05-06-PLAN.md — pipeline.policy() and the four committed artifacts: policy_curve.parquet, policy_bands.parquet, cost_sweep.parquet and manifest.json (wave 3)
+- [x] 05-06-PLAN.md — pipeline.policy() and the four committed artifacts: policy_curve.parquet, policy_bands.parquet, cost_sweep.parquet and manifest.json (wave 3)
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -210,7 +210,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
-| 5. Business & Policy Layer | 5/9 | In Progress|  |
+| 5. Business & Policy Layer | 6/9 | In Progress|  |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 

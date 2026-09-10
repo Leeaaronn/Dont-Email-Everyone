@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-09-10T03:25:48.816Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-09-10T04:00:21.603Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 35
-  completed_plans: 31
+  completed_plans: 32
   percent: 57
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Progress: [█████████░] 89%
 | Phase 05 P03 | 19min | 3 tasks | 4 files |
 | Phase 05 P05 | 8min | 2 tasks | 2 files |
 | Phase 05 P04 | 12min | 3 tasks | 2 files |
+| Phase 05 P06 | 22min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -168,11 +169,11 @@ Recent decisions affecting current work:
 - [Phase 04-04]: real-data model tests rebuild each arm frame with frames.build_frame rather than reading the committed arm Parquets, whose reset RangeIndex makes X.loc[frame.index] select the wrong 42,613 rows -- the plan's own acceptance snippet carried the bug 04-01 had already recorded
 - [Phase 04-04]: mean predicted uplift on the mens visit holdout measures +0.0800, not the +0.0754 the plan quotes; the mens visit ATE is +0.0766 full-arm / +0.0727 holdout and a T-learner's mean prediction is not constrained to equal either, so this is a stale research figure rather than a defect
 - [Phase 04-04]: UPLIFT-01 left Pending for the third time -- 04-04 ships the T-learner machinery and proves it on both arms real data, but fits and persists no per-arm model; the requirement becomes Complete in 04-05, following the 04-01/04-02/04-03 precedent
-- [Phase ?]: [Phase 04-05]: the D-22 magnitude band is 3 x the per-cell seed-to-seed SD MEASURED in this repo (20 split draws, 120 cell-seed observations), never a relative percentage -- PITFALLS' 0.0769-0.0789 visit-only band is named as REJECTED in both models.py and tests/test_models.py so a future agent reading a calibration failure cannot restore it
-- [Phase ?]: [Phase 04-05]: the plan's 'band/ATE ratios span more than an order of magnitude' does not reproduce -- measured 6.41x, so test_calibration_band_is_absolute_not_relative asserts >4x and adds a sharper measured claim: a single 5% relative bar fails 4 of the 6 cells at the committed split, reproducing 04-RESEARCH Q7's median-seed finding
-- [Phase ?]: [Phase 04-05]: the D-21 propensity maximum measures 0.7635 here (mens/spend against m1), not the 0.879 04-RESEARCH quotes at the primary seed -- Q7's figure predates the committed split column; same cell, same base model, gate still passes, and both numbers are recorded beside the constant
-- [Phase ?]: [Phase 04-05]: cross_arm_metrics returns FLAT per-arm keys (mens_min, womens_negative_fraction, ...) rather than a nested by-arm dict, because pipeline._jsonable coerces scalars only and would stringify a nested mapping
-- [Phase ?]: [Phase 04-05]: UPLIFT-01 left Pending for the fourth time -- 04-05 ships three diagnostics and fits no per-arm model of its own; 04-04's summary predicted completion here, but the requirement asks for models per arm and those are fit and persisted by pipeline.train() in 04-07
+- [Phase 04-05]: the D-22 magnitude band is 3 x the per-cell seed-to-seed SD MEASURED in this repo (20 split draws, 120 cell-seed observations), never a relative percentage -- PITFALLS' 0.0769-0.0789 visit-only band is named as REJECTED in both models.py and tests/test_models.py so a future agent reading a calibration failure cannot restore it
+- [Phase 04-05]: the plan's 'band/ATE ratios span more than an order of magnitude' does not reproduce -- measured 6.41x, so test_calibration_band_is_absolute_not_relative asserts >4x and adds a sharper measured claim: a single 5% relative bar fails 4 of the 6 cells at the committed split, reproducing 04-RESEARCH Q7's median-seed finding
+- [Phase 04-05]: the D-21 propensity maximum measures 0.7635 here (mens/spend against m1), not the 0.879 04-RESEARCH quotes at the primary seed -- Q7's figure predates the committed split column; same cell, same base model, gate still passes, and both numbers are recorded beside the constant
+- [Phase 04-05]: cross_arm_metrics returns FLAT per-arm keys (mens_min, womens_negative_fraction, ...) rather than a nested by-arm dict, because pipeline._jsonable coerces scalars only and would stringify a nested mapping
+- [Phase 04-05]: UPLIFT-01 left Pending for the fourth time -- 04-05 ships three diagnostics and fits no per-arm model of its own; 04-04's summary predicted completion here, but the requirement asks for models per arm and those are fit and persisted by pipeline.train() in 04-07
 - [Phase 04-06]: PERMUTATION_SHUFFLES is a separate literal from evaluation.py's null-band resample count, and models.py names that constant NON-GREPPABLY because an acceptance criterion greps the module for it and requires 0 -- the 02-03/03-01 rephrase-rather-than-drop precedent
 - [Phase 04-06]: the count-preservation test is named test_permutation_preserves_counts_of_treated_and_control, not the plan's ..._treated_and_control_counts, because pytest -k matches a SUBSTRING of the item name and the plan's own name does not contain 'preserves_counts' -- with no test selected pytest exits 5, so 04-VALIDATION's selector would have failed against correct code
 - [Phase 04-06]: the refit null measures 1.32x the score-shuffle null's SD on mens/visit at R=30 (0.001928 against 0.001459, same centre) -- a NEW measurement nothing quotes, so the test asserts >1.1 and carries the measured value rather than pinning it
@@ -203,6 +204,9 @@ Recent decisions affecting current work:
 - [Phase 05]: optimal_k resolves ties to the smallest k, guaranteed by a strictly-increasing-grid guard rather than by np.argmax alone — The cheapest campaign among equally profitable ones. On a descending grid np.argmax's first-maximum behaviour would silently invert the stated rule, so _guard_curve makes the docstring true.
 - [Phase 05]: 05-04: POLICY_WEIGHT = 2, derived from the two-arm womens+control frame, never transcribed from criterion 1's design 1/3 -- a 3 inflates V(email everyone) by 50%
 - [Phase 05]: 05-04: per_targeted divides by the realized int(n*k) count, not the exact k; both figures recorded (spend +0.930401 vs +0.930313 at k=0.20)
+- [Phase 05]: 05-06: One three-level bootstrap draw over all 32,001 holdout rows serves every band in Phase 5; masking is position-preserving, so the shared control is drawn once per replicate
+- [Phase 05]: 05-06: manifest.json headline totals reproduce by hand from scored_holdout.parquet to 3.2e-12 -- criterion 4 demonstrated, not asserted
+- [Phase 05]: 05-06: R = 500 kept for the committed bands after an R = 2000 check on the spend band: endpoints move up to 7.6 percent in width but no published verdict changes
 
 ### Pending Todos
 
@@ -227,6 +231,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T03:25:48.808Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-09-10T03:59:58.389Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None
