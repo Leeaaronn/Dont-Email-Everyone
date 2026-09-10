@@ -1480,3 +1480,73 @@ def test_policy_report_has_no_classification_metric_headline():
             "customers it selected, and a classification-family figure "
             "would be the wrong yardstick presented as a result."
         )
+
+
+def test_policy_report_cites_only_pytest_nodes_that_exist():
+    """ROADMAP criteria 2 and 5, discharged by a node that must resolve.
+
+    Sections 7 and 15 discharge two criteria by NAMING the test that
+    enforces each one, which is the same move
+    test_policy_report_keeps_the_regenerate_line_true makes for the
+    regenerate line: a committed document that cites an enforcement
+    mechanism has made a claim, and the claim stops being true the moment
+    somebody renames the test. Renaming is the likely event here -- these
+    are five ordinary test names in three files, and nothing else in the
+    suite would notice.
+
+    Every `tests/<file>.py::<name>` string in the write-up is extracted and
+    checked, so a section added later is covered without editing this test.
+    The node names are DERIVED from the prose rather than listed here; a
+    hardcoded list would turn this into a second copy of the document that
+    also needs maintaining.
+    """
+    text = _policy_report_text()
+    cited = sorted(set(re.findall(r"tests/(\w+\.py)::(\w+)", text)))
+
+    assert len(cited) >= 5, (
+        f"only {len(cited)} pytest nodes are cited in the write-up "
+        f"({cited}). Sections 7 and 15 discharge ROADMAP criteria 2 and 5 "
+        "by naming the tests that enforce them; if the citations have gone, "
+        "so has the discharge."
+    )
+
+    for filename, node in cited:
+        path = config.ROOT / "tests" / filename
+        assert path.exists(), (
+            f"the write-up cites tests/{filename}::{node} and "
+            f"tests/{filename} does not exist."
+        )
+        assert f"def {node}(" in path.read_text(encoding="utf-8"), (
+            f"the write-up cites tests/{filename}::{node}, which that file "
+            "no longer defines. Either the test was renamed and the "
+            "document now points at nothing, or it was deleted and a "
+            "ROADMAP criterion the document claims is enforced is not."
+        )
+
+
+def test_policy_report_discharges_criterion_five_for_both_modules():
+    """C5 names two modules, and one of them is easy to forget.
+
+    reports/metric.md discharged this for `evaluation.py` when that was the
+    only pure module in the project. Phase 5 added `economics.py` and Phase
+    6's app imports both, so a discharge that covers only the module with
+    the older precedent leaves the criterion half-met. Both module names are
+    required in the same section, and so is the Streamlit half of the
+    criterion -- the write-up can otherwise satisfy "imports no file I/O"
+    and say nothing about the import the criterion actually names.
+    """
+    flat = _flat(_policy_report_text())
+    section_at = flat.find("ROADMAP criterion 5 requires")
+    assert section_at != -1, (
+        "the write-up never states ROADMAP criterion 5. Phase 6 depends on "
+        "the purity of these two modules and this is the document that "
+        "records it."
+    )
+    section = flat[section_at : section_at + 4000]
+
+    for needle in ("evaluation.py", "economics.py", "Streamlit"):
+        assert needle in section, (
+            f"{needle!r} does not appear in the passage discharging "
+            "criterion 5. The criterion names two modules and one import; "
+            "a discharge that omits any of the three is not a discharge."
+        )
