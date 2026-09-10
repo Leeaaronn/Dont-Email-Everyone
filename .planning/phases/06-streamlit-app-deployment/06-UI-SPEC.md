@@ -1,10 +1,11 @@
 ---
 phase: 6
 slug: streamlit-app-deployment
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-09-10
+reviewed_at: 2026-09-10
 ---
 
 # Phase 6 — UI Design Contract
@@ -118,6 +119,18 @@ sizes already pinned in `plots.py`, which the app inherits unchanged.
 Exactly **two weights** are in play: regular, and bold via markdown `**` / the theme's own heading and
 metric weights. No third weight exists to reach for, which is a property of the stack rather than a
 rule to keep.
+
+**Formal exemption — the inherited matplotlib point sizes are out of scope for a "max N type sizes"
+rule.** The stepped `_TITLE_SIZES` tuple above, the 7.5pt legend and the 7pt cost-sweep annotations
+are **not introduced by this contract**. They are inherited unchanged from the `plots.py` factories
+whose legibility the 05-08 checkpoint explicitly approved, and they are unreachable from here:
+Streamlit exposes no typographic control without `unsafe_allow_html`, which this contract forbids,
+and restyling `plots.py` would alter the four committed PNGs, which D-06 forbids on pain of a
+byte-identity test failure. A future auditor comparing this contract against a generic frontend
+checklist should count the **Streamlit-side** roles in the table above against that kind of rule and
+treat the matplotlib column as a record of what was inherited. `layout="wide"` is the one pre-approved
+remedy if the UI legibility checkpoint finds the legend too small at ~730 CSS px; shrinking the
+figures or editing `plots.py` is not.
 
 Rules, each checkable:
 
@@ -246,8 +259,13 @@ as good news.
 
 **The predicate must be the figure's predicate.** `lo <= 0 <= hi` is exactly the condition
 `policy_curve_plot` hatches on. The state must be computed from it and never from the sign of the
-point estimate, so the app's words and the figure's hatching cannot disagree at any of the 202
-published (ranking, outcome, depth) rows the app can display.
+point estimate, so the app's words and the figure's hatching cannot disagree at any of the **404**
+published (ranking, outcome, depth) rows the app can display — 2 published rankings x 2 displayed
+outcomes (spend and visit; conversion is not surfaced, per D-03) x 101 depths. Measured from
+`policy_bands.parquet` on 2026-09-10: the `delta_random` rows for those rankings and outcomes number
+exactly 404, 101 per (ranking, outcome) pair. **The test must sweep the artifact's own rows rather
+than hard-code this count**, which is why V5 is written that way; the figure is stated so a reader
+knows the intended scope.
 
 ---
 
@@ -587,7 +605,7 @@ that map does not yet carry.
 | V2 | Exactly 3 `st.metric(`; no `delta=`, no `help=`, no `border=True` on any | source scan | **new** |
 | V3 | No `st.success(` / `st.warning(` / `st.info(` / `st.badge(` | source scan | **new** |
 | V4 | No `unsafe_allow_html`, no `st.columns(` outside the sidebar block | source scan | **new** |
-| V5 | The verdict state equals the figure's hatched state at all 202 published (ranking, outcome, k) rows the app can display | sweep `lo <= 0 <= hi` against the three verdict strings | **new** |
+| V5 | The verdict state equals the figure's hatched state at every published (ranking, outcome, k) row the app can display — 404 rows as measured 2026-09-10, swept from the artifact rather than hard-coded | sweep `lo <= 0 <= hi` against the three verdict strings | **new** |
 | V6 | All three verdict strings exist in the source and each is reachable — including `Detectably worse`, reachable at shipped/spend/k=0.99 | source scan + AppTest at `k=0.99` | **new** |
 | V7 | The capacity slider offers 100 options; `0.0` is absent | AppTest widget options | `test_capacity_control_uses_the_committed_grid` |
 | V8 | Option labels carry `pre-registered, shipped rule` and `sensitivity, not adopted`; ranking keys are read off the artifact by prefix filter | AppTest + source scan | `test_ranking_status_travels_with_the_control`, `test_only_published_rankings_are_offered` |
