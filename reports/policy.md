@@ -331,15 +331,16 @@ Regenerate everything from a fresh clone with `python -m dont_email_everyone.pip
 
 ## 15. The two modules the app will import, and what keeps them importable
 
-*Source: `tests/test_evaluation.py::test_evaluation_module_writes_nothing`, `tests/test_economics.py::test_economics_module_writes_nothing`, `tests/test_no_network.py::test_package_does_not_import_streamlit`, and the two public-surface tests named below.*
+*Source: the five tests listed below, of which `05-VALIDATION.md` maps this criterion to the first two; plus the two public-surface tests that keep the third and fourth complete.*
 
 **ROADMAP criterion 5 requires that `evaluation.py` and `economics.py` import neither Streamlit nor any file I/O, enforced by a test, so that the README's numbers and the app's numbers can never come from different code.** `reports/metric.md` discharged the equivalent for `evaluation.py` in its section 7, when that module was the only one in question. Phase 5 added a second pure module, and Phase 6's app will import both, so the property is restated here for the pair.
 
 Both modules are pure: the caller supplies the arrays, nothing reads a path, nothing writes one, and neither module can re-derive a frame from disk and bypass Phase 1's SHA-256 checksum and Pandera gates. `evaluation.py` imports only `dataclasses` and NumPy; `economics.py` imports only `math` and NumPy. The orchestrator in `pipeline.py` is the only component that touches the filesystem.
 
-Three tests enforce it, and none of them is a grep over an import block:
+Five tests enforce it, and only one of them is a token scan:
 
-- **`tests/test_evaluation.py::test_evaluation_module_writes_nothing`** calls all fourteen public functions of `evaluation.py` from an empty temporary directory and asserts the directory is still empty afterwards.
+- **`tests/test_evaluation.py::test_evaluation_module_is_pure`** and **`tests/test_economics.py::test_economics_module_is_pure`** are the two `05-VALIDATION.md` maps this criterion to. Each scans its module's non-comment body for a forbidden list covering file I/O (`to_parquet`, `read_parquet`, `open(`), rendering (`savefig`, `plt.`, `matplotlib`), the Streamlit namespace and the classification-metric family. Comments are stripped before the scan, so a token discussed in a docstring does not fail, and every needle is assembled by concatenation so neither test trips its own check.
+- **`tests/test_evaluation.py::test_evaluation_module_writes_nothing`** calls all fourteen public functions of `evaluation.py` from an empty temporary directory and asserts the directory is still empty afterwards. A token scan can be defeated by an alias; actually calling the code and finding the directory empty cannot.
 - **`tests/test_economics.py::test_economics_module_writes_nothing`** does the same for all four public functions of `economics.py`. Its failure message states the reason directly: the economics core must stay callable on arbitrary in-memory values so that Phase 6's app can call it live without a build step.
 - **`tests/test_no_network.py::test_package_does_not_import_streamlit`** greps every `.py` file in the package for the token `streamlit` and fails on any occurrence, comment included. It is package-wide rather than two-module, so the guarantee is stronger than the criterion asks for: no module the app imports can reach back into the app.
 
