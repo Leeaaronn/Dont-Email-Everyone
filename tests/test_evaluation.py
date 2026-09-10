@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dont_email_everyone import config, evaluation
+from dont_email_everyone import config, economics, evaluation
 
 # The six committed Phase 2 effects, read once at collection time. This is
 # the parametrization source for the cross-implementation endpoint test, so
@@ -2340,3 +2340,356 @@ def test_the_endpoint_cross_check_covers_every_committed_effect():
         for arm in ("mens", "womens")
         for outcome in ("visit", "conversion", "spend")
     }
+
+# --------------------------------------------------------------------------
+# Policy value: the IPW estimator (plan 05-04)
+# --------------------------------------------------------------------------
+
+# The tolerance the weight canary passes at, and the one it must FAIL at
+# with a transcribed 3. Both are bands rather than literals: the point
+# estimate is a property of the committed artifact, and a regenerated
+# artifact should move it a little rather than break a pinned digit.
+#
+# Measured in this working tree against the committed scored_holdout: with
+# weight 2 the value of "email everyone" on spend is 1.148433 against a
+# womens-arm mean of 1.146232, 0.19% high -- the two differ only because
+# the arms are 10,694 / 10,653 rather than exactly equal. With weight 3 it
+# is 1.722650, 50.29% high. There is no tolerance that admits one and the
+# other, which is what makes this a canary rather than a smoke check.
+WEIGHT_CANARY_TOLERANCE = 0.005
+WEIGHT_CANARY_FLOOR = 0.40
+
+# The implied ATE cross-check runs against `ate.parquet`'s womens/spend
+# effect, which was fitted on the FULL 42,693-row arm frame while this
+# estimator sees only the 21,347 holdout rows. They therefore agree up to
+# sampling error and not by identity: measured 0.422347 here against
+# 0.424412 committed, a gap of 0.49%. 10% is roughly 20x that gap and
+# still an order of magnitude tighter than the 49% a weight of 3 produces.
+IMPLIED_ATE_TOLERANCE = 0.10
+
+# R for the band tests. The properties asserted below -- ordering,
+# determinism under a repeated matrix, and containment of the point
+# estimate -- are properties of the construction, not of the tail
+# resolution, and each replicate is a full 21,347-row sort.
+POLICY_BAND_REPLICATES = 64
+POLICY_BAND_CONTAINMENT = 0.90
+
+
+def _womens_policy_frame():
+    """Return the committed womens+control holdout rows.
+
+    The frame is DERIVED with a mask on `segment`, never sliced to a typed
+    row count, so a regenerated `scored_holdout.parquet` moves it rather
+    than silently disagreeing with a literal -- the disposition plan 05-02
+    established for `_womens_treatment` above.
+
+    It is the womens+control rows and not all 32,001 because
+    `uplift_womens_visit` is nan on every mens holdout row, so the mens
+    rows carry no ranking to be targeted by. Conditioning on
+    `segment != mens` conditions on a randomly assigned variable, so the
+    two remaining arms stay comparable; it is also what makes the
+    Horvitz-Thompson weight 2 rather than 3 (CONTEXT.md D-16).
+    """
+    frame = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    return frame[frame["segment"] != config.ARMS["mens"]]
+
+
+def _policy_inputs(outcome="spend"):
+    """Return `(score, treatment, outcome)` for the real womens policy."""
+    frame = _womens_policy_frame()
+    return (
+        frame["uplift_womens_visit"].to_numpy(dtype=float),
+        (frame["segment"] == config.ARMS["womens"]).to_numpy().astype("int64"),
+        frame[outcome].to_numpy(dtype=float),
+    )
+
+
+def _committed_womens_spend_effect():
+    """The committed womens/spend ATE, read from the artifact."""
+    effects = pd.read_parquet(config.PROCESSED / "ate.parquet")
+    row = effects[(effects["arm"] == "womens") & (effects["outcome"] == "spend")]
+    return float(row["effect"].iloc[0])
+
+
+def _constant_effect_frame(n=2000, effect=0.75, seed=17):
+    """A two-arm frame whose treatment effect is a known constant.
+
+    Scores are `rng.normal`, so they are distinct with probability 1 and
+    the curve is exactly row-order invariant on this frame -- the first
+    tier of `evaluation.py` decision (c), which is the tier the invariance
+    test below is entitled to assert bit-identically.
+    """
+    rng = np.random.default_rng(seed)
+    treatment = np.zeros(n, dtype="int64")
+    treatment[: n // 2] = 1
+    rng.shuffle(treatment)
+    outcome = rng.normal(size=n) + effect * treatment
+    return rng.normal(size=n), treatment, outcome
+
+
+def test_policy_value_curve_endpoints():
+    """The four closed forms that fix what each contrast means.
+
+    Every one of them is exact rather than approximate, and that is the
+    point: `delta_none(0)`, `delta_all(1)` and both ends of
+    `delta_random` are structural zeros of the estimator, so any of them
+    coming back as 1e-17 would mean the arithmetic had been rearranged
+    into a form that accumulates error where none is possible.
+
+    `delta_none(1)` is the one genuinely computed number here, and it must
+    be the frame's own Horvitz-Thompson IPW average treatment effect --
+    targeting everybody IS the treated arm, so the policy value at k=1 has
+    nowhere else to be.
+    """
+    score, treatment, outcome = _constant_effect_frame()
+    curve = evaluation.policy_value_curve(score, treatment, outcome)
+
+    n = outcome.size
+    treated = treatment == 1
+    ht_ate = (
+        evaluation.POLICY_WEIGHT
+        * (outcome[treated].sum() - outcome[~treated].sum())
+        / n
+    )
+
+    assert curve.delta_none[0] == 0.0, (
+        "targeting nobody must have exactly zero value against emailing "
+        "nobody; a non-zero origin means the k=0 column of the cumulative "
+        "sums is not the literal zero it is prepended as."
+    )
+    assert curve.delta_all[-1] == 0.0, (
+        "targeting everybody IS emailing everybody, so the contrast "
+        "against a blanket send is exactly zero at k=1."
+    )
+    assert curve.delta_none[-1] == pytest.approx(ht_ate, rel=1e-12), (
+        f"delta_none(1) is {curve.delta_none[-1]!r} against a frame IPW ATE "
+        f"of {ht_ate!r}. The policy value at full coverage is the treated "
+        "arm's own IPW mean; if these disagree the estimator is not the "
+        "Horvitz-Thompson estimator it claims to be."
+    )
+    assert curve.delta_all[0] == -(curve.v_all - curve.v_none), (
+        "delta_all(0) must be exactly minus the incremental outcome of the "
+        "whole population -- the k=0 case of the identity that makes every "
+        "vs-everyone contrast non-positive under a positive ATE (D-08a)."
+    )
+    assert curve.delta_random[0] == 0.0 and curve.delta_random[-1] == 0.0, (
+        f"delta_random ends are {curve.delta_random[0]!r} and "
+        f"{curve.delta_random[-1]!r}, both of which must be exact zeros: a "
+        "random send of size 0 and a random send of the whole list are the "
+        "same two policies the targeted send collapses to at those k."
+    )
+
+
+def test_policy_weight_is_the_conditioned_design_propensity():
+    """T-05-10: the canary for a transcribed IPW weight.
+
+    ROADMAP criterion 1 was written as "known-propensity (1/3) IPW", and
+    1/3 is the DESIGN propensity across all three arms. This estimator
+    runs on the two-arm womens+control frame, where the conditional
+    propensity is 1/2 and the Horvitz-Thompson weight is therefore 2.
+    Transcribing the 3 is a silent 50% inflation of every dollar figure in
+    the phase, and it raises nothing.
+
+    Two independent cross-checks, both read from committed artifacts
+    rather than typed: the value of emailing everyone must reproduce the
+    womens arm's own mean spend, and the implied ATE must land on
+    `ate.parquet`'s womens/spend effect. Reading an artifact from a unit
+    test has precedent here -- the endpoint cross-check above parametrizes
+    over `ate.json` at collection time.
+    """
+    score, treatment, spend = _policy_inputs("spend")
+    arm_mean = float(spend[treatment == 1].mean())
+
+    right = evaluation.policy_value_curve(score, treatment, spend)
+    wrong = evaluation.policy_value_curve(score, treatment, spend, weight=3.0)
+
+    assert right.weight == 2.0, (
+        f"POLICY_WEIGHT is {right.weight!r}; on the two-arm frame the "
+        "Horvitz-Thompson weight is 1 / P(A = womens | A in {womens, "
+        "control}) = 2."
+    )
+    assert right.v_all == pytest.approx(arm_mean, rel=WEIGHT_CANARY_TOLERANCE), (
+        f"V(email everyone) is {right.v_all!r} against a womens-arm mean "
+        f"spend of {arm_mean!r} measured on the same rows. Emailing "
+        "everyone is the treated arm; the IPW value of that policy has to "
+        "reproduce the arm's own average."
+    )
+    assert wrong.v_all > arm_mean * (1.0 + WEIGHT_CANARY_FLOOR), (
+        f"with weight 3 on this frame V(email everyone) is {wrong.v_all!r} "
+        f"against an arm mean of {arm_mean!r}, which is not the gross "
+        "inflation it must be. If a transcribed 3 no longer fails here, "
+        "this canary has stopped guarding D-16."
+    )
+
+    committed = _committed_womens_spend_effect()
+    implied = right.v_all - right.v_none
+    assert implied == pytest.approx(committed, rel=IMPLIED_ATE_TOLERANCE), (
+        f"the implied ATE is {implied!r} against ate.parquet's committed "
+        f"womens/spend effect of {committed!r}. The two are fitted on "
+        "different row sets and agree only up to sampling error, but a "
+        "wrong weight moves the first by ~50% and cannot stay inside this "
+        "band."
+    )
+    assert (wrong.v_all - wrong.v_none) != pytest.approx(
+        committed, rel=IMPLIED_ATE_TOLERANCE
+    ), (
+        "the weight-3 implied ATE also agrees with ate.parquet, so this "
+        "cross-check cannot distinguish the two weights and proves nothing."
+    )
+
+
+def test_policy_curve_uses_the_truncation_convention():
+    """`int(n * k)` everywhere, and the same count `economics` reports.
+
+    One row of disagreement between the report and the app over a rounding
+    rule is the failure this prevents: `economics.emails_at_capacity` is
+    the function that tells a marketer how many emails a capacity buys,
+    and if it and the estimator disagree by a row then the published total
+    cannot be recovered by multiplying the per-targeted figure back up.
+    """
+    score, treatment, spend = _policy_inputs("spend")
+    curve = evaluation.policy_value_curve(score, treatment, spend)
+    n = spend.size
+
+    np.testing.assert_array_equal(
+        curve.n_targeted,
+        (n * curve.grid).astype(int),
+        err_msg=(
+            "n_targeted is not int(n * k). Rounding instead of truncating "
+            "would move the selection by a row at most values of k and by "
+            "nothing at all at k = 0.20, so a smoke check at the anchor "
+            "would never see it."
+        ),
+    )
+    assert curve.n_targeted[-1] == n
+    assert curve.n_targeted[0] == 0
+
+    anchor = int(
+        np.flatnonzero(np.isclose(curve.grid, economics.HEADLINE_CAPACITY))[0]
+    )
+    assert curve.n_targeted[anchor] == economics.emails_at_capacity(
+        n, economics.HEADLINE_CAPACITY
+    ), (
+        f"at the headline capacity the estimator targets "
+        f"{curve.n_targeted[anchor]} rows while economics.emails_at_capacity "
+        f"reports {economics.emails_at_capacity(n, economics.HEADLINE_CAPACITY)}."
+    )
+
+
+def test_delta_random_is_the_capacity_comparator():
+    """D-08a's headline contrast, and the sign identity behind it.
+
+    `delta_random` is the targeted send minus a RANDOM send of the same
+    size. A random send of fraction k delivers k times the incremental
+    outcome of a blanket send, so the comparator is the chord and the
+    contrast is the elementwise difference asserted here.
+
+    It is NOT the Qini curve minus its own random chord, and no assertion
+    in this file may claim it is. The two are close -- measured
+    correlation 0.9997 over the 101-point grid on the real frame -- and
+    genuinely different, because `qini_curve` normalizes per treated head
+    with a cumulative ratio correction while this carries a fixed weight
+    and a per-population-customer denominator.
+
+    The second identity, `delta_all == delta_none - delta_none[-1]`, is
+    the arithmetic D-08a rests on: the contrast against a blanket send is
+    MINUS the incremental outcome of the untargeted remainder. Beating a
+    blanket send at zero cost therefore requires a segment that email
+    measurably harms, which the Hillstrom womens arm does not contain.
+    """
+    score, treatment, spend = _policy_inputs("spend")
+    curve = evaluation.policy_value_curve(score, treatment, spend)
+
+    np.testing.assert_array_equal(
+        curve.delta_random,
+        curve.delta_none - curve.grid * (curve.v_all - curve.v_none),
+        err_msg="delta_random is not delta_none minus the random chord.",
+    )
+    np.testing.assert_allclose(
+        curve.delta_all,
+        curve.delta_none - curve.delta_none[-1],
+        rtol=0.0,
+        atol=1e-12,
+        err_msg=(
+            "delta_all is not minus the incremental outcome of the bottom "
+            "(1-k); the sign identity D-08a cites has been broken."
+        ),
+    )
+
+
+def test_policy_curve_is_invariant_to_input_row_order():
+    """Distinct scores: exact, per `evaluation.py` decision (c) tier one.
+
+    Asserted on the synthetic frame rather than the real one deliberately.
+    The real `uplift_womens_visit` column carries ties on 13.0% of its
+    rows (measured), and the seeded shuffle is POSITIONAL, so a reordered
+    input reshuffles each tie group differently and the curve moves inside
+    the groups. Decision (c) states that qualifier explicitly and forbids
+    the word "invariant" without it.
+    """
+    score, treatment, outcome = _constant_effect_frame()
+    curve = evaluation.policy_value_curve(score, treatment, outcome)
+
+    order = np.random.default_rng(404).permutation(score.size)
+    shuffled = evaluation.policy_value_curve(
+        score[order], treatment[order], outcome[order]
+    )
+
+    for field in (
+        "grid",
+        "n_targeted",
+        "v_pi",
+        "delta_none",
+        "delta_all",
+        "delta_random",
+        "per_targeted",
+    ):
+        np.testing.assert_array_equal(
+            getattr(curve, field),
+            getattr(shuffled, field),
+            err_msg=(
+                f"`{field}` moved when the input rows were permuted at a "
+                "fixed seed. With distinct scores the descending sort "
+                "produces the same ordering of (t, y) whatever the seeded "
+                "pre-shuffle did, so this tier is exact."
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutate, needle",
+    [
+        (lambda s, t, y: (s, np.full(t.size, 2), y), "admissible"),
+        (lambda s, t, y: (np.where(np.arange(s.size) == 3, np.nan, s), t, y), "nan"),
+        (lambda s, t, y: (s, t, np.where(np.arange(y.size) == 5, np.nan, y)), "nan"),
+    ],
+    ids=["three-valued-treatment", "nan-score", "nan-outcome"],
+)
+def test_policy_value_curve_inherits_the_input_guards(mutate, needle):
+    """The shared `_guard_inputs` gates, reached through the new entry point.
+
+    A nan score sinks a customer to the bottom of the targeting list
+    silently and a nan outcome poisons a cumulative sum from its position
+    onward; both would arrive as a nan in a published dollar figure rather
+    than as an error (T-05-12).
+    """
+    score, treatment, outcome = _constant_effect_frame(n=200)
+    with pytest.raises(ValueError, match=needle):
+        evaluation.policy_value_curve(*mutate(score, treatment, outcome))
+
+
+@pytest.mark.parametrize(
+    "bad_weight", [0.0, -2.0, np.nan, np.inf], ids=["zero", "negative", "nan", "inf"]
+)
+def test_policy_value_curve_rejects_an_unusable_weight(bad_weight):
+    """A weight is a reciprocal propensity; it is finite and positive.
+
+    A zero weight reports every policy as worth nothing, a negative one
+    flips the sign of the recommendation, and a nan or an infinity travels
+    through every contrast into the band without raising anything.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=200)
+    with pytest.raises(ValueError, match="weight"):
+        evaluation.policy_value_curve(
+            score, treatment, outcome, weight=bad_weight
+        )
