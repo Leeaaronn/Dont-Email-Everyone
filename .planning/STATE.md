@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-08-PLAN.md (figure legibility checkpoint approved, no changes)
-last_updated: "2026-09-10T07:19:09.155Z"
+stopped_at: Completed 05-09-PLAN.md and CLOSED Phase 05 (write-up accuracy checkpoint: changes requested across two rounds, all applied)
+last_updated: "2026-09-10T12:55:00.000Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 35
-  completed_plans: 34
-  percent: 57
+  completed_plans: 35
+  percent: 71
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 05 — business-policy-layer
+**Current focus:** Phase 06 — streamlit-app (Phase 05 closed)
 
 ## Current Position
 
-Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 9 of 9
-Status: Ready to execute
+Phase: 05 (business-policy-layer) — COMPLETE
+Plan: 9 of 9 executed
+Status: Phase closed; all five ROADMAP criteria discharged (see 05-09-SUMMARY.md close-out). Next: Phase 06 planning.
 Last activity: 2026-09-10
 
-Progress: [██████████] 97%
+Progress: [██████████] 100% of Phase 05
 
 ## Performance Metrics
 

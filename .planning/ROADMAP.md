@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Experiment Validity** - Balance check and ATE with intervals, proving randomization held before any modeling (completed 2026-09-05)
 - [x] **Phase 3: Uplift Evaluation Metric** - Hand-rolled Qini / uplift-at-k, unit-tested against synthetic oracles before any model exists (completed 2026-09-06)
 - [x] **Phase 4: Uplift Modeling** - T-learner per arm, evaluated honestly on holdout against a permutation null and a response-model baseline (completed 2026-09-09)
-- [ ] **Phase 5: Business & Policy Layer** - Policy-value estimate with intervals, cost/margin framing, and the committed artifacts the app reads
+- [x] **Phase 5: Business & Policy Layer** - Policy-value estimate with intervals, cost/margin framing, and the committed artifacts the app reads
 - [ ] **Phase 6: Streamlit App & Deployment** - Thin read-only threshold app, live on Community Cloud
 - [ ] **Phase 7: Documentation & Delivery** - Non-technical README whose numbers come from the finished pipeline
 
@@ -127,7 +127,7 @@ Plans:
   4. Committed artifacts (`scored_holdout.parquet`, precomputed bootstrap bands, `ate.json`, `manifest.json`) are small and format-stable, and are sufficient to reproduce every headline number with arithmetic alone — no model file required.
   5. `evaluation.py` and `economics.py` import neither Streamlit nor any file I/O, enforced by a test, so the README's numbers and the app's numbers can never come from different code.
 
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans executed
 
 Plans:
 **Wave 0** *(blocking gate — must be the phase's first commit)*
@@ -158,7 +158,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5)*
 
-- [ ] 05-09-PLAN.md — reports/policy.md and its twelve assertions, with a blocking accuracy checkpoint (wave 6)
+- [x] 05-09-PLAN.md — reports/policy.md and its twelve assertions, with a blocking accuracy checkpoint (wave 6)
 
 ### Phase 6: Streamlit App & Deployment
 
