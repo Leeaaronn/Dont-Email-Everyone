@@ -654,6 +654,134 @@ def tie_diagnostics(score) -> dict:
     }
 
 
+def stratified_indices(
+    labels,
+    n_resamples: int = BOOTSTRAP_BAND_RESAMPLES,
+    seed: int = 20260902,
+    *,
+    level_order=None,
+):
+    """Return an `(n_resamples, n)` int32 matrix of stratified positions.
+
+    The draw engine `bootstrap_indices` delegates to, generalized from two
+    arms to any number of them (D-14). Row `r` is one complete resample,
+    drawn WITH REPLACEMENT, of the row positions `0 .. n - 1`, with the
+    draws taken separately within each level, so every replicate carries
+    exactly the per-level counts the randomized design produced.
+
+    POSITION-PRESERVING, exactly as the two-arm case is:
+
+        np.array_equal(labels[out[r]], labels)
+
+    holds for every `r`, because each column is filled from its own level's
+    index pool. `bootstrap_indices` below argues that property, the `int32`
+    choice and the IN-PROCESS REUSE INFRASTRUCTURE disposition at length;
+    all three carry across unchanged and are deliberately not restated
+    here. The measured three-level case: `(500, 32001)` int32 is 64.0 MB
+    and builds in 0.13 s, against Streamlit Community Cloud's ~690 MB
+    envelope, so the Phase 6 app must not call this function either.
+
+    `level_order` IS THE SEQUENCE IN WHICH THE LEVELS CONSUME THE RNG
+    STREAM, and changing it changes the matrix. When `None` it defaults to
+    `np.unique(labels)`, which is ascending. When given it must be a
+    permutation of the observed levels or a `ValueError` names both sets.
+    Reversing the order on the real 21,347-row womens column moves 99.991%
+    of the cells (measured, R=500, seed 20260902) -- which is why
+    `bootstrap_indices` pins `(1, 0)` explicitly instead of accepting the
+    ascending default.
+
+    PHASE 5 AND PHASE 6 USE ONE THREE-LEVEL MATRIX over all 32,001 holdout
+    rows as the single project-wide draw. Because it is position-preserving,
+    masking its columns by the original `segment` yields exactly the
+    womens+control columns and exactly the mens+control columns, and within
+    a replicate the control columns are elementwise identical between the
+    two masks. That is ROADMAP criterion 2 expressed as a construction: the
+    shared control group is drawn ONCE per replicate rather than once per
+    arm, so the correlation between the two arms survives into their
+    difference instead of being thrown away.
+
+    THE THREE-LEVEL DRAWS ARE NOT THE TWO-LEVEL DRAWS, and that is a
+    decision rather than a surprise. A three-level matrix consumes the
+    stream in three chunks, so the womens columns inside it differ from
+    what `bootstrap_indices(womens_treatment, 500, 20260902)` returns. The
+    phase picks one matrix and uses it everywhere. Phase 4's already
+    published Qini bands are left alone: their seed is recorded, and a band
+    is a figure rather than a persisted column, so nothing downstream reads
+    those bands expecting these draws.
+    """
+    labels = np.asarray(labels)
+
+    if labels.ndim != 1:
+        raise ValueError(
+            f"`labels` has shape {labels.shape}; it must be 1-D. A 2-D "
+            "array would be flattened by np.flatnonzero and the resulting "
+            "index matrix would address a population that is not one row "
+            "per customer."
+        )
+    if labels.size == 0:
+        raise ValueError(
+            "`labels` is empty; there are no row positions to resample."
+        )
+    if not isinstance(n_resamples, (int, np.integer)) or n_resamples < 1:
+        raise ValueError(
+            f"`n_resamples` is {n_resamples!r}; it must be an integer of at "
+            "least 1. A zero or negative count returns a matrix with no "
+            "rows, and the percentile of an empty replicate stack is nan -- "
+            "a band that renders as nothing rather than as an error."
+        )
+    if labels.size > np.iinfo(np.int32).max:
+        raise ValueError(
+            f"`labels` holds {labels.size} rows, above the int32 index "
+            f"ceiling of {np.iinfo(np.int32).max}. The matrix dtype is "
+            "int32 to halve its memory; addressing this many rows would "
+            "wrap around to negative positions and silently resample the "
+            "wrong customers."
+        )
+
+    levels = np.unique(labels)
+    if levels.size < 2:
+        raise ValueError(
+            f"`labels` holds the single distinct level {levels.tolist()}; "
+            "stratifying needs at least 2. A one-level column means the arm "
+            "coding was lost upstream, and the matrix would be an "
+            "unstratified bootstrap wearing a stratified name."
+        )
+
+    if level_order is None:
+        order = levels
+    else:
+        order = np.asarray(level_order)
+        if order.ndim != 1 or not np.array_equal(np.sort(order), levels):
+            raise ValueError(
+                f"`level_order` is {order.tolist()!r} but the levels "
+                f"observed in `labels` are {levels.tolist()!r}; it must be "
+                "a permutation of them. A level missing from the order "
+                "leaves its columns UNWRITTEN in an np.empty buffer -- "
+                "uninitialized memory read back as row positions -- and a "
+                "level named twice draws it twice, overwriting the first "
+                "draw and consuming the stream a third time."
+            )
+
+    n_resamples = int(n_resamples)
+    # Seeded ONCE outside the loop, not per level and not per replicate:
+    # the whole matrix is then a single reproducible stream
+    # (coverage.py's empirical_coverage_table, same reasoning). It is also
+    # why `level_order` is load-bearing -- the levels share one stream and
+    # therefore consume it in sequence.
+    rng = np.random.default_rng(seed)
+    out = np.empty((n_resamples, labels.size), dtype=np.int32)
+    for value in order:
+        pos = np.flatnonzero(labels == value)
+        # `replace=True` is the bootstrap. Without it this becomes a
+        # within-level permutation, every replicate is the original sample
+        # in a different order, and the band collapses to zero width while
+        # still returning a plausible-looking triple.
+        out[:, pos] = rng.choice(
+            pos, size=(n_resamples, pos.size), replace=True
+        )
+    return out
+
+
 def bootstrap_indices(treatment, n_resamples: int = 500, seed: int = 20260902):
     """Return an `(n_resamples, n)` int32 matrix of arm-stratified positions.
 
@@ -714,6 +842,15 @@ def bootstrap_indices(treatment, n_resamples: int = 500, seed: int = 20260902):
     from a single stream seeded once, `coverage.empirical_coverage_table`'s
     precedent, so adding a replicate cannot silently re-use another
     replicate's draws.
+
+    THE DRAWS THEMSELVES NOW COME FROM `stratified_indices` (D-14), which
+    generalizes the loop below to any number of levels for Phase 5's
+    cross-arm work. This function NARROWS rather than widens: all five
+    guards above stay here, so a three-valued column still raises
+    `_guard_treatment`'s Pitfall-1 message from the wrapper rather than
+    being quietly accepted by the general engine. The delegation is
+    bit-identical, and `test_bootstrap_indices_unchanged_by_the_refactor`
+    pins it against a frozen copy of the pre-refactor loop.
     """
     treatment = np.asarray(treatment)
 
@@ -746,22 +883,19 @@ def bootstrap_indices(treatment, n_resamples: int = 500, seed: int = 20260902):
 
     _guard_treatment(treatment)
 
-    n_resamples = int(n_resamples)
-    # Seeded ONCE outside the loop, not per arm and not per replicate: the
-    # whole matrix is then a single reproducible stream
-    # (coverage.py's empirical_coverage_table, same reasoning).
-    rng = np.random.default_rng(seed)
-    out = np.empty((n_resamples, treatment.size), dtype=np.int32)
-    for value in (1, 0):
-        pos = np.flatnonzero(treatment == value)
-        # `replace=True` is the bootstrap. Without it this becomes a
-        # within-arm permutation, every replicate is the original sample in
-        # a different order, and the band collapses to zero width while
-        # still returning a plausible-looking triple.
-        out[:, pos] = rng.choice(
-            pos, size=(n_resamples, pos.size), replace=True
-        )
-    return out
+    # `level_order=(1, 0)` -- TREATED ARM FIRST -- is load-bearing, not
+    # stylistic, and this literal is the only thing holding it. The levels
+    # share one seeded stream and consume it in sequence, so the order is
+    # the draw. `stratified_indices` defaults to `np.unique` order, which is
+    # ASCENDING, and consuming the stream control-first instead moves
+    # 99.991% of the cells on the real 21,347-row womens column (measured
+    # at R=500, seed 20260902). Every Qini band and every uplift-at-k
+    # figure Phase 3 and Phase 4 committed came out of the (1, 0) stream.
+    # `test_bootstrap_indices_unchanged_by_the_refactor` pins that against
+    # a frozen copy of this loop as it stood before plan 05-02.
+    return stratified_indices(
+        treatment, n_resamples, seed, level_order=(1, 0)
+    )
 
 
 def _guard_band_grid(n_grid, level) -> None:
