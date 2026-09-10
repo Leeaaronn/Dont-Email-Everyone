@@ -1023,6 +1023,11 @@ Everything else in this document was executed against this repository or read di
 
 ## Open Questions
 
+> **All three questions below are RESOLVED.** They are left as written — the question, what was known
+> and what the research recommended — with a `RESOLVED` annotation appended to each naming where the
+> answer was actually decided and where it is implemented. Back-annotated 2026-09-10 during plan
+> revision. Nothing above the annotation has been rewritten.
+
 1. **Does the app surface the versus-everyone contrast, and where?**
    - What we know: APP-01 and ROADMAP criterion 1 both ask for it; `reports/policy.md` §6 publishes
      it; the artifact carries it as `delta_all`; D-08a says it is not the headline; and on the
@@ -1032,6 +1037,14 @@ Everything else in this document was executed against this repository or read di
      from §6 ("beating a blanket send at zero marginal cost requires a segment email measurably
      harms; this experiment does not contain one"). That satisfies the requirement's letter without
      making a negative number look like the answer. Worth confirming with the user during planning.
+   - **RESOLVED — `06-UI-SPEC.md` § "Open Questions, Answered → Q1".** Not a secondary metric: the
+     contrast appears in the element-12 `st.table` as the `vs emailing everyone` column, with its
+     interval, at the selected depth, and **nowhere else**. That is stronger than the recommendation
+     above — a table cell is not an `st.metric` and `st.metric` is source-capped at three, so
+     `delta_all` cannot acquire headline weight by construction rather than by discipline. The §6
+     sentence this question asked about is element 14, adjacent to the table. Implemented in
+     `06-06-PLAN.md` Task 1; pinned by the element-count acceptance criteria there and by
+     `test_app_uses_only_the_permitted_element_set` in `06-05-PLAN.md` Task 3.
 
 2. **Two curves or three figures on first paint?**
    - What we know: D-03 requires spend and visit together; criterion 3 requires the cost exhibit and
@@ -1041,11 +1054,30 @@ Everything else in this document was executed against this repository or read di
    - Recommendation: headline block + the two policy curves above the fold; the cost exhibit in a
      clearly-labelled assumptions section below. This is the UI checkpoint's business, not
      research's.
+   - **RESOLVED — `06-UI-SPEC.md` § "Open Questions, Answered → Q2" and § "Layout Contract".** As
+     recommended: two policy curves above the fold, the cost exhibit below a divider inside the
+     `Assumptions, not data` section, and the optimism exhibit absent entirely. Implemented as the
+     two `render(...)` call sites in `06-05-PLAN.md` Task 2 and the third in `06-06-PLAN.md` Task 2;
+     pinned by `test_app_renders_exactly_three_figures_each_closed`.
 
 3. **Does the `AppTest` suite run fast enough to be a per-commit gate?**
    - What we know: 16 reruns took ~19 s in this session; a focused subset ~5 s.
    - Recommendation: keep the exhaustive rerun sweep in one test and consider the existing
      `slow` marker (already declared in `pyproject.toml`) if it grows.
+   - **RESOLVED — decided at plan time, not deferred to execution.** No: the whole file is not fast
+     enough to be the per-commit gate, so the gate is a **selection** of it. `06-01-PLAN.md` Task 2
+     writes the rule into `tests/test_app.py`'s module docstring — a test carries
+     `@pytest.mark.slow` if and only if it drives more than two `AppTest` reruns or spawns a
+     subprocess interpreter — and names the exactly three tests in this phase that meet it:
+     `test_app_import_closure_is_slim` (`06-04-PLAN.md` Task 3),
+     `test_headline_tracks_the_committed_curve` (`06-05-PLAN.md` Task 3, the exhaustive rerun sweep
+     this question names) and `test_optimal_depth_moves_with_cost` (`06-06-PLAN.md` Task 3). The
+     per-task command is `pytest tests/test_app.py -q -m "not slow"`, held under the 20-second bar
+     `06-VALIDATION.md` declares; the three deselected tests run unweakened on the full-suite path
+     (`pytest -q` carries no `-m`) and by explicit `-m slow` selection in 06-04, 06-05, 06-06,
+     06-07, 06-08's deployment gate and 06-09's close-out. No marker registration was needed —
+     `pyproject.toml` already declares `slow` with `--strict-markers`, and the plans forbid editing
+     it.
 
 ---
 
