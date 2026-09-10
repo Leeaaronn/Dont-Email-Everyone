@@ -1114,6 +1114,14 @@ _ZERO_SPAN_EDGE = "#b8b8b8"
 _POLICY_BAND_COLOUR = "#1f4e79"
 _POLICY_ANCHOR_COLOUR = "#7030a0"
 _POLICY_EVERYONE_COLOUR = "#c65911"
+# The reviewer's currently-selected depth in the Phase 6 app. It enters
+# the project's figure vocabulary here and not in the app, because the app
+# passes no colour to any factory: a hex named at a call site is a hex that
+# can drift between two call sites. It is distinguished from the anchor by
+# LINESTYLE and MARKER as well as by hue -- see the draw site in
+# `policy_curve_plot`, and the note above for why hue alone is never
+# enough on these figures.
+_POLICY_SELECTED_COLOUR = "#375623"
 
 
 def _guard_policy_contrast(contrast):
@@ -1249,6 +1257,7 @@ def policy_curve_plot(
     unit,
     anchor,
     title=None,
+    selected=None,
 ):
     """Return a Figure of one policy-value curve with its bootstrap band.
 
@@ -1291,6 +1300,20 @@ def policy_curve_plot(
     A point estimate printed without its interval is the defect this whole
     figure exists to avoid, so the two are one string and cannot be
     separated by an edit.
+
+    **The selected depth.** `selected` is the depth a reviewer currently
+    has chosen in the Phase 6 app -- the one number on this figure that
+    arrives from a widget rather than from an artifact. `None`, the
+    default, draws nothing whatever, so every figure this factory has
+    already committed is unaffected by the parameter existing at all.
+
+    When it is given, the marker's y position is READ OUT of the arrays
+    this function has already built -- `drawn[sat]` for the value and
+    `n_targeted[sat]` for the count -- and is never recomputed from the
+    frame a second time. That is not an economy to be simplified away on
+    a later reading: it is what makes the marker the artifact's own value
+    BY CONSTRUCTION, so no edit to this factory can leave the marker
+    sitting at a number that appears nowhere in `policy_curve.parquet`.
 
     Renders nothing and writes nothing: the returned Figure is the caller's
     to save and to close. Neither input frame is mutated.
@@ -1360,6 +1383,29 @@ def policy_curve_plot(
             "that appears nowhere in the committed artifact."
         )
     at = int(np.flatnonzero(on_grid)[0])
+
+    # The selection is guarded HERE, beside the anchor's guards, rather
+    # than beside its own draw site below, so the "every guard fires
+    # BEFORE `plt.subplots`" rule stated a few lines down stays literally
+    # true. A raise from the draw site would leave a figure registered in
+    # pyplot's global state that the caller never received a handle to
+    # close -- the exact leak that rule exists to prevent -- and
+    # `selected` is the one input to this factory that arrives from a
+    # widget rather than from an artifact, so it is the one most likely
+    # to be wrong.
+    sat = None
+    if selected is not None:
+        selected = float(selected)
+        if not 0.0 <= selected <= 1.0:
+            raise ValueError(f"selected must lie in [0, 1]; got {selected}.")
+        sel_on_grid = np.isclose(k, selected)
+        if not sel_on_grid.any():
+            raise ValueError(
+                f"selected {selected} is not a point of the curve's k grid "
+                f"({k.min()} to {k.max()}). Interpolating would print a "
+                "number that appears nowhere in the committed artifact."
+            )
+        sat = int(np.flatnonzero(sel_on_grid)[0])
 
     n_frame = int(_one_value(curve, "n_frame", "curve"))
     n_targeted = np.asarray(curve["n_targeted"], dtype=int)
@@ -1508,6 +1554,48 @@ def policy_curve_plot(
     )
     if title is not None:
         ax.set_title(title, pad=28)
+    # The reviewer's current selection, drawn LAST so that its legend
+    # entry is the sixth and the anchor's three-line entry keeps the
+    # position it holds in every committed figure. Guarded far above,
+    # before the figure existed; nothing here can raise.
+    if selected is not None:
+        # SOLID, against the anchor's dashed, and a DIAMOND against the
+        # anchor's circle. The difference has to survive greyscale, which
+        # is the argument `_ZERO_SPAN_FACE`'s comment already makes for
+        # the hatch: dark green, dark purple and dark blue are three
+        # similar luminances.
+        #
+        # zorder 6 and 7 sit above the anchor's 4 and 5 deliberately, so a
+        # selection landing exactly on k = 0.20 is drawn ON TOP of the
+        # pre-registered anchor rather than vanishing underneath it.
+        #
+        # The count is `n_targeted[sat]`, the frame's own realized email
+        # count at that depth, never arithmetic on `n_frame`.
+        ax.axvline(
+            selected,
+            color=_POLICY_SELECTED_COLOUR,
+            lw=1.4,
+            zorder=6,
+            label=f"Selected k = {selected:.0%} = {n_targeted[sat]:,} emails",
+        )
+        ax.plot(
+            [selected],
+            [drawn[sat]],
+            marker="D",
+            markersize=7,
+            linestyle="none",
+            color=_POLICY_SELECTED_COLOUR,
+            zorder=7,
+        )
+
+    # A sixth legend entry when a selection is passed. 06-RESEARCH rendered
+    # and inspected that case at `selected=0.37` on the spend curve and
+    # found the upper-left box still clears the curve: the
+    # `y_hi = max(highs) + 0.34 * unit_span` headroom above absorbs it,
+    # because the new entry is ONE line where the anchor's is three. That
+    # is an argument, not a verification -- this figure still goes to the
+    # phase's UI legibility checkpoint, because 05-08 found three real
+    # defects by opening PNGs that every automated check had passed.
     ax.legend(loc="upper left", fontsize=7.5, framealpha=0.92)
     _fit_titles(fig)
     return fig
