@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-09-10T22:20:41.382Z"
-last_activity: 2026-09-10 -- Phase 6 planning complete
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-09-10T22:39:58.430Z"
+last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 35
+  completed_plans: 36
   percent: 71
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 06 — streamlit-app (Phase 05 closed)
+**Current focus:** Phase 06 — streamlit-app-deployment
 
 ## Current Position
 
-Phase: 05 (business-policy-layer) — COMPLETE
-Plan: 9 of 9 executed
+Phase: 06 (streamlit-app-deployment) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-09-10 -- Phase 6 planning complete
+Last activity: 2026-09-10
 
-Progress: [██████████] 100% of Phase 05
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
@@ -86,6 +86,7 @@ Progress: [██████████] 100% of Phase 05
 | Phase 05 P06 | 22min | 3 tasks | 7 files |
 | Phase 05 P07 | 40min | 3 tasks | 5 files |
 | Phase 05 P08 | 153min | 3 tasks | 9 files |
+| Phase 06 P01 | 22min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -216,6 +217,11 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-08: every title's rendered extent is measured against the canvas and the type stepped down until it fits, raising rather than publishing clipped -- Phase 4's clipped-label defect recurred here in a new artist, so the repair is class-level (_fit_titles plus an extent test) not instance-level
 - [Phase 05]: 05-08: optimism_plot panels by OUTCOME, not by unit as calibration_plot does -- visit runs to 8.85 pp while the whole conversion cell lives in 0.74-0.84 pp, so on a shared pp axis the conversion gap is about 1 percent of the canvas
 - [Phase 05]: 05-08: the anchor's point estimate and its 95 percent interval are ONE legend string on both policy curves, so the number cannot be quoted from the figure without its uncertainty
+- [Phase 06-01]: the -r line is the FIRST line of both layered requirements files, above the rationale header, because the plan's acceptance criteria assert head -1 exactly -- the header opens beneath it with '^ First line, deliberately' so the ordering reads as chosen
+- [Phase 06-01]: no .streamlit/config.toml key was dropped -- all four confirmed present in streamlit 1.63.0's _config_options_template before the file was written, and 'streamlit config show' reads all four back at the intended values; gatherUsageStats' default_val=True was confirmed on the installed wheel, not quoted
+- [Phase 06-01]: requirements.txt gained a recorded decision the plan did not ask for -- matplotlib is NOT a required streamlit dependency (it sits behind the charts extra), so the explicit serve-time pin is load-bearing and trimming it as redundant would break the figures
+- [Phase 06-01]: the serve-time requirements test asserts the five REQUIRED packages in the same test as the four banned ones, because the negative half passes trivially against an empty or truncated file
+- [Phase 06-01]: APP-02 left Pending despite appearing in this plan's requirements frontmatter -- 06-01 installs streamlit and makes a default deployment honest, but deploys nothing and adds no live link; the requirement is not satisfied until 06-08/06-09 do, following the VALID-01/02, UPLIFT-01 and UPLIFT-02 precedent. C-4 and D-10 are a ROADMAP criterion and a CONTEXT decision, not requirement IDs, and are correctly absent from REQUIREMENTS.md
 
 ### Pending Todos
 
@@ -246,6 +252,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:25:13.123Z
-Stopped at: Phase 6 planned - 9 plans, verification passed
-Resume file: .planning/phases/06-streamlit-app-deployment/06-01-PLAN.md
+Last session: 2026-09-10T22:39:35.057Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None

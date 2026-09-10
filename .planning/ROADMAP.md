@@ -173,12 +173,12 @@ Plans:
   4. The app loads only committed artifacts — no model file, no training, no network call — the serve-time `requirements.txt` excludes scikit-learn, statsmodels, DuckDB and Pandera, and every figure is closed after render.
   5. The app is live on Streamlit Community Cloud, opens successfully from a logged-out browser after 12+ hours of no traffic, and its link is in the README.
 
-**Plans:** 0/9 plans executed
+**Plans:** 1/9 plans executed
 
 Plans:
 **Wave 0** *(blocking gate — streamlit is not installed; nothing else can be written or run until it is)*
 
-- [ ] 06-01-PLAN.md — Install streamlit==1.63.0, split the pin set into three `-r`-layered requirements files with the root file as the slim serve-time set, and commit `.streamlit/config.toml` disabling telemetry (wave 0)
+- [x] 06-01-PLAN.md — Install streamlit==1.63.0, split the pin set into three `-r`-layered requirements files with the root file as the slim serve-time set, and commit `.streamlit/config.toml` disabling telemetry (wave 0)
 
 **Wave 1** *(blocked on Wave 0)*
 
@@ -249,7 +249,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
 | 5. Business & Policy Layer | 9/9 | Complete   | 2026-09-10 |
-| 6. Streamlit App & Deployment | 0/9 | Planned     | - |
+| 6. Streamlit App & Deployment | 1/9 | In Progress|  |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 
 ---
