@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-09-10T04:00:21.603Z"
+last_updated: "2026-09-10T04:42:48.846Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
@@ -84,6 +84,7 @@ Progress: [█████████░] 91%
 | Phase 05 P05 | 8min | 2 tasks | 2 files |
 | Phase 05 P04 | 12min | 3 tasks | 2 files |
 | Phase 05 P06 | 22min | 3 tasks | 7 files |
+| Phase 05 P07 | 40min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-06: One three-level bootstrap draw over all 32,001 holdout rows serves every band in Phase 5; masking is position-preserving, so the shared control is drawn once per replicate
 - [Phase 05]: 05-06: manifest.json headline totals reproduce by hand from scored_holdout.parquet to 3.2e-12 -- criterion 4 demonstrated, not asserted
 - [Phase 05]: 05-06: R = 500 kept for the committed bands after an R = 2000 check on the spend band: endpoints move up to 7.6 percent in width but no published verdict changes
+- [Phase 05]: 05-07: D-05 discharged with a number: the argmax policy is valued from the randomization on all 32,001 holdout rows at weight 3, and its optimism is decomposed rather than asserted
+- [Phase 05]: 05-07: The winners-curse residual also carries the difference between the two arms' calibration, so a share-weighted blended comparator is reported beside it
 
 ### Pending Todos
 
@@ -231,6 +234,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T03:59:58.389Z
+Last session: 2026-09-10T04:42:40.423Z
 Stopped at: Completed 05-06-PLAN.md
 Resume file: None

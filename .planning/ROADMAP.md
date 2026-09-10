@@ -150,7 +150,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 05-07-PLAN.md — D-05 discharged with a number: the three-arm argmax value, the naive-vs-honest gap, the Jensen gap and the isolated winner's curse (wave 4)
+- [x] 05-07-PLAN.md — D-05 discharged with a number: the three-arm argmax value, the naive-vs-honest gap, the Jensen gap and the isolated winner's curse (wave 4)
 
 **Wave 5** *(blocked on Wave 4)*
 
