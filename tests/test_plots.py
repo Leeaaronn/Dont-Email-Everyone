@@ -52,6 +52,7 @@ from dont_email_everyone import (  # noqa: E402
     ate,
     balance,
     config,
+    economics,
     evaluation,
     plots,
 )
@@ -1536,6 +1537,217 @@ def test_policy_curve_plot_does_not_mutate_input(
     plt.close(fig)
     pd.testing.assert_frame_equal(policy_curve_frame, curve_before)
     pd.testing.assert_frame_equal(policy_band_frame, band_before)
+
+
+def _vertical_line_at(ax, x):
+    """The axvline-style Line2D standing at exactly `x`, or None.
+
+    `_vertical_line_positions` answers whether a rule is PRESENT; this
+    answers which artist it is, which is what an assertion on linestyle or
+    on zorder needs. Two rules that differ only in colour are two rules a
+    printed README cannot tell apart, so the artist is the thing to get
+    hold of.
+    """
+    for line in ax.lines:
+        xdata = line.get_xdata()
+        if (
+            len(xdata) == 2
+            and xdata[0] == xdata[1]
+            and np.isclose(float(xdata[0]), x)
+        ):
+            return line
+    return None
+
+
+def _point_marker_at(ax, x):
+    """The single-point Line2D plotted at `x`, or None."""
+    for line in ax.lines:
+        xdata = line.get_xdata()
+        if len(xdata) == 1 and np.isclose(float(xdata[0]), x):
+            return line
+    return None
+
+
+def test_policy_curve_marks_the_selected_point_at_the_artifact_value(
+    policy_curve_frame, policy_band_frame
+):
+    # UI-SPEC V19 and the 06-VALIDATION row for ROADMAP criterion 2, which
+    # asks the curve to mark THE SELECTED POINT alongside the email-everyone
+    # reference and the band. Like
+    # `test_policy_curve_plot_shades_every_depth_whose_band_covers_zero`
+    # above, this is NOT a presence check. 05-08's lesson is that a figure
+    # encoding an honesty claim gets its drawn encoding compared against the
+    # source data element by element: a second axvline existing somewhere on
+    # the axes says nothing at all about whether the number under the
+    # reviewer's cursor is the number in the artifact.
+    row = policy_curve_frame.sort_values("k")
+    grid = np.asarray(row["k"], dtype=float)
+    # Read off the committed grid, never hardcoded past this assertion.
+    # 0.37 is the depth 06-RESEARCH rendered and inspected when it checked
+    # that a six-entry legend still clears the curve, so the case a human
+    # actually looked at is the case pinned here.
+    selected = float(grid[37])
+    assert np.isclose(selected, 0.37), grid[:5]
+    # Without this the test could silently degenerate into a second anchor
+    # test, passing on a factory that ignored `selected` altogether.
+    assert not np.isclose(selected, economics.HEADLINE_CAPACITY), (
+        "the selected depth must differ from the pre-registered anchor, or "
+        "this test proves only that the anchor is still drawn"
+    )
+
+    plt.close("all")
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected,
+    )
+    try:
+        ax = fig.axes[0]
+        anchor_at = round(float(economics.HEADLINE_CAPACITY), 8)
+
+        positions = _vertical_line_positions(ax)
+        assert round(selected, 8) in positions, positions
+        assert anchor_at in positions, positions
+        assert round(selected, 8) != anchor_at
+
+        sel_rule = _vertical_line_at(ax, selected)
+        anchor_rule = _vertical_line_at(ax, economics.HEADLINE_CAPACITY)
+        sel_marker = _point_marker_at(ax, selected)
+        anchor_marker = _point_marker_at(ax, economics.HEADLINE_CAPACITY)
+        assert sel_rule is not None, "the selected rule is not on the canvas"
+        assert sel_marker is not None, "the selected marker is not on the canvas"
+
+        # x AND y, against the artifact's own row -- never against a
+        # recomputation. `_UNIT_SCALE["$"]` is 1.0, so the multiplication is
+        # inert on this cell; it is written out anyway because the factory
+        # applies it, a `pp` cell would not be inert, and a later reader
+        # should not have to rediscover which side of the scaling this
+        # number sits on.
+        expected_y = (
+            float(row["delta_random"].to_numpy()[37]) * plots._UNIT_SCALE["$"]
+        )
+        assert np.isclose(float(sel_marker.get_xdata()[0]), selected)
+        drawn_y = float(sel_marker.get_ydata()[0])
+        assert np.isclose(drawn_y, expected_y), (
+            f"the diamond sits at y={drawn_y!r} where the committed row for "
+            f"k={selected} holds {expected_y!r}; the marker is showing a "
+            "number that appears nowhere in policy_curve.parquet"
+        )
+
+        # On LINESTYLE and MARKER, never on colour. The UI-SPEC requires the
+        # two rules to differ in a non-colour channel because Phase 7 embeds
+        # these figures in a README that may be printed, and an assertion on
+        # colour would pass happily on two indistinguishable dashed lines.
+        assert sel_rule.get_linestyle() == "-", sel_rule.get_linestyle()
+        assert anchor_rule.get_linestyle() == "--", anchor_rule.get_linestyle()
+        assert sel_marker.get_marker() == "D", sel_marker.get_marker()
+        assert anchor_marker.get_marker() == "o", anchor_marker.get_marker()
+
+        # A selection landing exactly on k = 0.20 must be drawn ON TOP of the
+        # pre-registered anchor rather than vanishing underneath it.
+        assert sel_rule.get_zorder() > anchor_rule.get_zorder()
+        assert sel_marker.get_zorder() > anchor_marker.get_zorder()
+
+        # D-07: the percentage carries the meaning and the count carries the
+        # reality, so the legend has to carry both.
+        expected_n = int(row["n_targeted"].to_numpy()[37])
+        text = _rendered_text(ax)
+        assert f"{expected_n:,}" in text, text
+        assert f"{selected:.0%}" in text, text
+        assert "Selected" in text, text
+    finally:
+        plt.close(fig)
+    assert plt.get_fignums() == []
+
+
+def test_policy_curve_plot_draws_nothing_new_when_selected_is_none(
+    policy_curve_frame, policy_band_frame
+):
+    """`selected=None` must be inert, or the committed PNGs move.
+
+    This is the in-repo half of D-06. The parameter added in plan 06-03 sits
+    in a factory that has already published figures `reports/policy.md` and
+    `reports/model.md` describe in words; if the default did anything
+    whatever, those figures would change under the next regeneration and the
+    prose around them would quietly stop matching them.
+
+    **No committed-PNG checksum test is written here, and that is
+    deliberate.** This module's own docstring above and
+    `tests/test_artifacts.py:6-9` both record the repo's standing policy
+    that figure and Parquet *bytes* are never asserted: matplotlib and
+    pyarrow embed run-specific metadata, so a byte assertion fails on a
+    perfectly correct regeneration in a different environment, while a
+    stale-but-valid file sails through it. 06-RESEARCH did measure SHA-256
+    identity for both policy PNGs, but that was one session on one machine
+    -- evidence, not a portable test.
+
+    D-06's actual demand -- "every committed artifact and figure comes back
+    byte-unchanged" -- is a REGENERATION GATE, not an assertion: run
+    `python -m dont_email_everyone.pipeline all`, then require
+    `git status --short data/processed reports/figures` to print nothing.
+    Plan 06-03 Task 3 runs exactly that. 06-VALIDATION.md provisionally
+    named this test
+    `test_policy_figures_are_byte_identical_after_relocation`; it was
+    renamed because that name promised an assertion this repo's own policy
+    forbids, and a test whose name outruns what it checks is worse than no
+    test at all.
+    """
+    plt.close("all")
+    shared = dict(
+        contrast="delta_random",
+        unit="$",
+        anchor=economics.HEADLINE_CAPACITY,
+    )
+    bare = plots.policy_curve_plot(
+        policy_curve_frame, policy_band_frame, **shared
+    )
+    marked = plots.policy_curve_plot(
+        policy_curve_frame, policy_band_frame, selected=0.37, **shared
+    )
+    try:
+        bare_ax = bare.axes[0]
+        marked_ax = marked.axes[0]
+
+        # Strictly fewer, not merely different: the selection adds one rule,
+        # one marker and one legend entry, and nothing else may move.
+        assert len(_vertical_line_positions(bare_ax)) < len(
+            _vertical_line_positions(marked_ax)
+        )
+        assert len(bare_ax.get_legend().get_texts()) < len(
+            marked_ax.get_legend().get_texts()
+        )
+        assert [line.get_marker() for line in bare_ax.lines].count("D") == 0, (
+            "a diamond marker is on the default figure; every committed "
+            "policy PNG would change under the next regeneration"
+        )
+
+        # Everything the existing policy-curve tests already pin has to be
+        # identical between the two.
+        assert bare_ax.get_xlim() == marked_ax.get_xlim()
+        assert bare_ax.get_ylim() == marked_ax.get_ylim()
+        assert bare_ax.get_xlabel() == marked_ax.get_xlabel()
+        assert bare_ax.get_ylabel() == marked_ax.get_ylabel()
+        assert [_patch_x_span(patch) for patch in bare_ax.patches] == [
+            _patch_x_span(patch) for patch in marked_ax.patches
+        ], "the hatched covers-zero spans moved"
+
+        anchor_at = round(float(economics.HEADLINE_CAPACITY), 8)
+        assert anchor_at in _vertical_line_positions(bare_ax)
+        assert anchor_at in _vertical_line_positions(marked_ax)
+        for ax in (bare_ax, marked_ax):
+            everyone = _point_marker_at(ax, 1.0)
+            assert everyone is not None and everyone.get_marker() == "s"
+        for x in (anchor_at, 1.0):
+            assert float(_point_marker_at(bare_ax, x).get_ydata()[0]) == float(
+                _point_marker_at(marked_ax, x).get_ydata()[0]
+            ), f"the marker at k={x} moved when a selection was passed"
+    finally:
+        plt.close(bare)
+        plt.close(marked)
+    assert plt.get_fignums() == []
 
 
 # --------------------------------------------------------------------------
