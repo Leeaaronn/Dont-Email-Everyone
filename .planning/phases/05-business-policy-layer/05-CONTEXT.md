@@ -135,7 +135,11 @@ decision below is shaped by that fact.
   chosen on **provenance rather than on the curve**: it is `evaluation.uplift_at_k`'s default,
   committed in `9581e84` on 2026-09-05, before `models.py` existed. It therefore could not have been
   selected to flatter a result that did not yet exist — which is the property the deferred question
-  was actually asking for. It independently lands on a plateau (k in [0.15, 0.25] all within ±10%).
+  was actually asking for. It independently lands in a stable window: the five anchors across
+  k in [0.15, 0.25] measure 0.2085 / 0.1944 / 0.1861 / 0.2256 / 0.1996, so the story is the same at
+  any anchor in the window — but note that 0.2256 falls outside a strict ±10% band around $0.20,
+  so **do not repeat the phrase "within ±10%"**. Re-measure and phrase the band from the artifact.
+  The anchor rests on provenance, not on the plateau; the window is corroboration, not the argument.
   k <= 0.10 is unusable: the frame holds only 170 non-zero spend rows and one 1,068-row slice
   carries 14 of them.
 
