@@ -1430,6 +1430,149 @@ def test_bootstrap_indices_rejects_a_degenerate_arm():
 
 
 # --------------------------------------------------------------------------
+# stratified_indices -- D-14's generalization of the same engine
+# --------------------------------------------------------------------------
+
+# The three holdout arms, coded as integers for `stratified_indices`. The
+# codes themselves are arbitrary; what matters is that there are three of
+# them, because a three-level matrix consumes the RNG stream differently
+# from a two-level one and Phase 5 has to pick one matrix and use it
+# everywhere rather than mixing the two.
+SEGMENT_CODES = {
+    config.CONTROL: 0,
+    config.ARMS["mens"]: 1,
+    config.ARMS["womens"]: 2,
+}
+
+# Small R throughout this section. Every property here is either bit
+# identity or an exact positional invariant, and neither becomes truer at
+# R=500 -- while the real vectors below are 21k and 32k columns wide, so a
+# large R buys nothing but seconds.
+REFACTOR_REPLICATES = 8
+
+
+def _holdout_segment():
+    """Return the committed holdout `segment` column as a NumPy array.
+
+    Read from the committed Parquet rather than rebuilt, the same
+    disposition `tests/conftest.py`'s arm-frame fixtures record. Reading an
+    artifact from this module has precedent: the endpoint cross-check above
+    parametrizes over `ate.json` at collection time.
+    """
+    frame = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    return frame["segment"].to_numpy()
+
+
+def _womens_treatment():
+    """Return the real womens-vs-control 0/1 treatment vector.
+
+    The frame size is DERIVED from the artifact, never typed, so a
+    regenerated `scored_holdout.parquet` moves this vector rather than
+    silently disagreeing with a literal.
+    """
+    segment = _holdout_segment()
+    inside = segment != config.ARMS["mens"]
+    return (segment[inside] == config.ARMS["womens"]).astype("int64")
+
+
+def _pre_refactor_bootstrap_indices(treatment, n_resamples, seed):
+    """The Phase 3 draw loop, frozen here exactly as it was before 05-02.
+
+    DUPLICATING IT IS DELIBERATE, AND IS THE WHOLE POINT. A regression test
+    that imports the code it is regressing against proves nothing: it would
+    keep passing while both copies drifted together. This reference is the
+    committed Phase 3 behaviour, pinned in a place the refactor cannot
+    reach, and every band Phase 3 published came out of these six lines.
+
+    `for value in (1, 0)` -- treated arm FIRST -- is the load-bearing part.
+    `np.unique` returns levels ascending, so the obvious generalization
+    consumes the stream in the opposite order and moves practically every
+    cell of the matrix.
+    """
+    rng = np.random.default_rng(seed)
+    out = np.empty((n_resamples, treatment.size), dtype=np.int32)
+    for value in (1, 0):
+        pos = np.flatnonzero(treatment == value)
+        out[:, pos] = rng.choice(
+            pos, size=(n_resamples, pos.size), replace=True
+        )
+    return out
+
+
+def test_bootstrap_indices_unchanged_by_the_refactor():
+    """T-05-03: the permission slip for touching Phase 3's machinery.
+
+    Asserted on a synthetic vector AND on the real womens-vs-control
+    treatment column, because the synthetic case has balanced arms and
+    would not notice an off-by-one in how a ragged pool is filled.
+
+    If this fails, every Qini band and every uplift-at-k figure Phase 3 and
+    Phase 4 committed has moved, and nothing else in the suite would say so
+    -- the bands would still be ordered, still finite, still plausible.
+    """
+    _, synthetic, _ = _band_arrays()
+    cases = {
+        "synthetic": synthetic,
+        "womens-vs-control holdout": _womens_treatment(),
+    }
+
+    for name, treatment in cases.items():
+        reference = _pre_refactor_bootstrap_indices(
+            treatment, REFACTOR_REPLICATES, 20260902
+        )
+        current = evaluation.bootstrap_indices(
+            treatment, REFACTOR_REPLICATES, 20260902
+        )
+        differing = float((reference != current).mean())
+
+        assert np.array_equal(reference, current), (
+            f"on the {name} vector ({treatment.size} rows), "
+            f"`bootstrap_indices` no longer reproduces the pre-refactor "
+            f"draw: {differing:.6f} of cells differ. The delegation to "
+            "`stratified_indices` must pass `level_order=(1, 0)`; with the "
+            "levels ascending instead, the RNG stream is consumed treated"
+            "-last and every published band silently moves."
+        )
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        pytest.param(np.repeat([0, 1], 60), id="2-level"),
+        pytest.param(np.repeat([0, 1, 2], 40), id="3-level"),
+    ],
+)
+def test_stratified_indices_is_position_preserving(labels):
+    """C-2: `np.array_equal(labels[out[r]], labels)` for every replicate.
+
+    The invariant Phase 3 established for two arms, now required to hold
+    for three. It is what lets Phase 5 index ANY per-row array -- spend,
+    the uplift score, a per-customer margin -- with a resample row without
+    knowing how the draws were laid out.
+    """
+    matrix = evaluation.stratified_indices(labels, REFACTOR_REPLICATES, 5)
+
+    assert matrix.shape == (REFACTOR_REPLICATES, labels.size), (
+        f"the matrix has shape {matrix.shape}, expected "
+        f"{(REFACTOR_REPLICATES, labels.size)}. Row r must be one COMPLETE "
+        "resample of every row position."
+    )
+    assert matrix.dtype == np.int32, (
+        f"the matrix has dtype {matrix.dtype}, expected int32. The "
+        "platform default would double a 64 MB three-level matrix for no "
+        "addressing benefit."
+    )
+    for r, take in enumerate(matrix):
+        assert np.array_equal(labels[take], labels), (
+            f"replicate {r} does not reproduce the label vector when used "
+            "as an index. The resample has stopped being stratified and "
+            "position-preserving, so a consumer indexing a spend column "
+            "with it would pair one arm's rows with another arm's values "
+            "and report a number rather than raising."
+        )
+
+
+# --------------------------------------------------------------------------
 # bands -- D-06's two confidence bands
 # --------------------------------------------------------------------------
 
