@@ -173,7 +173,45 @@ Plans:
   4. The app loads only committed artifacts — no model file, no training, no network call — the serve-time `requirements.txt` excludes scikit-learn, statsmodels, DuckDB and Pandera, and every figure is closed after render.
   5. The app is live on Streamlit Community Cloud, opens successfully from a logged-out browser after 12+ hours of no traffic, and its link is in the README.
 
-**Plans**: TBD
+**Plans:** 0/9 plans executed
+
+Plans:
+**Wave 0** *(blocking gate — streamlit is not installed; nothing else can be written or run until it is)*
+
+- [ ] 06-01-PLAN.md — Install streamlit==1.63.0, split the pin set into three `-r`-layered requirements files with the root file as the slim serve-time set, and commit `.streamlit/config.toml` disabling telemetry (wave 0)
+
+**Wave 1** *(blocked on Wave 0)*
+
+- [ ] 06-02-PLAN.md — D-04: relocate `OUTCOMES` and `SMD_THRESHOLD` into `config.py` with identity-preserving re-export shims, dropping statsmodels and scipy from `plots.py`'s import closure (wave 1)
+
+**Wave 2** *(blocked on Wave 1 — same file)*
+
+- [ ] 06-03-PLAN.md — `selected=` marker on `policy_curve_plot` with `_POLICY_SELECTED_COLOUR`, its artifact-value introspection test, and D-06's full-pipeline regeneration gate (wave 2)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 06-04-PLAN.md — `streamlit_app.py` spine: cached ROOT-anchored load, cross-artifact freshness guard, the single `render()` helper, the sidebar controls, and the criterion-4 test set (wave 3)
+
+**Wave 4** *(blocked on Wave 3 — same file)*
+
+- [ ] 06-05-PLAN.md — The D-07 headline block with three verdict states, the two policy curves, and the adjacency / verdict-versus-hatching tests (wave 4)
+
+**Wave 5** *(blocked on Wave 4 — same file)*
+
+- [ ] 06-06-PLAN.md — The contrasts table carrying all three criterion-1 differences, the assumptions section with the live cost exhibit, the footer, and their tests (wave 5)
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 06-07-PLAN.md — Amend criteria 1 and 5 in place, and the blocking figure-legibility checkpoint with a moving marker (wave 6)
+
+**Wave 7** *(blocked on Wave 6)*
+
+- [ ] 06-08-PLAN.md — Deployment readiness gate, the Community Cloud deploy checkpoint, and the live link in the README (wave 7)
+
+**Wave 8** *(blocked on Wave 7 — wall-clock dependency, cannot complete in one session)*
+
+- [ ] 06-09-PLAN.md — The 12-hour cold-start wake checkpoint and the five-criterion close-out (wave 8)
+
 **UI hint**: yes
 
 ### Phase 7: Documentation & Delivery
@@ -210,8 +248,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
-| 5. Business & Policy Layer | 8/9 | In Progress|  |
-| 6. Streamlit App & Deployment | 0/TBD | Not started | - |
+| 5. Business & Policy Layer | 9/9 | Complete   | 2026-09-10 |
+| 6. Streamlit App & Deployment | 0/9 | Planned     | - |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 
 ---
