@@ -413,29 +413,75 @@ def _guard_inputs(score, treatment, outcome):
     return score, treatment, outcome
 
 
+def ranking_order(score, *, seed: int = 20260902):
+    """Return the row positions that put `score` in descending order.
+
+    THE PROJECT'S ONE RANKING, exposed as positions so it can be shared
+    ACROSS modules and not merely within this one. `_ranked_arrays` below
+    delegates to it, which is what keeps the module's single `np.argsort`
+    single, and `pipeline.policy()` calls it to select the same top-k head
+    the policy value was computed on.
+
+    That cross-module use is the reason this is public rather than
+    private. The optimism exhibit reports the model's own mean predicted
+    uplift over the targeted head beside the value the randomization
+    delivered on that head; if the orchestrator reimplemented the sort,
+    the two numbers could be computed over different customers and their
+    difference -- which is the finding -- would be measuring the
+    disagreement between two rankings instead of the optimism of one.
+
+    D-01's tie rule is applied in full: permute FIRST at `seed`, so the
+    order within a tie group comes from the seed rather than from the
+    caller's row order, and only then take a STABLE descending sort. The
+    returned vector is a permutation of `0 .. n - 1`, so
+    `score[ranking_order(score)]` is non-increasing and
+    `treatment[perm][order]` and `treatment[perm[order]]` are the same
+    gather.
+
+    Raises `ValueError` on a nan score, for the reason
+    `_guard_no_nan_scores` records: `np.argsort` places nan last whatever
+    its sign, so a nan score is silently ranked as the worst prospect.
+    """
+    score = np.asarray(score, dtype=float)
+    if score.ndim != 1:
+        raise ValueError(
+            f"`score` has shape {score.shape}; the ranking is over one "
+            "entry per customer, so it must be 1-D."
+        )
+    _guard_no_nan_scores(score)
+    # D-01: permute FIRST, so tie order comes from the seed rather than
+    # from the caller's row order (module docstring, decision (b)).
+    perm = np.random.default_rng(seed).permutation(score.size)
+    order = np.argsort(-score[perm], kind="stable")
+    return perm[order]
+
+
 def _ranked_arrays(score, treatment, outcome, seed: int):
     """Return `(treatment, outcome)` reordered by descending `score`.
 
     The one place where the seeded shuffle and the stable descending sort
-    live, so `qini_curve` and (from plan 03-02) `uplift_at_k` cannot drift
-    onto different rankings and silently break the
-    `uplift_at_k(k) == Q(k) * N_t / n_t(k)` identity (module docstring,
-    decision (b)). The direct analogue of `ate._fit`, which centralizes
-    `cov_type` for exactly the same reason.
+    are APPLIED to a pair of arrays, so `qini_curve` and (from plan 03-02)
+    `uplift_at_k` cannot drift onto different rankings and silently break
+    the `uplift_at_k(k) == Q(k) * N_t / n_t(k)` identity (module
+    docstring, decision (b)). The direct analogue of `ate._fit`, which
+    centralizes `cov_type` for exactly the same reason.
+
+    The ordering itself moved into `ranking_order` in plan 05-07, so the
+    orchestrator can select the same head without a second sort. This is a
+    pure gather either way: `treatment[perm][order]` and
+    `treatment[perm[order]]` are the same rows in the same places, so no
+    number computed downstream moved when the two steps were fused.
 
     Both returned arrays are float64. `treatment` is used arithmetically
     below as a 0/1 mask inside `np.cumsum`, and an integer mask would make
-    the cumulative counts integer and the division that follows a different
-    operation.
+    the cumulative counts integer and the division that follows a
+    different operation.
     """
     score, treatment, outcome = _guard_inputs(score, treatment, outcome)
-    # D-01: permute FIRST, so tie order comes from the seed rather than from
-    # the caller's row order (module docstring, decision (b)).
-    perm = np.random.default_rng(seed).permutation(score.size)
-    order = np.argsort(-score[perm], kind="stable")
+    take = ranking_order(score, seed=seed)
     return (
-        treatment[perm][order].astype(float),
-        outcome[perm][order],
+        treatment[take].astype(float),
+        outcome[take],
     )
 
 
@@ -1527,3 +1573,561 @@ def policy_value_band(
         bands[name] = (np.asarray(lo, dtype=float), np.asarray(hi, dtype=float))
 
     return grid, bands
+
+
+# --------------------------------------------------------------------------
+# D-05: the multi-arm argmax policy, valued rather than cautioned about
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, eq=False)
+class ArgmaxPolicyValue:
+    """What `argmax_policy_value` returns: one value and its baseline.
+
+    A frozen dataclass for the reason `PolicyValueCurve` records: the
+    field set is fixed, so `result.delta_non = ...` raises instead of
+    handing a typo back to whoever reads the right spelling later.
+
+    `value` is the Horvitz-Thompson value of the prescribed policy and
+    `v_none` the value of emailing nobody, both per POPULATION customer of
+    the frame handed in -- the second of the three units named in the
+    module docstring, decision (g). `delta_none` is their difference and
+    is the honest argmax gain the optimism exhibit subtracts from.
+
+    `n_matched` is the count of rows whose realized arm agreed with the
+    prescription and therefore contributed to `value`. It is carried
+    because a Horvitz-Thompson numerator built on a mask nobody can see is
+    a number nobody can check: on a three-arm design with a two-arm
+    prescription it should sit near a third of `n`, and a count near zero
+    is the signature of an arm-label mismatch that would otherwise
+    surface only as a suspiciously small dollar figure.
+
+    `prescribed_share` maps each named arm to the fraction of rows the
+    argmax prescribed it. On the real data that mapping IS D-04's
+    justification restated as a measurement.
+    """
+
+    value: float
+    v_none: float
+    delta_none: float
+    n: int
+    n_matched: int
+    weight: float
+    no_action: object
+    prescribed_share: dict
+
+
+def _guard_score_mapping(scores_by_arm):
+    """Validate a `{arm label: score array}` mapping and return it as arrays.
+
+    Shared by `argmax_policy_value` and `naive_policy_value` so the two
+    cannot drift onto different admissibility rules -- the same reasoning
+    `_guard_inputs` records for the three-array case. Every check is a
+    plain `if`/`raise`, never an `assert`, because asserts are compiled
+    out under `python -O` and these gates stand between a nan and a
+    published dollar figure.
+
+    Insertion order is preserved and is load-bearing: it is the order
+    `np.argmax` breaks an exact tie in. Two float score columns tie with
+    probability zero on this data, and the rule is stated anyway so a
+    future reader is not left to infer it from NumPy's documentation.
+    """
+    if not isinstance(scores_by_arm, dict):
+        raise ValueError(
+            f"`scores_by_arm` is a {type(scores_by_arm).__name__}; it must "
+            "be a mapping from an arm label to that arm's predicted uplift "
+            "array. A bare sequence loses the labels, and the labels are "
+            "what the realized-arm vector gets matched against, row by row."
+        )
+    if not scores_by_arm:
+        raise ValueError(
+            "`scores_by_arm` is empty; there is no action to prescribe and "
+            "no policy to value."
+        )
+
+    arrays = {}
+    sizes = {}
+    for arm, values in scores_by_arm.items():
+        array = np.asarray(values, dtype=float)
+        if array.ndim != 1:
+            raise ValueError(
+                f"the score array for arm {arm!r} has shape {array.shape}; "
+                "every arm's scores must be 1-D, one entry per customer."
+            )
+        nan_positions = np.flatnonzero(np.isnan(array))
+        if nan_positions.size:
+            raise ValueError(
+                f"the score array for arm {arm!r} holds "
+                f"{nan_positions.size} nan value(s), the first at position "
+                f"{int(nan_positions[0])}. Before plan 05-03 every arm's "
+                "score column was nan on the rows randomized into the "
+                "OTHER arm, and those are exactly the rows an "
+                "inverse-probability numerator counts for an argmax "
+                "policy. A nan there does not raise on its own: np.argmax "
+                "ranks it, the masked sum becomes nan, and a nan arrives "
+                "as a published policy value."
+            )
+        arrays[arm] = array
+        sizes[arm] = int(array.size)
+
+    distinct = set(sizes.values())
+    if len(distinct) != 1:
+        raise ValueError(
+            f"the arms' score arrays have different lengths: {sizes}. All "
+            "of them index the same customers positionally, so a length "
+            "mismatch means two arms describe different rows."
+        )
+    if distinct == {0}:
+        raise ValueError(
+            "the score arrays are empty; there is no population to "
+            "prescribe an action to."
+        )
+    return arrays
+
+
+def argmax_policy_value(
+    scores_by_arm,
+    arm_codes,
+    outcome,
+    *,
+    weight: float = 3.0,
+    no_action=None,
+) -> ArgmaxPolicyValue:
+    """Known-propensity IPW value of "send each customer their best arm".
+
+    D-05's honest side. CONTEXT.md D-04 is unchanged by anything computed
+    here: the SHIPPED policy targets the womens arm only, because a
+    per-customer argmax rests on mens rankings that failed their own
+    permutation nulls, and D-03 forbids an unproven cell from carrying a
+    headline. This function exists so the optimism of that argmax is a
+    MEASURED NUMBER rather than a caution in prose. Phase 4's D-19
+    delivered a quantified incomparability and explicitly deferred the
+    policy call to Phase 5; restating the caution qualitatively would
+    discharge nothing.
+
+    WHY THIS COULD NOT BE COMPUTED BEFORE PLAN 05-03. An
+    inverse-probability numerator counts a customer only where their
+    REALIZED arm agrees with the action the policy prescribes. For an
+    argmax policy the prescribed action is an email, so the contributing
+    rows are the TREATED ones -- and in the Phase 4 artifact each arm's
+    predicted-uplift column was nan on the rows randomized into the other
+    arm, which is precisely that set. Only the shared control rows carried
+    both arms' scores, and control rows contribute to the baseline rather
+    than to the policy. 05-03 scored every holdout row under both arms'
+    models and wrote the `_all` columns, which is what makes the numerator
+    non-empty.
+
+    WHY A HOLDOUT SPLIT DOES NOT REPAIR THE OPTIMISM. The winner's curse
+    measured here does not come from selecting on the evaluation rows. It
+    comes from estimation noise in a single fitted uplift function that is
+    COMMON to every holdout row, so two halves of the holdout share that
+    noise and a within-holdout split measures nothing at all. Selection
+    and valuation already use different rows in the sense that matters:
+    the argmax for a customer is chosen by models fitted on the 31,999
+    training rows, and the value is read off the randomization on the
+    holdout. The gap this exhibit reports is the residual after that.
+
+    WHY A SURROGATE CLASSIFIER WAS REJECTED. Imputing the argmax label on
+    control rows with a fitted classifier would enlarge the numerator, and
+    it would put a MODEL inside a value estimate in a phase whose entire
+    argument is that no model enters one (D-02). The estimate would then
+    inherit that classifier's own error and stop being checkable with
+    arithmetic, which ROADMAP criterion 4 requires it to remain.
+
+    THE WEIGHT HERE IS 3 AND THE FRAME IS ALL 32,001 HOLDOUT ROWS. This is
+    the one place ROADMAP criterion 1's literal "1/3" applies unmodified:
+    on the full holdout every action in {mens, womens, no-email} is
+    realized with known probability 1/3, so the reciprocal propensity is
+    3. `POLICY_WEIGHT` is 2 because it runs on the womens+control frame,
+    where the design probability is renormalized by conditioning on the
+    two arms that frame holds. Neither number is a transcription of the
+    other; each is a property of the frame its estimator runs on, which is
+    why the weight is a parameter carrying its derivation rather than a
+    second module constant free to drift away from its sibling.
+
+    The estimator, with T(i) the arm the argmax prescribes for customer i
+    and A(i) the arm they were randomized into:
+
+        V(pi) = (weight / n) * sum_i 1{A(i) = T(i)} * Y_i
+        V(0)  = (weight / n) * sum_i 1{A(i) = no_action} * Y_i
+
+    `no_action` names the level that means "not emailed". When it is left
+    at `None` it is derived as the single level of `arm_codes` that
+    `scores_by_arm` does not name, and a `ValueError` is raised unless
+    there is exactly one such level -- naming one arm on a three-level
+    vector leaves two candidates, and guessing between them would put the
+    wrong baseline under every gap in the exhibit.
+
+    A SINGLE-ARM MAPPING IS ADMISSIBLE AND IS USED. With one named arm the
+    prescription is constant and this reduces to the blanket send of that
+    arm, which is exactly the comparator the winner's-curse subtraction
+    needs: `winners_curse = gap_argmax - gap_womens` is a clean difference
+    only when both gaps come from one estimator on one frame, differing in
+    nothing but how many arms the argmax chooses between.
+
+    Ties are broken toward the arm that appears FIRST in `scores_by_arm`,
+    which is `np.argmax`'s rule applied to the mapping's insertion order.
+
+    Raises `ValueError` on a non-mapping or empty `scores_by_arm`, on a
+    nan or non-1-D score array, on arms whose arrays disagree in length,
+    on an `arm_codes` or `outcome` vector of a different length, on a nan
+    outcome, on an arm named in `scores_by_arm` that `arm_codes` never
+    realized, on an ambiguous or absent `no_action`, and on a weight that
+    is not finite and positive.
+    """
+    weight = _guard_weight(weight)
+    arrays = _guard_score_mapping(scores_by_arm)
+
+    arm_codes = np.asarray(arm_codes)
+    outcome = np.asarray(outcome, dtype=float)
+    n = int(next(iter(arrays.values())).size)
+    if arm_codes.ndim != 1 or outcome.ndim != 1:
+        raise ValueError(
+            f"`arm_codes` has shape {arm_codes.shape} and `outcome` has "
+            f"shape {outcome.shape}; both must be 1-D, one entry per "
+            "customer."
+        )
+    if arm_codes.size != n or outcome.size != n:
+        raise ValueError(
+            f"input lengths disagree: scores={n}, "
+            f"arm_codes={arm_codes.size}, outcome={outcome.size}. All three "
+            "index the same customers positionally."
+        )
+    _guard_no_nan_outcome(outcome)
+
+    realized = set(np.unique(arm_codes).tolist())
+    missing = [arm for arm in arrays if arm not in realized]
+    if missing:
+        raise ValueError(
+            f"`scores_by_arm` names arm(s) {missing!r} that `arm_codes` "
+            f"never realized; the realized levels are {sorted(realized, key=repr)!r}. "
+            "Every row prescribed such an arm contributes nothing to the "
+            "numerator, so the policy would be valued at a number that is "
+            "quietly too small rather than raising."
+        )
+
+    if no_action is None:
+        unnamed = [level for level in realized if level not in arrays]
+        if len(unnamed) != 1:
+            raise ValueError(
+                f"`no_action` was not given and cannot be derived: the "
+                f"levels of `arm_codes` that `scores_by_arm` does not name "
+                f"are {sorted(unnamed, key=repr)!r}, and exactly one is "
+                "needed. Name the do-nothing arm explicitly; guessing "
+                "between two candidates would put the wrong baseline under "
+                "every contrast computed from this value."
+            )
+        no_action = unnamed[0]
+    elif no_action in arrays:
+        raise ValueError(
+            f"`no_action` is {no_action!r}, which `scores_by_arm` also "
+            "names as an actionable arm. The do-nothing arm cannot also be "
+            "an arm the policy sends."
+        )
+    elif no_action not in realized:
+        raise ValueError(
+            f"`no_action` is {no_action!r}, which `arm_codes` never "
+            f"realized; the realized levels are {sorted(realized, key=repr)!r}. "
+            "With no rows in the do-nothing arm the baseline is zero and "
+            "every gain computed against it is the policy's whole value."
+        )
+
+    arms = list(arrays)
+    # A (n_arms, n) stack rather than a running maximum: the prescription
+    # has to be recoverable as an ARM LABEL, not only as a value, because
+    # `prescribed_share` is the measurement D-04 rests on. Two arms by
+    # 32,001 float64 rows is 0.5 MB.
+    stacked = np.vstack([arrays[arm] for arm in arms])
+    chosen = np.argmax(stacked, axis=0)
+    prescribed = np.array(arms, dtype=object)[chosen]
+
+    matched = prescribed == arm_codes
+    value = float(weight * outcome[matched].sum() / n)
+    idle = arm_codes == no_action
+    v_none = float(weight * outcome[idle].sum() / n)
+
+    return ArgmaxPolicyValue(
+        value=value,
+        v_none=v_none,
+        delta_none=value - v_none,
+        n=n,
+        n_matched=int(matched.sum()),
+        weight=weight,
+        no_action=no_action,
+        prescribed_share={
+            arm: float(np.count_nonzero(chosen == position) / n)
+            for position, arm in enumerate(arms)
+        },
+    )
+
+
+def naive_policy_value(scores_by_arm) -> float:
+    """The model's own belief about the argmax policy: `mean(max_a u_a)`.
+
+    THIS IS THE QUANTITY CONTEXT.md D-02 FORBIDS AS A HEADLINE. Summing or
+    averaging predicted uplift over a targeted set makes the published
+    figure a restatement of the model's belief about itself, which is
+    exactly the failure mode this project exists to avoid. It is computed
+    here for ONE purpose: so the gap against the honest
+    inverse-probability estimate is a number rather than an assertion that
+    a gap exists.
+
+    THE JENSEN DECOMPOSITION, IN WORDS. For any two arrays,
+
+        mean(max(u_a, u_b)) >= max(mean(u_a), mean(u_b))
+
+    with equality only where one arm dominates everywhere. So part of the
+    distance between this number and the honest one is pure arithmetic --
+    the expectation of a maximum exceeds the maximum of the expectations
+    even for two UNBIASED, perfectly calibrated estimators -- and the rest
+    is the winner's curse proper, the tendency of an argmax over noisy
+    correlated estimates to select the upward errors. The exhibit reports
+    the Jensen gap separately for exactly that reason: without it, a
+    reader cannot tell which part of the optimism would survive a perfect
+    model.
+
+    A SINGLE-ARM MAPPING RETURNS THAT ARM'S MEAN. One arm is not a choice,
+    so there is no maximization and no Jensen gap; the call supplies the
+    womens-only side of the decomposition, whose optimism is
+    miscalibration alone.
+
+    Takes the same `{arm label: score array}` mapping
+    `argmax_policy_value` takes, through the same validator, so the two
+    numbers whose difference is the finding cannot be computed on
+    differently admissible inputs. Returns a plain float in the score
+    column's own units, per population customer of the rows handed in.
+
+    Raises `ValueError` on a non-mapping or empty mapping, a nan score, a
+    non-1-D array, and arms whose arrays disagree in length.
+    """
+    arrays = _guard_score_mapping(scores_by_arm)
+    stacked = np.vstack([arrays[arm] for arm in arrays])
+    return float(np.max(stacked, axis=0).mean())
+
+
+@dataclass(frozen=True, eq=False)
+class PolicyValueVariant:
+    """One estimator's view of one top-k policy, in five scalars.
+
+    Frozen for `PolicyValueCurve`'s reason. Every field is per POPULATION
+    customer of the frame except `per_targeted`, which is per email sent
+    and is nan where no emails are sent -- the same convention
+    `policy_value_curve` fixes and for the same reason: a per-email figure
+    where no emails were sent is missing, never zero and never infinite.
+    """
+
+    v_pi: float
+    v_all: float
+    v_none: float
+    delta_none: float
+    per_targeted: float
+
+
+@dataclass(frozen=True, eq=False)
+class PolicyValueVariants:
+    """The three estimators at one k, plus the selection they share."""
+
+    k: float
+    n: int
+    n_targeted: int
+    weight: float
+    ht: PolicyValueVariant
+    hajek: PolicyValueVariant
+    aipw: PolicyValueVariant
+
+
+def policy_value_variants(
+    score,
+    treatment,
+    outcome,
+    *,
+    k: float,
+    weight: float = POLICY_WEIGHT,
+    m0,
+    m1,
+    seed: int = 20260902,
+) -> PolicyValueVariants:
+    """Horvitz-Thompson, Hajek and AIPW values of one top-k policy.
+
+    A ROBUSTNESS NOTE, NOT A RESTRUCTURE. The conclusion is recorded here
+    so a future reader does not have to rediscover it: Horvitz-Thompson
+    stays the headline estimator, because it is ROADMAP criterion 1's
+    literal reading, and because it reduces to a two-term subtraction --
+    weight times (a sum over the treated head minus a sum over the control
+    tail) -- that a reader can check in a spreadsheet. Criterion 4 asks
+    for exactly that property. The other two are reported beside it as one
+    line of evidence that the headline does not depend on the choice.
+
+    WHAT EACH ONE BUYS.
+
+    Horvitz-Thompson divides by the frame size and multiplies by a fixed
+    reciprocal propensity. It is unbiased for the design, and it does NOT
+    reproduce the realized arm means, because the realized arm sizes are
+    never exactly the design's expected ones.
+
+    Hajek divides by the REALIZED counts instead. Its defining property is
+    that `v_all` is the realized treated arm's mean outcome exactly and
+    `v_none` the realized control arm's mean exactly, where the
+    Horvitz-Thompson form lands on both only if the two arms came out the
+    same size. That is the strongest available test of the pair and it is
+    asserted rather than described. The cost is that it is a ratio
+    estimator: consistent rather than unbiased, and undefined where a
+    selection holds no rows of the arm it needs, which is why an empty
+    head or tail raises here instead of returning a nan.
+
+    AIPW adds the augmentation term built from the committed `m0`/`m1`
+    base-model predictions:
+
+        V = (1/n) * sum_i [ m_{T(i)}(X_i)
+                          + weight * 1{A(i) = T(i)} * (Y_i - m_{T(i)}(X_i)) ]
+
+    It is doubly robust, and on this data it buys almost nothing: the
+    narrowing of the interval is a fraction of a percent, because the base
+    models explain essentially none of spend's variance and an
+    augmentation term that predicts nothing subtracts nothing from the
+    residual it is meant to shrink. That measurement is recorded in
+    the policy manifest's `estimator_robustness` block, written by the
+    run that produced it, rather than quoted here as a literal that
+    would go stale.
+    With `m0` and `m1` identically zero the augmentation vanishes and this
+    reduces to the Horvitz-Thompson value exactly, which is what pins the
+    arithmetic.
+
+    `m0` and `m1` are REQUIRED keyword arguments. A doubly-robust
+    estimator without outcome models is not doubly robust, and a default
+    of zero would silently publish a third copy of the first estimator
+    under a name that claims otherwise.
+
+    ONE k, NOT A GRID, and one selection shared by all three: the head is
+    the first `int(n * k)` positions of `ranking_order`, the project's
+    single ordering, so the three variants cannot rank differently from
+    each other or from `policy_value_curve`.
+
+    Raises `ValueError` on the input defects `policy_value_curve` rejects,
+    on a `k` outside [0, 1], on `m0` or `m1` of the wrong length or
+    holding a nan, and on a k whose head holds no treated rows or whose
+    tail holds no control rows.
+    """
+    weight = _guard_weight(weight)
+    score, treatment, outcome = _guard_inputs(score, treatment, outcome)
+    m0 = np.asarray(m0, dtype=float)
+    m1 = np.asarray(m1, dtype=float)
+    for name, array in (("m0", m0), ("m1", m1)):
+        if array.shape != outcome.shape:
+            raise ValueError(
+                f"`{name}` has shape {array.shape}; it must match the "
+                f"outcome's {outcome.shape}. The augmentation term is "
+                "applied row by row, so a length mismatch means the "
+                "predictions describe different customers."
+            )
+        nan_positions = np.flatnonzero(np.isnan(array))
+        if nan_positions.size:
+            raise ValueError(
+                f"`{name}` holds {nan_positions.size} nan value(s), the "
+                f"first at position {int(nan_positions[0])}. The base-model "
+                "columns are nan on the rows outside the frame they were "
+                "fitted for, and one nan turns the whole augmented sum "
+                "into a nan without raising."
+            )
+
+    try:
+        k_value = float(k)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"`k` is {k!r}; it must be a number.") from error
+    if not np.isfinite(k_value) or not 0.0 <= k_value <= 1.0:
+        raise ValueError(
+            f"`k` is {k!r}; the targeting depth is a fraction of the frame "
+            "and must lie in [0, 1]."
+        )
+
+    n = int(outcome.size)
+    take = ranking_order(score, seed=seed)
+    # TRUNCATION, never rounding -- the module docstring's decision (f),
+    # and the same expression `policy_value_curve`, `uplift_at_k` and
+    # `economics.emails_at_capacity` all size their selections with.
+    n_targeted = int(n * k_value)
+
+    head = np.zeros(n, dtype=bool)
+    head[take[:n_targeted]] = True
+    tail = ~head
+    treated = treatment == 1.0
+    control = treatment == 0.0
+
+    head_treated = head & treated
+    tail_control = tail & control
+    if not head_treated.any() or not tail_control.any():
+        raise ValueError(
+            f"at k = {k_value} the targeted head holds "
+            f"{int(head_treated.sum())} treated rows and the untargeted "
+            f"tail holds {int(tail_control.sum())} control rows; the Hajek "
+            "variant divides by both counts, so a zero on either side is a "
+            "division by zero rather than a value of zero."
+        )
+
+    ht = PolicyValueVariant(
+        v_pi=float(
+            weight * (outcome[head_treated].sum() + outcome[tail_control].sum()) / n
+        ),
+        v_all=float(weight * outcome[treated].sum() / n),
+        v_none=float(weight * outcome[control].sum() / n),
+        delta_none=0.0,
+        per_targeted=0.0,
+    )
+    ht = _finish_variant(ht, n, n_targeted)
+
+    head_share = n_targeted / n
+    hajek = PolicyValueVariant(
+        v_pi=float(
+            head_share * outcome[head_treated].mean()
+            + (1.0 - head_share) * outcome[tail_control].mean()
+        ),
+        v_all=float(outcome[treated].mean()),
+        v_none=float(outcome[control].mean()),
+        delta_none=0.0,
+        per_targeted=0.0,
+    )
+    hajek = _finish_variant(hajek, n, n_targeted)
+
+    # The augmentation, written once per prescribed action. `m1` is the
+    # prediction under an email and `m0` the prediction under none, so the
+    # policy's own prediction is m1 on the head and m0 on the tail.
+    aug_treated = m1 + weight * np.where(treated, outcome - m1, 0.0)
+    aug_control = m0 + weight * np.where(control, outcome - m0, 0.0)
+    aipw = PolicyValueVariant(
+        v_pi=float((aug_treated[head].sum() + aug_control[tail].sum()) / n),
+        v_all=float(aug_treated.sum() / n),
+        v_none=float(aug_control.sum() / n),
+        delta_none=0.0,
+        per_targeted=0.0,
+    )
+    aipw = _finish_variant(aipw, n, n_targeted)
+
+    return PolicyValueVariants(
+        k=k_value,
+        n=n,
+        n_targeted=n_targeted,
+        weight=weight,
+        ht=ht,
+        hajek=hajek,
+        aipw=aipw,
+    )
+
+
+def _finish_variant(variant, n: int, n_targeted: int) -> PolicyValueVariant:
+    """Fill the two derived fields of a `PolicyValueVariant`.
+
+    Its own function so the two derivations are written once for all three
+    estimators. A per-variant copy is how one of them ends up dividing by
+    the exact `k` instead of the realized count, which is the 0.01%
+    discrepancy `policy_value_curve`'s docstring resolves in writing.
+    """
+    delta_none = variant.v_pi - variant.v_none
+    return PolicyValueVariant(
+        v_pi=variant.v_pi,
+        v_all=variant.v_all,
+        v_none=variant.v_none,
+        delta_none=delta_none,
+        per_targeted=(
+            float(delta_none * n / n_targeted) if n_targeted > 0 else np.nan
+        ),
+    )

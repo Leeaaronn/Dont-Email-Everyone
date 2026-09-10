@@ -158,9 +158,17 @@ def test_evaluation_module_is_pure():
 # `uplift_at_k` and `tie_diagnostics` joined the call list below in plan
 # 03-02; `bootstrap_indices`, `qini_bootstrap_band` and `qini_random_band`
 # in plan 03-05; `stratified_indices` in plan 05-02; `policy_value_curve`
-# and `policy_value_band` in plan 05-04. All ten public functions are
-# called, so "every public function" is literally true rather than a claim
-# about whichever ones happened to be here first.
+# and `policy_value_band` in plan 05-04; `ranking_order`,
+# `argmax_policy_value`, `naive_policy_value` and `policy_value_variants`
+# in plan 05-07. All fourteen public functions are called, so "every
+# public function" is literally true rather than a claim about whichever
+# ones happened to be here first.
+#
+# The count is asserted below against the module's own public surface
+# rather than trusted, because a call list maintained by hand is a call
+# list that silently stops growing (plan 05-07: four functions arrived at
+# once and the fourteenth was the one a hand-maintained list would have
+# missed).
 #
 # 03-05 was the last plan in PHASE 3 to add public surface here, and the
 # list did NOT then stop growing: D-14's `stratified_indices` arrived two
@@ -179,7 +187,10 @@ def test_evaluation_module_is_pure():
 def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     """Call every public function from an empty directory; it stays empty.
 
-    All ten are called below; the comment above records why each is here.
+    All fourteen are called below; the comment above records why each is
+    here, and the completeness check at the end of this function asserts
+    that fourteen is still the whole public surface rather than the part
+    of it somebody remembered.
     """
     monkeypatch.chdir(tmp_path)
     score, treatment, outcome = _two_arm_arrays(n=500, seed=3)
@@ -197,6 +208,52 @@ def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
         treatment,
         outcome,
         indices=evaluation.stratified_indices(treatment, 4),
+    )
+    evaluation.ranking_order(score)
+    arm_codes = np.where(treatment == 1, "womens", "none").astype(object)
+    evaluation.argmax_policy_value(
+        {"womens": score}, arm_codes, outcome, weight=2.0
+    )
+    evaluation.naive_policy_value({"womens": score, "mens": -score})
+    evaluation.policy_value_variants(
+        score,
+        treatment,
+        outcome,
+        k=0.2,
+        m0=np.zeros(outcome.size),
+        m1=np.zeros(outcome.size),
+    )
+
+    called = {
+        "qini_curve",
+        "qini_coefficient",
+        "uplift_at_k",
+        "tie_diagnostics",
+        "bootstrap_indices",
+        "stratified_indices",
+        "qini_bootstrap_band",
+        "qini_random_band",
+        "policy_value_curve",
+        "policy_value_band",
+        "ranking_order",
+        "argmax_policy_value",
+        "naive_policy_value",
+        "policy_value_variants",
+    }
+    public = {
+        name
+        for name, value in vars(evaluation).items()
+        if not name.startswith("_")
+        and callable(value)
+        and getattr(value, "__module__", None) == evaluation.__name__
+        and not isinstance(value, type)
+    }
+    assert public == called, (
+        f"evaluation.py's public function surface is {sorted(public)} but "
+        f"this boundary test calls {sorted(called)}. Every public function "
+        "must be exercised here, or the no-bytes-reach-the-filesystem "
+        "guarantee becomes a guarantee about whichever functions happened "
+        "to exist when the list was last updated."
     )
 
     assert list(tmp_path.iterdir()) == [], (
