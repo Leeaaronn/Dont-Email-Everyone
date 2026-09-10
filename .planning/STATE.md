@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Completed 04-09-PLAN.md — phase 04 complete
-last_updated: "2026-09-10T00:18:41.775Z"
-last_activity: 2026-09-09
+status: executing
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-09-10T00:47:06.345Z"
+last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 26
-  completed_plans: 26
+  total_plans: 35
+  completed_plans: 27
   percent: 57
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-31)
 
 **Core value:** A correct, defensible answer to "which customers should we email, and how much more revenue does that targeted campaign generate versus blasting everyone?" — grounded in randomized-experiment causal inference, not correlational ML.
-**Current focus:** Phase 5 — business & policy layer
+**Current focus:** Phase 05 — business-policy-layer
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-09-09
+Phase: 05 (business-policy-layer) — EXECUTING
+Plan: 2 of 9
+Status: Ready to execute
+Last activity: 2026-09-10
 
-Progress: [██████████] 100%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Progress: [██████████] 100%
 | Phase 04 P07 | 71min | 3 tasks | 8 files |
 | Phase 04 P08 | 214min | 3 tasks | 16 files |
 | Phase 04 P09 | 39min | 3 tasks | 2 files |
+| Phase 05 P01 | 9min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -185,6 +186,11 @@ Recent decisions affecting current work:
 - [Phase 04-09]: the forest-ratio anti-overclaim window is SYMMETRIC (+/-1500 chars) -- forward-only fails on correct prose at 1 of 5 occurrences because a figure list quotes 242.70x a paragraph after the sentence that qualifies it, and demanding the qualifier be repeated after every backward reference is a demand about typing rather than about honesty
 - [Phase 04-09]: Task 2's 'no deleted line matching validity|metric' criterion is unsatisfiable alongside its own single-literal REPORT_NAMES criterion; the three-name tuple was written, the one deleted line is the constant itself, and no Phase 2 or Phase 3 test function was touched
 - [Phase 04-09]: the checkpoint fixed the 51KB length concern by ADDING a ~180-word 'Result in brief' signpost rather than cutting evidence -- and the block was audited against three ordering assertions before insertion, since each keys on the FIRST occurrence of a token (ships, 0.9, +0.009569) above the results boundary
+- [Phase 05]: The k = 0.20 capacity anchor is pre-registered in reports/policy.md at commit 655f74a, the phase's first content commit -- D-13's provenance argument is prior by git timestamp, not by assertion
+- [Phase 05]: policy.md joins tests/test_reports.py REPORT_NAMES in 05-01 rather than 05-09 (which 05-VALIDATION.md's gap list assigned it to) -- the gap is already closed, 05-09 must not re-add it
+- [Phase 05]: economics.py declares no cost and no margin constant, enforced by a vars(economics) namespace sweep rather than by the docstring alone (D-10)
+- [Phase 05]: emails_at_capacity rejects a non-integral population instead of truncating it -- a fraction passed where a count belongs is a unit error truncation would hide
+- [Phase 05]: The criterion-5 purity sweep bans the substring 'st.', which collides with ordinary English: no word ending in -st may be followed by a period in evaluation.py or economics.py prose
 
 ### Pending Todos
 
@@ -209,6 +215,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-09T22:49:53.526Z
-Stopped at: Completed 04-09-PLAN.md — phase 04 complete
+Last session: 2026-09-10T00:47:06.338Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None

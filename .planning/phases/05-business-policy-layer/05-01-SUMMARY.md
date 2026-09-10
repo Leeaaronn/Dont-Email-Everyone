@@ -49,7 +49,7 @@ patterns-established:
 requirements-completed: []
 
 # Metrics
-duration: 55min
+duration: 9min
 completed: 2026-09-10
 ---
 
@@ -59,9 +59,9 @@ completed: 2026-09-10
 
 ## Performance
 
-- **Duration:** ~55 min
-- **Started:** 2026-09-10T00:36:11Z (timestamp of the pre-registration commit)
-- **Completed:** 2026-09-10T00:45:04Z (final task commit; wall-clock includes the pre-commit measurement passes)
+- **Duration:** 9 min, measured commit-to-commit; context loading and the pre-commit measurement passes preceded the first commit and are not in that span
+- **Started:** 2026-09-10T00:36:11Z (`655f74a`, the pre-registration commit)
+- **Completed:** 2026-09-10T00:45:04Z (`dc556b8`, the final task commit)
 - **Tasks:** 3 (one of them TDD, so 4 code commits)
 - **Files modified:** 4 (3 created, 1 modified)
 

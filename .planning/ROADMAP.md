@@ -127,12 +127,12 @@ Plans:
   4. Committed artifacts (`scored_holdout.parquet`, precomputed bootstrap bands, `ate.json`, `manifest.json`) are small and format-stable, and are sufficient to reproduce every headline number with arithmetic alone — no model file required.
   5. `evaluation.py` and `economics.py` import neither Streamlit nor any file I/O, enforced by a test, so the README's numbers and the app's numbers can never come from different code.
 
-**Plans:** 0/9 plans executed
+**Plans:** 1/9 plans executed
 
 Plans:
 **Wave 0** *(blocking gate — must be the phase's first commit)*
 
-- [ ] 05-01-PLAN.md — Pre-register the k = 0.20 anchor on provenance grounds; create economics.py with HEADLINE_CAPACITY, emails_at_capacity and criterion 5's two purity tests (wave 0 — gates the phase, because D-13's anchor argument is provenance-based and is worthless unless this commit precedes every Phase 5 number)
+- [x] 05-01-PLAN.md — Pre-register the k = 0.20 anchor on provenance grounds; create economics.py with HEADLINE_CAPACITY, emails_at_capacity and criterion 5's two purity tests (wave 0 — gates the phase, because D-13's anchor argument is provenance-based and is worthless unless this commit precedes every Phase 5 number)
 
 **Wave 1** *(blocked on Wave 0; no shared files among themselves — evaluation.py, pipeline.py and economics.py respectively)*
 
@@ -210,7 +210,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 2. Experiment Validity | 6/6 | Complete   | 2026-09-05 |
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
-| 5. Business & Policy Layer | 0/9 | Planned     | - |
+| 5. Business & Policy Layer | 1/9 | In Progress|  |
 | 6. Streamlit App & Deployment | 0/TBD | Not started | - |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 
