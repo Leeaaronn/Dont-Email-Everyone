@@ -841,12 +841,18 @@ def policy_value_curve(
                                       - sum_{tail, control} Y ]
 
     The second is MINUS the incremental outcome of the bottom (1 - k). At
-    zero cost, beating a blanket send therefore requires a segment that
-    email measurably HARMS, and the Hillstrom womens arm has a positive
-    ATE on all three outcomes. So `delta_all` is non-positive at every k
-    on this data, and that is arithmetic rather than model failure. It is
-    also the whole reason D-08a overturned D-08 and moved the headline
-    onto the contrast against a random send of the same size.
+    zero cost, beating a blanket send therefore requires a tail that email
+    measurably HARMS, and the Hillstrom womens arm has a positive ATE on
+    all three outcomes. The POINT estimate does turn positive in a
+    mid-range window where the untargeted tail's own measured effect
+    happens to be negative -- 37 of 101 grid points on spend, 30 on visit
+    and 20 on conversion, every one of them at k of 0.49 or above -- but
+    the interval never follows it. Swept over the whole grid at R = 500,
+    not one k gives a vs-everyone band that excludes zero from ABOVE on
+    any of the three outcomes, while 12 to 46 points per outcome exclude
+    it from below. That is arithmetic rather than model failure, and it is
+    why D-08a overturned D-08 and moved the headline onto the contrast
+    against a random send of the same size.
 
     `delta_random` IS NOT THE QINI CURVE MINUS ITS RANDOM CHORD. The two
     are close -- measured correlation 0.9997 across the 101-point grid on
@@ -1219,6 +1225,38 @@ def _guard_band_grid(n_grid, level) -> None:
         )
 
 
+def _guard_indices(indices, n):
+    """Validate a caller-supplied resample matrix against its own frame.
+
+    Extracted from `qini_bootstrap_band`, whose three checks these are
+    verbatim, so `policy_value_band` inherits the identical admissibility
+    rules and the identical messages rather than a second hand-written
+    copy that eventually disagrees. Returns the matrix as a NumPy array.
+    """
+    indices = np.asarray(indices)
+    if indices.ndim != 2 or indices.shape[1] != n:
+        raise ValueError(
+            f"`indices` has shape {indices.shape}; a resample matrix "
+            "must be 2-D with one column per row of the data, i.e. "
+            f"(n_resamples, {n}). A matrix built for a different frame "
+            "would index the wrong customers without raising."
+        )
+    if indices.dtype.kind not in ("i", "u"):
+        raise ValueError(
+            f"`indices` has dtype {indices.dtype}; it must be an "
+            "integer kind. A float matrix cannot be used as a fancy "
+            "index, and a boolean one would silently select a mask "
+            "instead of a resample."
+        )
+    if indices.shape[0] < 1:
+        raise ValueError(
+            f"`indices` carries {indices.shape[0]} replicate rows; the "
+            "percentile of an empty replicate stack is nan, which "
+            "renders as a missing band rather than as an error."
+        )
+    return indices
+
+
 def qini_bootstrap_band(
     score,
     treatment,
@@ -1276,27 +1314,7 @@ def qini_bootstrap_band(
     if indices is None:
         indices = bootstrap_indices(treatment, n_resamples, seed)
     else:
-        indices = np.asarray(indices)
-        if indices.ndim != 2 or indices.shape[1] != n:
-            raise ValueError(
-                f"`indices` has shape {indices.shape}; a resample matrix "
-                "must be 2-D with one column per row of the data, i.e. "
-                f"(n_resamples, {n}). A matrix built for a different frame "
-                "would index the wrong customers without raising."
-            )
-        if indices.dtype.kind not in ("i", "u"):
-            raise ValueError(
-                f"`indices` has dtype {indices.dtype}; it must be an "
-                "integer kind. A float matrix cannot be used as a fancy "
-                "index, and a boolean one would silently select a mask "
-                "instead of a resample."
-            )
-        if indices.shape[0] < 1:
-            raise ValueError(
-                f"`indices` carries {indices.shape[0]} replicate rows; the "
-                "percentile of an empty replicate stack is nan, which "
-                "renders as a missing band rather than as an error."
-            )
+        indices = _guard_indices(indices, n)
 
     grid = np.linspace(0.0, 1.0, n_grid)
     curves = np.empty((indices.shape[0], n_grid))
@@ -1398,3 +1416,114 @@ def qini_random_band(
     tail = (1.0 - level) / 2.0 * 100.0
     lo, hi = np.percentile(curves, [tail, 100.0 - tail], axis=0)
     return grid, np.asarray(lo, dtype=float), np.asarray(hi, dtype=float)
+
+
+# The four contrasts `policy_value_band` bands, in the order they are
+# returned. A tuple rather than a comprehension over the dataclass fields:
+# `grid`, `n_targeted` and `v_pi` are not contrasts and banding them would
+# publish an interval for a quantity nothing quotes.
+POLICY_CONTRASTS = ("delta_none", "delta_all", "delta_random", "per_targeted")
+
+
+def policy_value_band(
+    score,
+    treatment,
+    outcome,
+    *,
+    indices,
+    weight: float = POLICY_WEIGHT,
+    n_grid: int = BAND_GRID_POINTS,
+    level: float = BOOTSTRAP_BAND_LEVEL,
+    seed: int = 20260902,
+):
+    """Pointwise percentile bands for all four policy contrasts at once.
+
+    Returns `(grid, bands)`. `grid` is `np.linspace(0.0, 1.0, n_grid)`,
+    the same grid `policy_value_curve` returns, and `bands` maps each name
+    in `POLICY_CONTRASTS` to a `(lo, hi)` pair of float64 arrays of length
+    `n_grid`. Nothing nested, nothing but floats: `pipeline.py`'s rule is
+    that a nested dtype survives a Parquet write and then fails to load
+    under pandas plus pyarrow alone, and each of these pairs becomes two
+    float columns of `policy_bands.parquet`.
+
+    `indices` IS REQUIRED AND KEYWORD-ONLY, deliberately stricter than
+    `qini_bootstrap_band`'s optional `indices=None` hook. That optional
+    hook is the softer precedent this tightens on purpose. CONTEXT.md
+    D-12's claim is that the Qini band, this policy band and Phase 6's
+    revenue band are JOINTLY valid because all three are computed on the
+    same replicates; a default that quietly built its own draw matrix
+    would leave that claim as a comment describing a property the code
+    does not have, and no test could tell the difference from the outside.
+    Pass a matrix from `stratified_indices` -- for this phase, the one
+    three-level matrix over all 32,001 holdout rows, masked by `segment`.
+
+    THE TIE-BREAK SEED VARIES PER REPLICATE AND THE DRAW DOES NOT.
+    Replicate `r` is valued at `seed + r`, exactly as
+    `qini_bootstrap_band`'s loop advances its own, so the two bands cannot
+    settle onto different conventions and be quoted side by side. On this
+    data the choice is free: the womens score's largest tie group covers
+    0.14% of the rows, and the k = 0.20 spend policy value is identical
+    across eight consecutive tie seeds, spread exactly zero. It buys
+    convention alignment and costs nothing measurable.
+
+    A PLAIN PYTHON LOOP OVER REPLICATES, for the memory reason
+    `qini_bootstrap_band`'s own comment sets out at length and which is
+    not repeated here: the vectorized alternative allocates an R-by-n
+    float64 array on top of the index matrix, and Streamlit Community
+    Cloud's envelope is around 690 MB. Four `(R, n_grid)` stacks at
+    R = 500 and n_grid = 101 are 1.6 MB in total, so the stacking below is
+    not what costs anything.
+
+    `np.percentile` rather than an index into a sorted replicate stack.
+    The naive `sorted(values)[int(0.025 * R)]` is biased low at small R
+    and would quietly narrow the band in exactly the regime a reader
+    reaches for first when checking a result by hand.
+
+    `per_targeted` IS NAN AT `grid[0]`, in every replicate, because no
+    emails are sent there. Its band is computed only on the columns where
+    every replicate is finite and is nan elsewhere, so a missing per-email
+    figure stays missing rather than becoming a percentile of a stack that
+    holds no numbers.
+
+    Raises `ValueError` on the same input defects `policy_value_curve`
+    rejects, on a bad `n_grid` or `level`, and on an `indices` matrix that
+    is not 2-D with one integer column per row of the data.
+    """
+    score, treatment, outcome = _guard_inputs(score, treatment, outcome)
+    _guard_band_grid(n_grid, level)
+    weight = _guard_weight(weight)
+    indices = _guard_indices(indices, treatment.size)
+
+    grid = np.linspace(0.0, 1.0, n_grid)
+    stacks = {
+        name: np.empty((indices.shape[0], n_grid)) for name in POLICY_CONTRASTS
+    }
+    for r, take in enumerate(indices):
+        replicate = policy_value_curve(
+            score[take],
+            treatment[take],
+            outcome[take],
+            weight=weight,
+            n_grid=n_grid,
+            seed=seed + r,
+        )
+        for name in POLICY_CONTRASTS:
+            stacks[name][r] = getattr(replicate, name)
+
+    tail = (1.0 - level) / 2.0 * 100.0
+    bands = {}
+    for name in POLICY_CONTRASTS:
+        stack = stacks[name]
+        lo = np.full(n_grid, np.nan)
+        hi = np.full(n_grid, np.nan)
+        # Column-wise rather than whole-array: `per_targeted` carries a
+        # structural nan in its first column and np.percentile would
+        # return nan for the WHOLE row of percentiles it appears in.
+        usable = np.all(np.isfinite(stack), axis=0)
+        if np.any(usable):
+            lo[usable], hi[usable] = np.percentile(
+                stack[:, usable], [tail, 100.0 - tail], axis=0
+            )
+        bands[name] = (np.asarray(lo, dtype=float), np.asarray(hi, dtype=float))
+
+    return grid, bands
