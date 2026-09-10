@@ -59,7 +59,16 @@ and, under `config.FIGURES`, `love_plot.png` and `ate_forest.png`.
   into a report still says what produced it.
 - `scored_holdout.parquet` -- one row per HOLDOUT customer of the analysis
   table, wide, with the six primary cells' uplift, both base scores and the
-  response baseline. Holdout rows only, which is what makes an in-sample
+  response baseline. Each primary cell carries one FURTHER uplift column,
+  suffixed `_all`, holding that cell's uplift on every holdout row rather
+  than on the arm's own frame alone. Those six exist because a cross-arm
+  policy value needs the other arm's score on the TREATED rows, where the
+  original column is NaN by construction -- an argmax over two arms is
+  otherwise undefined on exactly the rows the estimator counts. The
+  original masked columns are unchanged, and the `_all` suffix is what
+  keeps the two meanings distinguishable downstream: a consumer wanting
+  "this arm's score where this arm was actually run" still reads the
+  unsuffixed column. Holdout rows only, which is what makes an in-sample
   metric structurally impossible to report downstream rather than merely
   discouraged. Wide rather than keyed by (arm, customer) because the two
   arms share one control group: the wide form makes those shared customers
@@ -916,9 +925,30 @@ def train() -> None:
                 }
 
                 if learner == models.PRIMARY_CONFIG:
+                    # `uplift_hold` above covers this arm's OWN holdout rows
+                    # only, so on a womens-arm customer the mens-arm score is
+                    # absent -- and a per-customer argmax over the two arms is
+                    # then undefined on exactly the treated rows a policy
+                    # value has to count (Phase 5 D-05, D-15). `uplift_all`
+                    # closes that: scoring a holdout womens-arm customer with
+                    # the mens T-learner is an ordinary out-of-sample
+                    # prediction, and what the assembly loop below calls
+                    # "inventing a number" is inventing an OUTCOME, not a
+                    # PREDICTION.
+                    #
+                    # No refit happens here. `m0` and `m1` are the estimators
+                    # already fitted above and this is a `predict` over
+                    # `X.loc[holdout_index]`. Nor is there leakage:
+                    # `model.json`'s `split` block records ONE global 50/50
+                    # draw over the whole analysis table, so every holdout row
+                    # was unseen by every fit regardless of which arm it sits
+                    # in.
                     primary_scores[(arm, outcome)] = {
                         "index": hold_idx,
                         "uplift": uplift_hold,
+                        "uplift_all": models.uplift(
+                            m0, m1, X.loc[holdout_index]
+                        ),
                         "m0": score_m0,
                         "m1": score_m1,
                         "response": baseline_hold,
@@ -1087,17 +1117,40 @@ def train() -> None:
         uplift_column = f"uplift_{arm}_{outcome}"
         if not cell["ships"]:
             uplift_column = f"unproven_{uplift_column}"
+            # Deliberately NOT extended with the `_all` name below. This list
+            # becomes `model.json`'s published labelling contract, which is
+            # Phase 4 output and is asserted byte-identical after the Phase 5
+            # regeneration. The `_all` column still CARRIES the prefix -- it
+            # is derived from `uplift_column`, which already has it -- so the
+            # label travels with the number (D-03) without the contract
+            # itself moving.
             unproven_columns.append(uplift_column)
         for column, values in (
             (uplift_column, scores["uplift"]),
+            (f"{uplift_column}_all", scores["uplift_all"]),
             (f"m0_{arm}_{outcome}", scores["m0"]),
             (f"m1_{arm}_{outcome}", scores["m1"]),
             (f"response_{arm}_{outcome}", scores["response"]),
         ):
-            # NaN outside the arm's own frame: a Womens E-Mail customer has
-            # no mens-arm uplift, and writing a number there would invent one.
-            filled = pd.Series(np.nan, index=holdout_index, dtype="float32")
-            filled.loc[scores["index"]] = np.asarray(values, dtype="float32")
+            values = np.asarray(values, dtype="float32")
+            if column.endswith("_all"):
+                # The ONE unmasked family. `uplift_all` is defined on every
+                # row of `holdout_index`, not just the arm's own frame, so it
+                # is assigned whole rather than through the mask below. The
+                # other four families stay masked exactly as before: they are
+                # the arm's own scores on the arm's own customers, and the
+                # `_all` suffix is what keeps the two meanings apart.
+                filled = pd.Series(
+                    values, index=holdout_index, dtype="float32"
+                )
+            else:
+                # NaN outside the arm's own frame: a Womens E-Mail customer
+                # has no mens-arm uplift, and writing a number there would
+                # invent one.
+                filled = pd.Series(
+                    np.nan, index=holdout_index, dtype="float32"
+                )
+                filled.loc[scores["index"]] = values
             scored[column] = filled
 
     # D-20's cross-arm block, measured on the SHARED CONTROL holdout rows --
