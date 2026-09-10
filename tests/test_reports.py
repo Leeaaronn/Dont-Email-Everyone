@@ -91,7 +91,34 @@ FIGURE_NAMES = [
     # D-21's monotonicity scatter, one per shipping cell.
     "monotonicity_womens_visit_linear.png",
     "monotonicity_womens_conversion_linear.png",
+    # Phase 5's policy exhibits. The two policy curves are the SAME ranking
+    # on two outcomes and the pair is the argument: spend's band covers zero
+    # at the pre-registered anchor and visit's does not, which is visible
+    # without reading a number because both shade every depth where the band
+    # covers zero. Then D-09's cost-optimal-depth exhibit and D-05's
+    # naive-against-honest comparison.
+    "policy_curve_womens_visit_spend.png",
+    "policy_curve_womens_visit_visit.png",
+    "cost_sweep_k_star.png",
+    "optimism_naive_vs_honest.png",
 ]
+
+# The subset belonging to Phase 5, split out of FIGURE_NAMES for exactly the
+# reason VALIDITY_FIGURES was: `test_model_report_references_every_committed_
+# figure` asserts that `reports/model.md` -- PHASE 4's write-up -- references
+# every non-Phase-2 name on the allowlist, and four Phase 5 exhibits landing
+# there would fail Phase 4's report for not mentioning figures that did not
+# exist when it was written. Naming them keeps them under the presence,
+# byte-floor and git-tracking loop while leaving model.md's own assertion
+# about model.md's own figures. Plan 05-09 brings these four under the same
+# kind of reference assertion against `reports/policy.md`, in the plan that
+# authors that document's results.
+POLICY_FIGURES = (
+    "policy_curve_womens_visit_spend.png",
+    "policy_curve_womens_visit_visit.png",
+    "cost_sweep_k_star.png",
+    "optimism_naive_vs_honest.png",
+)
 
 MIN_FIGURE_BYTES = 5_000
 
@@ -166,6 +193,25 @@ def test_figures_exist():
             "figures, so an untracked figure is missing from a fresh clone "
             "even though it is present here."
         )
+
+
+def test_policy_figures_are_allowlisted():
+    # The same containment check `test_validity_figures_are_allowlisted`
+    # makes, and for the same failure: POLICY_FIGURES drives what
+    # MODEL_FIGURES excludes, so a rename in one that is not made in the
+    # other would quietly put a Phase 5 exhibit back into Phase 4's
+    # reference assertion, or drop it out of every assertion entirely.
+    assert set(POLICY_FIGURES) <= set(FIGURE_NAMES), (
+        f"{sorted(set(POLICY_FIGURES) - set(FIGURE_NAMES))} is held in "
+        "POLICY_FIGURES but is not on the committed allowlist"
+    )
+    assert not set(POLICY_FIGURES) & set(VALIDITY_FIGURES), (
+        "a figure cannot belong to both Phase 2 and Phase 5"
+    )
+    assert not set(POLICY_FIGURES) & set(MODEL_FIGURES), (
+        "MODEL_FIGURES must exclude every Phase 5 exhibit; model.md is "
+        "Phase 4's write-up and cannot reference a figure drawn after it"
+    )
 
 
 def test_validity_figures_are_allowlisted():
@@ -318,7 +364,11 @@ MODEL_REPORT = "model.md"
 # The phase's figures: everything on the committed allowlist that is not one
 # of Phase 2's two. Derived rather than typed out, so this file carries no
 # second copy of the thirteen names and a rename lands in exactly one place.
-MODEL_FIGURES = tuple(n for n in FIGURE_NAMES if n not in VALIDITY_FIGURES)
+MODEL_FIGURES = tuple(
+    n
+    for n in FIGURE_NAMES
+    if n not in VALIDITY_FIGURES and n not in POLICY_FIGURES
+)
 
 
 def _model_report_text():

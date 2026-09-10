@@ -147,6 +147,17 @@ wrote plus the `ate.parquet` that `analyze` wrote, and writes, under
   two sensitivity rankings are keyed by their own column names under
   `sensitivity` and contribute no number to `headline` (D-03).
 
+`policy` also writes, under `config.FIGURES`, the four PNGs named in
+`POLICY_FIGURE_STEMS` below: the headline ranking's policy curve on the
+spend outcome and again on the visit outcome, D-09's cost-optimal-depth
+exhibit, and D-05's naive-against-honest optimism comparison. Two curves
+rather than nine, and the pair is the argument: `spend` is the outcome the
+project's question is about and its interval covers zero at the
+pre-registered anchor, while `visit` is the cell that cleared Phase 4's
+permutation null and whose interval does not. Both figures shade every
+depth at which the band covers zero, so the difference between them is
+visible without reading a number.
+
 `policy` READS what `train` and `analyze` wrote and fits nothing, which is
 a second real ordering dependency -- `analyze` then `train` then `policy`
 -- so `all` chains all four and `policy` raises by name if any one of its
@@ -1661,6 +1672,43 @@ ALL_ROWS_SUFFIX = "_all"
 POLICY_ROBUSTNESS_OUTCOME = "spend"
 POLICY_ROBUSTNESS_CELL = "womens_spend"
 
+# The four Phase 5 exhibits, named for what they show. Pinned as a constant
+# so the count printed at the end of a run and the set a test asserts on
+# come from one place; `tests/test_reports.py::FIGURE_NAMES` re-lists them
+# independently, for the reason 04-08 recorded -- a figure written but never
+# committed and a figure renamed in code are two different failures, and
+# deriving the allowlist from the module under test collapses both into no
+# failure at all.
+POLICY_FIGURE_STEMS = (
+    "policy_curve_womens_visit_spend",
+    "policy_curve_womens_visit_visit",
+    "cost_sweep_k_star",
+    "optimism_naive_vs_honest",
+)
+
+# D-08a. The two committed policy curves draw the HEADLINE contrast, which
+# is targeted top-k against a random send of the same size -- not against
+# emailing everyone. The other three contrasts stay in the artifact for any
+# reader who wants them; putting the superseded one on a committed figure
+# would be publishing D-08 after D-08a replaced it.
+POLICY_FIGURE_CONTRAST = "delta_random"
+
+
+def _policy_curve_title(outcome):
+    """The title for one committed policy curve.
+
+    Two lines rather than one. `plots._fit_titles` measures the rendered
+    width and shrinks the type until it fits, so a single long line would
+    not be clipped -- it would be published at 7 points beside 10-point axis
+    labels. The break is where a reader would put one anyway: the claim on
+    the first line, the cell it is measured on below it.
+    """
+    return (
+        "Targeted top-k against a random send of the same size\n"
+        f"Ranking: {POLICY_HEADLINE_RANKING}    Outcome: {outcome}"
+    )
+
+
 def policy() -> None:
     """Value the top-k targeting policies and write the four Phase 5
     artifacts described in the module docstring.
@@ -1728,7 +1776,7 @@ def policy() -> None:
     model_block = json.loads(model_path.read_text(encoding="utf-8"))
     unproven_columns = list(model_block["headline"]["unproven_columns"])
     print(
-        f"[1/7] inputs: scored={scored.shape} ate={committed_ate.shape} "
+        f"[1/8] inputs: scored={scored.shape} ate={committed_ate.shape} "
         f"unproven cells named by model.json: {len(unproven_columns)}"
     )
 
@@ -1782,7 +1830,7 @@ def policy() -> None:
         name: frame[name].to_numpy(dtype=float) for name in POLICY_OUTCOMES
     }
     print(
-        f"[2/7] one three-level draw: {indices_all.shape} over all holdout "
+        f"[2/8] one three-level draw: {indices_all.shape} over all holdout "
         f"rows, masked to {indices.shape} on the womens+control frame "
         f"({int(treatment.sum())} treated / {int((treatment == 0).sum())} "
         "control)"
@@ -1862,7 +1910,7 @@ def policy() -> None:
 
     curve_out = pd.concat(curve_parts, ignore_index=True)
     band_out = pd.concat(band_parts, ignore_index=True)
-    print(f"[3/7] curves={curve_out.shape} bands={band_out.shape}")
+    print(f"[3/8] curves={curve_out.shape} bands={band_out.shape}")
 
     # D-09's exhibit, on the headline ranking and the spend outcome only:
     # money is the axis a cost sweep is about, and the other eight cells
@@ -1942,7 +1990,7 @@ def policy() -> None:
     zeroed = np.flatnonzero(k_star == 0.0)
     first_zero_ratio = float(swept[zeroed[0]]) if zeroed.size else None
     print(
-        f"[4/7] cost exhibit: {sweep_out.shape} rows, k* from {zero_cost_k} "
+        f"[4/8] cost exhibit: {sweep_out.shape} rows, k* from {zero_cost_k} "
         f"at c/m = 0 to {float(k_star[-1])} at {POLICY_RATIO_MAX}, "
         f"{int(np.unique(k_star).size)} distinct optima, first breakpoint "
         f"{first_breakpoint}"
@@ -2319,7 +2367,7 @@ def policy() -> None:
         ),
     }
     print(
-        f"[5/7] optimism: winners_curse on {POLICY_ROBUSTNESS_OUTCOME} = "
+        f"[5/8] optimism: winners_curse on {POLICY_ROBUSTNESS_OUTCOME} = "
         f"{decomposition[POLICY_ROBUSTNESS_OUTCOME]['unproven_winners_curse']}"
         f", argmax picks {mens_name} on "
         f"{decomposition[POLICY_ROBUSTNESS_OUTCOME]['unproven_argmax_share_mens']}"
@@ -2502,7 +2550,7 @@ def policy() -> None:
         "estimator_robustness": estimator_robustness,
     }
     print(
-        f"[6/7] manifest assembled: headline on {POLICY_HEADLINE_RANKING} "
+        f"[6/8] manifest assembled: headline on {POLICY_HEADLINE_RANKING} "
         f"at k = {capacity_k} ({n_targeted} of {n_frame} customers), "
         f"{len(manifest['sensitivity'])} sensitivity rankings"
     )
@@ -2524,7 +2572,84 @@ def policy() -> None:
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
 
-    print(f"[7/7] wrote 4 policy artifacts to {config.PROCESSED}")
+    print(f"[7/8] wrote 4 policy artifacts to {config.PROCESSED}")
+    # Creates `config.REPORTS` as a parent in the same call, exactly as
+    # `analyze()` and `train()` rely on.
+    config.FIGURES.mkdir(parents=True, exist_ok=True)
+
+    # The orchestrator owns the write and the close; plots.py returns a
+    # Figure and renders nothing. Four explicit statement pairs, never a
+    # loop, for the reason train()'s thirteen carry: the source-reading
+    # boundary test counts the write calls against the close calls in this
+    # module's body, and a loop would write four figures from one occurrence
+    # of each token, leaving the count meaningless. Neither token is spelled
+    # out in this comment -- naming one here would inflate its own count by
+    # one, the same rephrase-rather-than-drop disposition 02-03, 03-01,
+    # 04-06 and 04-08 each recorded for a grep-sensitive line.
+    #
+    # `dpi=150` throughout, matching every figure Phase 2 and Phase 4 wrote.
+    #
+    # Two policy curves, not nine. `spend` is the outcome the project's
+    # question is about and `visit` is the cell that actually cleared Phase
+    # 4's permutation null, so the pair is the honest presentation of one
+    # ranking: the dollar figure whose interval covers zero at the anchor,
+    # beside the rate whose interval does not. Committing all nine would
+    # bury that contrast in a directory listing.
+    figure = plots.policy_curve_plot(
+        curve_out.loc[
+            (curve_out["ranking"] == POLICY_HEADLINE_RANKING)
+            & (curve_out["outcome"] == "spend")
+        ],
+        band_out.loc[
+            (band_out["ranking"] == POLICY_HEADLINE_RANKING)
+            & (band_out["outcome"] == "spend")
+        ],
+        contrast=POLICY_FIGURE_CONTRAST,
+        unit=ate.OUTCOMES["spend"],
+        anchor=economics.HEADLINE_CAPACITY,
+        title=_policy_curve_title("spend"),
+    )
+    figure.savefig(
+        config.FIGURES / "policy_curve_womens_visit_spend.png", dpi=150
+    )
+    plt.close(figure)
+
+    figure = plots.policy_curve_plot(
+        curve_out.loc[
+            (curve_out["ranking"] == POLICY_HEADLINE_RANKING)
+            & (curve_out["outcome"] == "visit")
+        ],
+        band_out.loc[
+            (band_out["ranking"] == POLICY_HEADLINE_RANKING)
+            & (band_out["outcome"] == "visit")
+        ],
+        contrast=POLICY_FIGURE_CONTRAST,
+        unit=ate.OUTCOMES["visit"],
+        anchor=economics.HEADLINE_CAPACITY,
+        title=_policy_curve_title("visit"),
+    )
+    figure.savefig(
+        config.FIGURES / "policy_curve_womens_visit_visit.png", dpi=150
+    )
+    plt.close(figure)
+
+    figure = plots.cost_sweep_plot(
+        sweep_out,
+        title=(
+            "Cost-optimal targeting depth against the cost-to-margin ratio"
+        ),
+    )
+    figure.savefig(config.FIGURES / "cost_sweep_k_star.png", dpi=150)
+    plt.close(figure)
+
+    figure = plots.optimism_plot(manifest["optimism"])
+    figure.savefig(config.FIGURES / "optimism_naive_vs_honest.png", dpi=150)
+    plt.close(figure)
+
+    print(
+        f"[8/8] figures: {len(POLICY_FIGURE_STEMS)} written to "
+        f"{config.FIGURES}"
+    )
 
 
 def main(argv=None) -> None:

@@ -32,7 +32,9 @@ runs -- these tests assert structure (limits, tick labels, legend entries,
 error-bar spans) and a non-trivial file size, never a checksum.
 """
 
+import copy
 import inspect
+import json
 import re
 
 import matplotlib
@@ -1199,6 +1201,632 @@ def test_uplift_vs_base_score_plot_leaves_no_stray_figures_on_a_guard_raise(
     assert plt.get_fignums() == []
 
 
+
+
+# --------------------------------------------------------------------------
+# Phase 5: policy exhibits -- fixtures
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def policy_curve_frame():
+    """The committed 101-row curve for the headline ranking on spend.
+
+    Read from `data/processed/policy_curve.parquet` rather than synthesized,
+    because the property these figures are judged on is a property of the
+    real bands: the spend contrast's interval covers zero at the
+    pre-registered anchor and at an isolated depth between two stretches
+    where it does not. No convenient frame reproduces that by accident.
+    """
+    curve = pd.read_parquet(config.PROCESSED / "policy_curve.parquet")
+    return curve.loc[
+        (curve["ranking"] == "uplift_womens_visit")
+        & (curve["outcome"] == "spend")
+    ]
+
+
+@pytest.fixture(scope="module")
+def policy_band_frame():
+    """The committed band rows matching `policy_curve_frame`, all contrasts."""
+    bands = pd.read_parquet(config.PROCESSED / "policy_bands.parquet")
+    return bands.loc[
+        (bands["ranking"] == "uplift_womens_visit")
+        & (bands["outcome"] == "spend")
+    ]
+
+
+@pytest.fixture(scope="module")
+def cost_sweep_frame():
+    """The committed cost sweep, swept rows and illustrative pairs together."""
+    return pd.read_parquet(config.PROCESSED / "cost_sweep.parquet")
+
+
+@pytest.fixture(scope="module")
+def optimism_block():
+    """The committed manifest's `optimism` block."""
+    manifest = json.loads(
+        (config.PROCESSED / "manifest.json").read_text(encoding="utf-8")
+    )
+    return manifest["optimism"]
+
+
+def _filled_regions(ax):
+    """Every filled area on `ax` -- ribbons and shaded spans.
+
+    A `fill_between` is a PolyCollection and an `axvspan` is a Patch, so a
+    test that looked for only one of the two would pass on a figure missing
+    the other. The patch's concrete class is deliberately not named:
+    matplotlib returns a Polygon from `axvspan` in some versions and a
+    Rectangle in others (3.11.1 here), and pinning the class would make a
+    matplotlib upgrade look like a missing figure element.
+    """
+    collections = [c for c in ax.collections if isinstance(c, PolyCollection)]
+    return collections + list(ax.patches)
+
+
+def _patch_x_span(patch):
+    """The (x0, x1) a Patch covers in DATA coordinates."""
+    box = patch.get_path().get_extents(patch.get_patch_transform())
+    return float(box.x0), float(box.x1)
+
+
+# --------------------------------------------------------------------------
+# policy_curve_plot
+# --------------------------------------------------------------------------
+
+
+def test_policy_curve_plot_returns_a_figure(policy_curve_frame, policy_band_frame):
+    before = plt.get_fignums()
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    assert isinstance(fig, matplotlib.figure.Figure)
+    plt.close(fig)
+    assert plt.get_fignums() == before, (
+        "policy_curve_plot left a figure registered in pyplot's global state"
+    )
+
+
+def test_policy_curve_plot_axis_labels_name_the_grain(
+    policy_curve_frame, policy_band_frame
+):
+    # The load-bearing wording. All three grains are alive in this phase --
+    # per population customer, per targeted customer, per treated customer --
+    # and `evaluation.py`'s decision (g) calls conflating them PITFALLS
+    # Pitfall 8's headline failure mode. A y label that names the unit but
+    # not the denominator leaves the reader to guess which one is drawn.
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    ax = fig.axes[0]
+    y_label = ax.get_ylabel()
+    assert "dollars" in y_label, y_label
+    assert "per population customer" in y_label, y_label
+    assert "per targeted customer" not in y_label, y_label
+    # And the noun is the OUTCOME's, never inferred from the unit -- the
+    # exact defect that published "Cumulative incremental visits" over three
+    # curves made of conversions in Phase 4.
+    assert "spend" in y_label, y_label
+    assert "visits" not in y_label, y_label
+
+    x_label = ax.get_xlabel()
+    assert "percentage" in x_label, x_label
+    assert "21,347" in x_label, x_label
+    plt.close(fig)
+
+
+def test_policy_curve_plot_shows_the_absolute_email_count(
+    policy_curve_frame, policy_band_frame
+):
+    # D-07: the percentage carries the meaning and the count carries the
+    # reality, and a figure embedded on its own has no caption to hold the
+    # second one.
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    # A secondary axis is a CHILD of its parent and is not in `fig.axes`,
+    # so a check over `fig.axes` alone would silently pass on a figure with
+    # no count axis at all.
+    children = list(fig.axes[0].child_axes)
+    labels = [ax.get_xlabel() for ax in children]
+    assert any("Emails sent" in label for label in labels), labels
+    # The secondary axis must map k to a COUNT, not repeat the percentage.
+    secondary = next(ax for ax in children if "Emails sent" in ax.get_xlabel())
+    assert secondary.get_xlim() == pytest.approx((0.0, 21347.0)), (
+        "the secondary axis does not run over the evaluation frame's size"
+    )
+    plt.close(fig)
+
+
+def test_policy_curve_plot_draws_the_band_and_the_anchor(
+    policy_curve_frame, policy_band_frame
+):
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    ax = fig.axes[0]
+    assert _filled_regions(ax), "no filled region: the band was not drawn"
+    assert 0.20 in _vertical_line_positions(ax), (
+        "the pre-registered anchor rule is absent from the figure"
+    )
+    text = _rendered_text(ax)
+    assert "Pre-registered anchor" in text, text
+    assert "not an optimum" in text, text
+    # The anchor's own value never appears without its interval: the two are
+    # one string in the legend and cannot be separated by an edit.
+    assert "95% band" in text, text
+    assert "+$0.1016" in text, text
+    assert "-$0.0299" in text and "+$0.3034" in text, text
+    plt.close(fig)
+
+
+def test_policy_curve_plot_marks_the_email_everyone_reference(
+    policy_curve_frame, policy_band_frame
+):
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    text = _rendered_text(fig.axes[0])
+    assert "Email everyone" in text, text
+    assert "21,347 emails" in text, text
+    plt.close(fig)
+
+
+def test_policy_curve_plot_shades_every_depth_whose_band_covers_zero(
+    policy_curve_frame, policy_band_frame
+):
+    # THE honesty assertion, and it is not a presence check. The shaded
+    # region is compared depth by depth against the committed bands,
+    # including the isolated single depth (k = 0.51 on this cell) that a
+    # `fill_between(..., where=)` mask silently drops -- which is how a
+    # figure joins two significant stretches into one wider stretch the data
+    # does not support.
+    band = policy_band_frame.loc[
+        policy_band_frame["contrast"] == "delta_random"
+    ].sort_values("k")
+    covered = band.loc[(band["lo"] <= 0.0) & (band["hi"] >= 0.0), "k"].to_numpy()
+    uncovered = band.loc[~((band["lo"] <= 0.0) & (band["hi"] >= 0.0)), "k"].to_numpy()
+    assert covered.size and uncovered.size, (
+        "this cell must have both kinds of depth or the test proves nothing"
+    )
+
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    ax = fig.axes[0]
+    spans = [_patch_x_span(patch) for patch in ax.patches]
+    assert spans, "no shaded region was drawn"
+
+    def shaded(k):
+        return any(lo - 1e-9 <= k <= hi + 1e-9 for lo, hi in spans)
+
+    missing = [float(k) for k in covered if not shaded(k)]
+    assert missing == [], (
+        f"the band covers zero at k={missing} and the figure does not shade "
+        "those depths, so they read as a detectable gain"
+    )
+    wrong = [float(k) for k in uncovered if shaded(k)]
+    assert wrong == [], (
+        f"the figure shades k={wrong}, where the band EXCLUDES zero -- "
+        "over-shading understates a result as surely as under-shading "
+        "overstates one"
+    )
+    assert "covers zero" in _rendered_text(ax), (
+        "the shaded region carries no legend entry saying what it means"
+    )
+    plt.close(fig)
+
+
+def test_policy_curve_plot_draws_the_band_behind_the_line(
+    policy_curve_frame, policy_band_frame
+):
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    ax = fig.axes[0]
+    curve = _curve_lines(ax)[0]
+    ribbons = [c for c in ax.collections if isinstance(c, PolyCollection)]
+    assert ribbons, "no ribbon collection on the axes"
+    assert max(c.get_zorder() for c in ribbons) < curve.get_zorder(), (
+        "the band is drawn in front of the line it belongs to"
+    )
+    plt.close(fig)
+
+
+@pytest.mark.parametrize("bad", ["delta_everything", "DELTA_RANDOM", "", None])
+def test_policy_curve_plot_rejects_an_unknown_contrast(
+    policy_curve_frame, policy_band_frame, bad
+):
+    before = plt.get_fignums()
+    with pytest.raises(ValueError) as excinfo:
+        plots.policy_curve_plot(
+            policy_curve_frame,
+            policy_band_frame,
+            contrast=bad,
+            unit="$",
+            anchor=0.20,
+        )
+    assert "contrast" in str(excinfo.value)
+    assert "delta_random" in str(excinfo.value), (
+        "the raise must name the contrasts that do exist, not merely that "
+        "this one does not"
+    )
+    assert plt.get_fignums() == before, (
+        "the guard raised after plt.subplots and leaked a figure"
+    )
+
+
+def test_policy_curve_plot_rejects_a_contrast_absent_from_the_bands(
+    policy_curve_frame, policy_band_frame
+):
+    # A curve drawn with no band would publish a point estimate with no
+    # interval, which is the one thing this figure exists to prevent.
+    before = plt.get_fignums()
+    empty = policy_band_frame.loc[policy_band_frame["contrast"] == "delta_none"]
+    with pytest.raises(ValueError) as excinfo:
+        plots.policy_curve_plot(
+            policy_curve_frame,
+            empty,
+            contrast="delta_random",
+            unit="$",
+            anchor=0.20,
+        )
+    assert "delta_random" in str(excinfo.value)
+    assert plt.get_fignums() == before
+
+
+def test_policy_curve_plot_rejects_an_anchor_off_the_grid(
+    policy_curve_frame, policy_band_frame
+):
+    before = plt.get_fignums()
+    with pytest.raises(ValueError) as excinfo:
+        plots.policy_curve_plot(
+            policy_curve_frame,
+            policy_band_frame,
+            contrast="delta_random",
+            unit="$",
+            anchor=0.205,
+        )
+    assert "grid" in str(excinfo.value)
+    assert plt.get_fignums() == before
+
+
+def test_policy_curve_plot_does_not_mutate_input(
+    policy_curve_frame, policy_band_frame
+):
+    curve_before = policy_curve_frame.copy(deep=True)
+    band_before = policy_band_frame.copy(deep=True)
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=0.20,
+    )
+    plt.close(fig)
+    pd.testing.assert_frame_equal(policy_curve_frame, curve_before)
+    pd.testing.assert_frame_equal(policy_band_frame, band_before)
+
+
+# --------------------------------------------------------------------------
+# cost_sweep_plot
+# --------------------------------------------------------------------------
+
+
+def test_cost_sweep_plot_x_axis_is_the_ratio_and_carries_no_currency(
+    cost_sweep_frame,
+):
+    # T-05-25. D-10 is explicit that Hillstrom carries no cost data, so a
+    # currency figure on the x axis is a number a reader would adopt. The
+    # ratio is also the only scalar k* depends on.
+    fig = plots.cost_sweep_plot(cost_sweep_frame)
+    ax = fig.axes[0]
+    x_label = ax.get_xlabel()
+    assert "c/m" in x_label, x_label
+    assert "$" not in x_label, x_label
+    assert not re.search(r"\d+\.\d+", x_label), (
+        f"the x label carries a bare numeric amount: {x_label!r}"
+    )
+    y_label = ax.get_ylabel()
+    assert "k*" in y_label and "percentage" in y_label, y_label
+    plt.close(fig)
+
+
+def test_cost_sweep_plot_marks_the_illustrative_pairs_as_assumptions(
+    cost_sweep_frame,
+):
+    fig = plots.cost_sweep_plot(cost_sweep_frame)
+    text = _rendered_text(fig.axes[0])
+    marked = cost_sweep_frame.loc[cost_sweep_frame["illustrative"]]
+    assert len(marked) >= 1
+    assert text.count("ASSUMED") >= len(marked), (
+        "every illustrative marker must say so beside itself, not only in "
+        f"the legend: {text!r}"
+    )
+    assert "ASSUMPTIONS" in text, text
+    assert "no cost or margin is adopted" in text, text
+    plt.close(fig)
+
+
+def test_cost_sweep_plot_draws_a_step_function(cost_sweep_frame):
+    # k* jumps from one grid depth to the next; a smoothed line would draw
+    # depths that are the optimum of nothing.
+    fig = plots.cost_sweep_plot(cost_sweep_frame)
+    ax = fig.axes[0]
+    line = _curve_lines(ax)[0]
+    assert line.get_drawstyle().startswith("steps"), line.get_drawstyle()
+    y = line.get_ydata()
+    assert len(set(np.round(y, 8))) >= 4, (
+        "k* takes fewer than four distinct values on the drawn curve; "
+        "ROADMAP criterion 3 asks this exhibit to show the optimum MOVING"
+    )
+    plt.close(fig)
+
+
+def test_cost_sweep_plot_rejects_a_sweep_whose_optimum_never_moves(
+    cost_sweep_frame,
+):
+    # Transposition, not a presence check: a flat exhibit satisfies
+    # criterion 3 on paper and nothing in practice.
+    before = plt.get_fignums()
+    flat = cost_sweep_frame.copy()
+    flat["k_star"] = 0.8
+    with pytest.raises(ValueError) as excinfo:
+        plots.cost_sweep_plot(flat)
+    assert "distinct" in str(excinfo.value)
+    assert plt.get_fignums() == before
+
+
+def test_cost_sweep_plot_does_not_mutate_input(cost_sweep_frame):
+    before = cost_sweep_frame.copy(deep=True)
+    fig = plots.cost_sweep_plot(cost_sweep_frame)
+    plt.close(fig)
+    pd.testing.assert_frame_equal(cost_sweep_frame, before)
+
+
+# --------------------------------------------------------------------------
+# optimism_plot
+# --------------------------------------------------------------------------
+
+
+def test_optimism_plot_labels_carry_the_unproven_prefix(optimism_block):
+    # D-03: the label travels with the number everywhere it appears,
+    # including into a picture. Asserted in BOTH directions, following
+    # 05-07's `test_optimism_block_is_labelled_unproven` -- over-labelling a
+    # published cell is as wrong as under-labelling an unproven one.
+    fig = plots.optimism_plot(optimism_block)
+    labels = {}
+    for ax in fig.axes:
+        for tick in ax.get_yticklabels():
+            if tick.get_text():
+                labels[tick.get_text()] = ax
+    assert labels, "the figure carries no row labels"
+
+    unproven = {
+        cell["score_column"]
+        for cell in optimism_block["miscalibration"].values()
+        if cell["score_column"].startswith("unproven_")
+    }
+    published = {
+        cell["score_column"]
+        for cell in optimism_block["miscalibration"].values()
+        if not cell["score_column"].startswith("unproven_")
+    }
+    assert unproven and published, (
+        "the committed block must hold both kinds or this proves nothing"
+    )
+    for name in unproven:
+        assert name in labels, f"{name} is not labelled on the figure"
+        assert "unproven" in name
+    for name in published:
+        assert name in labels, f"{name} is not labelled on the figure"
+        assert "unproven" not in name
+    plt.close(fig)
+
+
+def test_optimism_plot_shows_each_cells_own_ratio(optimism_block):
+    # No single directional caption. Measured on the committed manifest,
+    # visit overstates at 1.26x, spend at 2.00x and conversion UNDERSTATES
+    # at 0.87x, so "the models overstate their own top-k effect" would be
+    # false on one of the three cells. Each row carries its own number.
+    fig = plots.optimism_plot(optimism_block)
+    text = " ".join(_rendered_text(ax) for ax in fig.axes)
+    for expected in ("1.26x", "0.87x", "2.00x"):
+        assert expected in text, f"{expected} is missing from {text!r}"
+    lowered = text.lower()
+    for banned in ("overstate", "overstates", "inflate", "optimistic"):
+        assert banned not in lowered, (
+            f"{banned!r} appears on a figure whose three cells do not share "
+            "a direction"
+        )
+    plt.close(fig)
+
+
+def test_optimism_plot_axis_labels_name_the_targeted_grain(optimism_block):
+    fig = plots.optimism_plot(optimism_block)
+    for ax in fig.axes:
+        label = ax.get_xlabel()
+        assert "per targeted customer" in label, label
+        assert "per population customer" not in label, label
+    plt.close(fig)
+
+
+def test_optimism_plot_panels_never_share_a_unit_axis(optimism_block):
+    # `ate_forest` and `calibration_plot` panel by unit so a +$0.77 spend
+    # effect is never drawn as +76.98 pp. Panelling by OUTCOME is strictly
+    # finer, so the same guarantee holds; this asserts it rather than
+    # trusting the arrangement.
+    fig = plots.optimism_plot(optimism_block)
+    units = [
+        "dollars" if "dollars" in ax.get_xlabel() else "pp" for ax in fig.axes
+    ]
+    assert len(fig.axes) == len(optimism_block["miscalibration"]), (
+        "one panel per outcome"
+    )
+    for ax, unit in zip(fig.axes, units):
+        other = "per targeted customer)"
+        assert other in ax.get_xlabel()
+    assert "dollars" in units and "pp" in units, units
+    plt.close(fig)
+
+
+def test_optimism_plot_rejects_a_block_without_its_miscalibration(optimism_block):
+    before = plt.get_fignums()
+    with pytest.raises(ValueError) as excinfo:
+        plots.optimism_plot({"frame": optimism_block["frame"]})
+    assert "miscalibration" in str(excinfo.value)
+    assert plt.get_fignums() == before
+
+
+def test_optimism_plot_rejects_a_cell_measured_on_another_grain(optimism_block):
+    # The grain is read out of the artifact and asserted, not assumed: a
+    # per-population cell drawn under a per-targeted label is exactly the
+    # conflation this phase's axis vocabulary exists to prevent.
+    before = plt.get_fignums()
+    mangled = copy.deepcopy(optimism_block)
+    first = next(iter(mangled["miscalibration"]))
+    mangled["miscalibration"][first]["unit"] = "per_population_customer"
+    with pytest.raises(ValueError) as excinfo:
+        plots.optimism_plot(mangled)
+    assert "per_population_customer" in str(excinfo.value)
+    assert plt.get_fignums() == before
+
+
+def test_optimism_plot_does_not_mutate_input(optimism_block):
+    before = copy.deepcopy(optimism_block)
+    fig = plots.optimism_plot(optimism_block)
+    plt.close(fig)
+    assert optimism_block == before
+
+
+# --------------------------------------------------------------------------
+# No committed figure may publish a clipped label
+# --------------------------------------------------------------------------
+
+
+def _clipped_artists(fig):
+    """Text-bearing artists whose rendered extent leaves the canvas.
+
+    Tick labels outside the view interval are excluded: matplotlib keeps
+    them as artists without drawing them, so their extent is meaningless.
+    Everything else is measured against `fig.bbox` at the figure's own dpi,
+    which is what `savefig` lays out from.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    canvas = fig.bbox
+    clipped = []
+    every = [child for ax in fig.axes for child in ax.child_axes]
+    for ax in list(fig.axes) + every:
+        artists = [ax.xaxis.label, ax.yaxis.label, ax.title, *ax.texts]
+        x_lo, x_hi = sorted(ax.get_xlim())
+        y_lo, y_hi = sorted(ax.get_ylim())
+        artists += [
+            label
+            for label in ax.get_xticklabels()
+            if x_lo - 1e-9 <= label.get_position()[0] <= x_hi + 1e-9
+        ]
+        artists += [
+            label
+            for label in ax.get_yticklabels()
+            if y_lo - 1e-9 <= label.get_position()[1] <= y_hi + 1e-9
+        ]
+        legend = ax.get_legend()
+        if legend is not None:
+            artists.append(legend)
+        for artist in artists:
+            box = artist.get_window_extent(renderer)
+            if box.width <= 0 or box.height <= 0:
+                continue
+            if (
+                box.x0 < canvas.x0 - 0.5
+                or box.x1 > canvas.x1 + 0.5
+                or box.y0 < canvas.y0 - 0.5
+                or box.y1 > canvas.y1 + 0.5
+            ):
+                clipped.append(getattr(artist, "get_text", lambda: repr(artist))())
+    for text in fig.texts:
+        box = text.get_window_extent(renderer)
+        if box.x0 < canvas.x0 - 0.5 or box.x1 > canvas.x1 + 0.5:
+            clipped.append(text.get_text())
+    return clipped
+
+
+def test_policy_figures_publish_no_clipped_label(
+    policy_curve_frame, policy_band_frame, cost_sweep_frame, optimism_block
+):
+    # Phase 4 published `ved holdout Qini ... 95t` -- a subtitle clipped at
+    # both ends -- and no byte-size floor, no structural assertion and no
+    # `tight_layout()` call caught it; a human opening the PNG did. This
+    # measures every text artist's rendered extent against the canvas, which
+    # is the mechanical half of that catch.
+    figures = [
+        plots.policy_curve_plot(
+            policy_curve_frame,
+            policy_band_frame,
+            contrast="delta_random",
+            unit="$",
+            anchor=0.20,
+            title=(
+                "Targeted top-k against a random send of the same size\n"
+                "Ranking: uplift_womens_visit    Outcome: spend"
+            ),
+        ),
+        plots.cost_sweep_plot(
+            cost_sweep_frame,
+            title="Cost-optimal targeting depth against the cost-to-margin ratio",
+        ),
+        plots.optimism_plot(optimism_block),
+    ]
+    for fig in figures:
+        clipped = _clipped_artists(fig)
+        plt.close(fig)
+        assert clipped == [], f"clipped off the canvas: {clipped}"
+
+
+def test_a_title_too_long_to_fit_raises_rather_than_publishing_it_clipped(
+    cost_sweep_frame,
+):
+    # Transposition. The step-down exists to keep a long title on the
+    # canvas; when nothing fits, refusing is the only honest option, and a
+    # refusal that leaked the figure would trade one defect for another.
+    before = plt.get_fignums()
+    with pytest.raises(ValueError) as excinfo:
+        plots.cost_sweep_plot(cost_sweep_frame, title="A" * 400)
+    assert "clipped" in str(excinfo.value)
+    assert plt.get_fignums() == before, (
+        "the refusal left a figure registered in pyplot's global state"
+    )
+
+
 # --------------------------------------------------------------------------
 # Module boundary
 # --------------------------------------------------------------------------
@@ -1238,22 +1866,57 @@ def test_plots_module_selects_the_headless_backend_before_pyplot():
 
 def test_plots_module_writes_nothing(
     balance_df, ate_df, qini_pair, qini_pair_holdout, null_draws,
-    calibration_rows, uplift_and_base_score, tmp_path, monkeypatch,
+    calibration_rows, uplift_and_base_score, policy_curve_frame,
+    policy_band_frame, cost_sweep_frame, optimism_block,
+    tmp_path, monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
     # EVERY public factory, never a subset: a factory left out of this tuple
     # quietly narrows the module guarantee to the ones somebody remembered.
-    for fig in (
-        plots.love_plot(balance_df),
-        plots.ate_forest(ate_df),
-        plots.qini_plot(*qini_pair),
-        plots.qini_train_holdout_plot(qini_pair, qini_pair_holdout),
-        plots.permutation_null_plot(null_draws, 0.0031, p95=0.004),
-        plots.calibration_plot(calibration_rows),
-        plots.uplift_vs_base_score_plot(*uplift_and_base_score, r=0.5),
-    ):
+    # The list is ASSERTED against the module's own public surface below,
+    # rather than maintained by hand -- 05-07 made `evaluation.py`'s
+    # equivalent list self-checking after four functions arrived at once and
+    # a hand-maintained list would have missed the fourth.
+    called = {
+        "love_plot": plots.love_plot(balance_df),
+        "ate_forest": plots.ate_forest(ate_df),
+        "qini_plot": plots.qini_plot(*qini_pair),
+        "qini_train_holdout_plot": plots.qini_train_holdout_plot(
+            qini_pair, qini_pair_holdout
+        ),
+        "permutation_null_plot": plots.permutation_null_plot(
+            null_draws, 0.0031, p95=0.004
+        ),
+        "calibration_plot": plots.calibration_plot(calibration_rows),
+        "uplift_vs_base_score_plot": plots.uplift_vs_base_score_plot(
+            *uplift_and_base_score, r=0.5
+        ),
+        "policy_curve_plot": plots.policy_curve_plot(
+            policy_curve_frame,
+            policy_band_frame,
+            contrast="delta_random",
+            unit="$",
+            anchor=0.20,
+        ),
+        "cost_sweep_plot": plots.cost_sweep_plot(cost_sweep_frame),
+        "optimism_plot": plots.optimism_plot(optimism_block),
+    }
+    for fig in called.values():
         plt.close(fig)
     assert list(tmp_path.iterdir()) == [], (
         "plots.py wrote to disk; only the orchestrator may touch the "
         "filesystem in Phase 2"
+    )
+
+    public = {
+        name
+        for name, value in vars(plots).items()
+        if not name.startswith("_")
+        and inspect.isfunction(value)
+        and value.__module__ == plots.__name__
+    }
+    assert public == set(called), (
+        "this test does not call every public factory of plots.py. "
+        f"Uncalled: {sorted(public - set(called))}. A factory left out is a "
+        "factory whose purity nothing checks."
     )

@@ -1243,18 +1243,21 @@ def test_pipeline_paths_all_come_from_config():
         )
 
 
-# 15 = analyze()'s love_plot and ate_forest (2) plus the thirteen Phase 4
+# 19 = analyze()'s love_plot and ate_forest (2), plus the thirteen Phase 4
 # figures train() writes: 5 train-vs-holdout Qini pairs (the three mens/visit
 # learners plus both shipping cells) + 3 permutation-null histograms (the
 # flagship default forest plus both shipping cells) + 2 uplift-vs-baseline
-# comparisons + 1 six-cell calibration plot + 2 monotonicity scatters.
-# 2 + 5 + 3 + 2 + 1 + 2 = 15. Each write is an explicit statement pair rather
-# than a loop precisely so this count means something, and neither counted
-# token appears in a comment anywhere in pipeline.py -- a comment naming one
-# inflates its own count by one and the equality stops proving pairing.
+# comparisons + 1 six-cell calibration plot + 2 monotonicity scatters, plus
+# the four Phase 5 exhibits policy() writes: 2 policy curves on the headline
+# ranking (spend and visit) + 1 cost sweep + 1 optimism comparison.
+# 2 + 5 + 3 + 2 + 1 + 2 + 2 + 1 + 1 = 19. Each write is an explicit statement
+# pair rather than a loop precisely so this count means something, and
+# neither counted token appears in a comment anywhere in pipeline.py -- a
+# comment naming one inflates its own count by one and the equality stops
+# proving pairing.
 def test_pipeline_pairs_every_savefig_with_a_close():
     body = _pipeline_body()
-    assert body.count("savefig(") == body.count("plt.close(") == 15
+    assert body.count("savefig(") == body.count("plt.close(") == 19
 
 
 # 9 = analyze()'s balance/ate/coverage, train()'s model_results,
@@ -1302,7 +1305,12 @@ def policied(tmp_path_factory):
     fixture fits nothing and runs in about twenty seconds, dominated by
     the nine bootstrap bands; `trained` takes minutes because of the eight
     refit permutation nulls, and that is the distinction the marker is
-    for. `reports/` is never created, because policy() writes no figure.
+    for.
+
+    `reports/figures/` deliberately does not exist beforehand, exactly as
+    `analyzed` and `trained` arrange it: plan 05-08 gave policy() four
+    committed exhibits, and the directory appearing is what proves the run
+    created it rather than finding it.
     """
     root = tmp_path_factory.mktemp("policy")
     processed = root / "processed"
@@ -1311,17 +1319,22 @@ def policied(tmp_path_factory):
     for name in POLICY_INPUT_ARTIFACTS:
         shutil.copyfile(config.PROCESSED / name, processed / name)
 
+    figures = reports / "figures"
     stdout = io.StringIO()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(config, "PROCESSED", processed)
         mp.setattr(config, "REPORTS", reports)
-        mp.setattr(config, "FIGURES", reports / "figures")
+        mp.setattr(config, "FIGURES", figures)
+        assert not figures.exists(), "figures/ must not exist before the run"
         with redirect_stdout(stdout):
             pipeline.policy()
+        open_figures = plt.get_fignums()
 
     return SimpleNamespace(
         processed=processed,
         reports=reports,
+        figures=figures,
+        open_figures=open_figures,
         stdout=stdout.getvalue(),
         curve=pd.read_parquet(processed / "policy_curve.parquet"),
         bands=pd.read_parquet(processed / "policy_bands.parquet"),
@@ -1339,15 +1352,64 @@ def test_policy_writes_exactly_the_expected_artifact_set(policied):
         "others -- an unlisted file is one no test asserts on and no report "
         "traces a number to"
     )
-    assert not policied.reports.exists(), (
-        "policy() created reports/; it writes no figure, and a directory "
-        "appearing here means a figure was written where no test asserts "
-        "on it"
+    assert policied.figures.is_dir(), (
+        "policy() did not create reports/figures/; it writes the four "
+        "Phase 5 exhibits and the directory is its own to create. This "
+        "assertion was INVERTED in plan 05-08: through 05-07 policy() wrote "
+        "no figure and the test asserted reports/ stayed absent, which is "
+        "false the moment the first exhibit lands."
     )
     for name in POLICY_INPUT_ARTIFACTS:
         assert (policied.processed / name).is_file(), (
             f"policy() removed or replaced its own input {name}"
         )
+
+
+def test_policy_writes_exactly_the_expected_figure_set(policied):
+    written = {path.stem for path in policied.figures.glob("*.png")}
+    assert written == set(pipeline.POLICY_FIGURE_STEMS), (
+        "policy() must write exactly the curated Phase 5 set. Set equality, "
+        "not containment: an unlisted figure and a missing one are both "
+        "failures, and tests/test_reports.py re-lists the same four names "
+        "independently so a rename in code and a figure never committed "
+        "stay two different failures (04-08's disposition)"
+    )
+    stray = [path.name for path in policied.figures.iterdir() if path.suffix != ".png"]
+    assert stray == [], f"policy() wrote non-PNG files into figures/: {stray}"
+
+
+def test_policy_writes_non_trivial_figures(policied):
+    for path in sorted(policied.figures.glob("*.png")):
+        size = path.stat().st_size
+        assert size > 5_000, (
+            f"{path.name} is {size} bytes. A figure this small rendered "
+            "nothing -- the file exists but the axes are empty."
+        )
+
+
+def test_policy_leaves_no_open_figures(policied):
+    # The orchestrator owns the close as well as the write. An unclosed
+    # figure stays registered in pyplot's global state for the life of the
+    # process and matplotlib warns once more than twenty accumulate, which
+    # a run of `all` -- two plus thirteen plus four -- reaches exactly.
+    assert policied.open_figures == [], (
+        "policy() left matplotlib figures open; every write must be paired "
+        f"with a close. Still open: {policied.open_figures}"
+    )
+
+
+def test_policy_curves_draw_the_headline_contrast_only(policied):
+    # D-08a replaced D-08: the headline contrast is versus a RANDOM send of
+    # the same size, not versus emailing everyone. A committed figure drawn
+    # on the superseded contrast would publish a decision the phase reversed.
+    assert pipeline.POLICY_FIGURE_CONTRAST == "delta_random", (
+        "the committed policy curves must draw D-08a's contrast"
+    )
+    body = _pipeline_body()
+    assert 'contrast="delta_all"' not in body, (
+        "a committed figure is drawn on the versus-everyone contrast, which "
+        "D-08a superseded"
+    )
 
 
 def test_policy_raises_when_its_input_is_missing(tmp_path):
