@@ -24,6 +24,7 @@ moves away from it, or if the two commits stop standing in the order the
 write-up claims. The ARGUMENT is pinned, not merely the value.
 """
 
+import ast
 import inspect
 import math
 import subprocess
@@ -791,4 +792,195 @@ def test_profit_curve_rejects_mismatched_and_malformed_curves():
     with pytest.raises(ValueError):
         economics.profit_curve(
             delta, grid * 100.0, cost_per_email=0.1, gross_margin=1.0
+        )
+
+
+# --------------------------------------------------------------------------
+# D-10 and the module boundary, made structural
+# --------------------------------------------------------------------------
+
+
+def _cost_or_margin_parameters(function):
+    """Every parameter of `function` whose name mentions cost or margin."""
+    return [
+        parameter
+        for name, parameter in inspect.signature(function).parameters.items()
+        if "cost" in name.lower() or "margin" in name.lower()
+    ]
+
+
+def _public_economics_functions():
+    return {
+        name: value
+        for name, value in vars(economics).items()
+        if not name.startswith("_")
+        and inspect.isfunction(value)
+        and value.__module__ == economics.__name__
+    }
+
+
+@pytest.mark.parametrize(
+    "function_name", ["profit_curve", "optimal_k", "cost_margin_sweep"]
+)
+def test_cost_and_margin_have_no_defaults(function_name):
+    """CONTEXT.md D-10, expressed against the signature rather than in prose.
+
+    Hillstrom carries no cost data of any kind, so a default here would be
+    a FABRICATED CONSTANT, and every number downstream -- the report, the
+    README, Phase 6's app -- would inherit it without one person having
+    chosen it. The headline is stated at cost = $0 and margin = 100%
+    precisely so that it inherits nothing; that property survives only for
+    as long as no default is ever written down.
+
+    `inspect.Parameter.empty` is the check and not a call that omits them,
+    because a default of `None` handled by an `if` inside the body would
+    pass a call-level check while still being a default. Two of the three
+    functions here take no cost or margin parameter at all, and that is
+    also a pass: the requirement is that no such parameter carries a
+    default, not that every function has one.
+    """
+    function = getattr(economics, function_name)
+    for parameter in _cost_or_margin_parameters(function):
+        assert parameter.default is inspect.Parameter.empty, (
+            f"`{function_name}` gives `{parameter.name}` the default "
+            f"{parameter.default!r}. Hillstrom measures no cost and no "
+            "margin, so that value is invented, and the headline would "
+            "silently inherit it. Cost and margin are required keyword "
+            "arguments everywhere in this module (CONTEXT.md D-10)."
+        )
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, (
+            f"`{function_name}` accepts `{parameter.name}` positionally. "
+            "An assumption passed as a bare number at a call site is an "
+            "assumption a reviewer cannot see in the diff."
+        )
+
+
+def test_no_public_function_anywhere_defaults_a_cost_or_a_margin():
+    """The same rule swept over the whole public surface, not a name list.
+
+    The parametrized test above names three functions and therefore stops
+    protecting the module the moment a fourth is added. This one
+    introspects, so a future plan cannot escape D-10 by not appearing in a
+    list somebody forgot to extend.
+    """
+    for name, function in _public_economics_functions().items():
+        for parameter in _cost_or_margin_parameters(function):
+            assert parameter.default is inspect.Parameter.empty, (
+                f"`{name}` gives `{parameter.name}` the default "
+                f"{parameter.default!r}; D-10 forbids a cost or margin "
+                "default anywhere in this module."
+            )
+
+
+def test_capacity_framing_needs_no_cost_assumption():
+    """ROADMAP criterion 3, third clause, over the whole public surface.
+
+    Criterion 3 asks for a capacity framing that requires NO cost
+    assumption at all -- which is what lets the headline be stated in one
+    sentence with no assumption clause (D-06 with D-10).
+    `test_emails_at_capacity_takes_no_cost_or_margin_argument` above owns
+    the single-signature half. This one owns the containment claim: the
+    cost surface is confined to exactly the two D-09 exhibit functions, and
+    the capacity framing is callable with a population and nothing else.
+    """
+    priced = sorted(
+        name
+        for name, function in _public_economics_functions().items()
+        if _cost_or_margin_parameters(function)
+    )
+    assert priced == ["optimal_k", "profit_curve"], (
+        f"the functions taking a cost or margin are {priced}. Criterion 3 "
+        "requires cost and margin to stay confined to the D-09 exhibit; if "
+        "a third function has acquired them, some framing that used to "
+        "need no economic assumption now needs one."
+    )
+
+    # The capacity framing, exercised with no economic input whatsoever.
+    assert economics.emails_at_capacity(EVALUATION_FRAME_ROWS) == 4269
+    assert economics.HEADLINE_CAPACITY == 0.20
+
+
+def _economics_identifiers():
+    """Every identifier `economics.py` USES, with prose excluded.
+
+    An `ast` walk rather than a substring sweep of the source, because the
+    module's own boundary paragraph explains that it holds no random number
+    generator -- so a naive grep for that word in the body would fire on
+    the sentence that promises the property. Reading identifiers instead
+    keeps the check on the code, where it belongs, and makes it stronger:
+    `np.random.default_rng` is caught by the attribute name whatever the
+    surrounding text says.
+    """
+    names = set()
+    for node in ast.walk(ast.parse(_economics_source())):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.alias):
+            names.add(node.name)
+            if node.asname:
+                names.add(node.asname)
+        elif isinstance(node, ast.ImportFrom):
+            names.add(node.module or "")
+        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+    return names
+
+
+def test_economics_module_has_no_randomness():
+    """The module-boundary rule of decision (a), stated as code.
+
+    `evaluation.py` owns the randomization and the ranking; this module
+    owns money. That seam is why every test in this file is closed-form and
+    why not one of them needs a tolerance or a seed -- the moment a draw or
+    a sort appears here, the economics core acquires a reproducibility
+    surface and its tests acquire tolerances, and a dollar figure that
+    moves between runs is the exact failure this project cannot afford.
+
+    Tokens are assembled by concatenation so this file cannot trip its own
+    check if the sweep is ever widened to cover `tests/`.
+    """
+    identifiers = _economics_identifiers()
+    forbidden = (
+        "rand" + "om",
+        "default_" + "rng",
+        "shuf" + "fle",
+        "permut" + "ation",
+        "arg" + "sort",
+        "see" + "d",
+        "choi" + "ce",
+    )
+    for token in forbidden:
+        offenders = sorted(
+            name for name in identifiers if token in name.lower()
+        )
+        assert not offenders, (
+            f"economics.py uses the identifier(s) {offenders}, which "
+            f"contain {token!r}. Decision (a) puts the randomization and "
+            "the ranking in evaluation.py and money here, so that this "
+            "module's tests stay closed-form and its numbers do not move "
+            "between runs."
+        )
+
+
+def test_economics_module_does_no_ranking():
+    """The other half of the seam: no top-k selection lives here either.
+
+    `evaluation.uplift_at_k` owns the selection and its truncation rule.
+    A second sort in this module would be a second ranking convention, and
+    two ranking conventions in one project is how a report and an app
+    disagree about which customers were mailed.
+    """
+    identifiers = _economics_identifiers()
+    for token in ("arg" + "sort", "sort_" + "values", "rank" + "data"):
+        offenders = sorted(
+            name for name in identifiers if token in name.lower()
+        )
+        assert not offenders, (
+            f"economics.py uses {offenders}. Ranking belongs to "
+            "evaluation.py; this module consumes a curve that has already "
+            "been ranked."
         )
