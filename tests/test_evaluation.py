@@ -157,25 +157,28 @@ def test_evaluation_module_is_pure():
 
 # `uplift_at_k` and `tie_diagnostics` joined the call list below in plan
 # 03-02; `bootstrap_indices`, `qini_bootstrap_band` and `qini_random_band`
-# in plan 03-05. All seven public functions are called, so "every public
-# function" is literally true rather than a claim about whichever ones
-# happened to be here first.
+# in plan 03-05; `stratified_indices` in plan 05-02. All eight public
+# functions are called, so "every public function" is literally true rather
+# than a claim about whichever ones happened to be here first.
 #
-# 03-05 is the last plan in this phase that adds public surface to
-# `evaluation.py`, so the list is complete as it stands. Any LATER plan
-# adding a function must still extend it -- a call list that quietly stops
-# growing turns this guarantee into a guarantee about history.
+# 03-05 was the last plan in PHASE 3 to add public surface here, and the
+# list did NOT then stop growing: D-14's `stratified_indices` arrived two
+# phases later and was added to this call list in the same commit that
+# added the function. That is the rule working rather than an exception to
+# it -- a call list that quietly stops growing turns this guarantee into a
+# guarantee about history. Any later plan adding a function must extend it
+# too.
 #
 # The two bands run at R=4. The defaults would allocate a resample matrix
 # far larger than a boundary check needs, and the property under test here
 # is "no bytes reach the filesystem", not "the band is correct".
 #
-# This prose sits in a comment rather than in the docstring so the seven
+# This prose sits in a comment rather than in the docstring so the eight
 # calls stay inside a short grep window under the function signature.
 def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     """Call every public function from an empty directory; it stays empty.
 
-    All seven are called below; the comment above records why each is here.
+    All eight are called below; the comment above records why each is here.
     """
     monkeypatch.chdir(tmp_path)
     score, treatment, outcome = _two_arm_arrays(n=500, seed=3)
@@ -184,6 +187,7 @@ def test_evaluation_module_writes_nothing(tmp_path, monkeypatch):
     evaluation.uplift_at_k(score, treatment, outcome, 0.2)
     evaluation.tie_diagnostics(score)
     evaluation.bootstrap_indices(treatment, 4)
+    evaluation.stratified_indices(treatment, 4)
     evaluation.qini_bootstrap_band(score, treatment, outcome, n_resamples=4)
     evaluation.qini_random_band(treatment, outcome, n_resamples=4)
 
@@ -1570,6 +1574,251 @@ def test_stratified_indices_is_position_preserving(labels):
             "with it would pair one arm's rows with another arm's values "
             "and report a number rather than raising."
         )
+
+
+def test_stratified_indices_level_order_is_load_bearing():
+    """The hazard D-14 flagged, made impossible to trip silently.
+
+    `np.unique` orders levels ASCENDING; Phase 3's loop is `(1, 0)`, treated
+    arm first. The levels share one seeded stream and consume it in
+    sequence, so the order IS the draw. Reversing it therefore does not
+    perturb the matrix -- it replaces it.
+
+    The threshold is 0.9 and the measured fraction goes in the FAILURE
+    MESSAGE, never in the assertion. This test exists to make reversing the
+    order loud, not to pin a numpy implementation detail that a future
+    release could legitimately move.
+
+    Named `test_stratified_indices_level_order_is_load_bearing` rather than
+    `test_level_order_is_load_bearing` as `05-VALIDATION.md`'s criteria
+    table spells it, so it sorts under this section's subject like every
+    other test in the module. Grep `level_order_is_load_bearing` to find it
+    from either name.
+    """
+    treatment = _womens_treatment()
+    kept = evaluation.stratified_indices(
+        treatment, REFACTOR_REPLICATES, 20260902, level_order=(1, 0)
+    )
+    reversed_ = evaluation.stratified_indices(
+        treatment, REFACTOR_REPLICATES, 20260902, level_order=(0, 1)
+    )
+    differing = float((kept != reversed_).mean())
+
+    assert differing > 0.9, (
+        f"reversing `level_order` on the real {treatment.size}-row womens "
+        f"column changed only {differing:.6f} of the matrix cells, which is "
+        "not above 0.9. Either the levels have stopped sharing a single "
+        "seeded stream -- in which case `bootstrap_indices` no longer "
+        "reproduces its Phase 3 draws for a reason this test cannot see -- "
+        "or the order argument is being ignored, in which case the "
+        "`(1, 0)` literal in `bootstrap_indices` is decorative and the "
+        "hazard it guards against is live."
+    )
+
+
+def test_shared_control_is_drawn_once_per_replicate():
+    """ROADMAP criterion 2, written as code rather than as a claim.
+
+    ONE three-level matrix over all 32,001 holdout rows is the phase's
+    single project-wide draw. Because the matrix is position-preserving, a
+    consumer recovers an arm's frame by MASKING ITS COLUMNS by the original
+    `segment` -- and the control columns are then the same columns in both
+    masks, so the shared control group is resampled once per replicate
+    instead of once per arm.
+
+    The forbidden alternative is one binary matrix per arm. It looks
+    correct, raises nothing, and gives the shared control two independent
+    draws inside the same replicate -- which throws away the correlation
+    between the two arms and makes the interval on their DIFFERENCE wrong.
+    The second half of this test builds exactly that and shows it disagrees,
+    so the equality above is a property of the construction rather than of
+    arithmetic.
+
+    Frame sizes are DERIVED from the artifact with `.sum()` on the masks,
+    never typed as 21,347 and 21,307: a literal here would keep passing
+    against a regenerated Parquet it no longer describes.
+    """
+    segment = _holdout_segment()
+    codes = np.array([SEGMENT_CODES[value] for value in segment], dtype="int64")
+
+    womens_mask = segment != config.ARMS["mens"]
+    mens_mask = segment != config.ARMS["womens"]
+    control_mask = segment == config.CONTROL
+
+    n_womens_frame = int(womens_mask.sum())
+    n_mens_frame = int(mens_mask.sum())
+    assert n_womens_frame + n_mens_frame - int(control_mask.sum()) == segment.size, (
+        f"the two arm frames ({n_womens_frame} and {n_mens_frame} rows) and "
+        f"the {int(control_mask.sum())} control rows do not reconcile "
+        f"against the {segment.size}-row holdout. The masks are not the "
+        "two-arm partition this test believes it is taking."
+    )
+
+    matrix = evaluation.stratified_indices(
+        codes, REFACTOR_REPLICATES, 20260902
+    )
+    assert matrix.shape == (REFACTOR_REPLICATES, segment.size), (
+        f"the shared matrix has shape {matrix.shape}, expected "
+        f"{(REFACTOR_REPLICATES, segment.size)} -- one column per holdout "
+        "row, which is what makes masking by `segment` meaningful."
+    )
+
+    # Local control positions INSIDE each arm frame. The values in the
+    # matrix stay GLOBAL row positions after masking, which is the point:
+    # a consumer indexes the 32,001-row spend column with them directly.
+    womens_frame = matrix[:, womens_mask]
+    mens_frame = matrix[:, mens_mask]
+    control_in_womens = control_mask[womens_mask]
+    control_in_mens = control_mask[mens_mask]
+
+    assert (womens_frame.shape[1], mens_frame.shape[1]) == (
+        n_womens_frame,
+        n_mens_frame,
+    ), (
+        f"masking gave frames of {womens_frame.shape[1]} and "
+        f"{mens_frame.shape[1]} columns against {n_womens_frame} and "
+        f"{n_mens_frame} rows in the artifact."
+    )
+
+    via_womens = womens_frame[:, control_in_womens]
+    via_mens = mens_frame[:, control_in_mens]
+
+    assert np.array_equal(via_womens, via_mens), (
+        "the shared control group received DIFFERENT draws in the womens "
+        "mask and the mens mask within the same replicate. That is exactly "
+        "what ROADMAP criterion 2 forbids: the two arm estimates would then "
+        "be built on two independent resamples of one control group, their "
+        "correlation would be thrown away, and the confidence interval on "
+        "the difference between the arms would be wrong -- wider or "
+        "narrower, with nothing raised either way."
+    )
+    for r, (take_w, take_m) in enumerate(zip(via_womens, via_mens)):
+        assert np.array_equal(
+            segment[take_w], segment[take_m]
+        ) and np.all(segment[take_w] == config.CONTROL), (
+            f"replicate {r}'s control draw leaves the control arm: the "
+            "masked columns are not resampling control rows from the "
+            "control pool, so position-preservation has broken under "
+            "masking even though the two masks agree."
+        )
+
+    # NON-VACUITY. One binary matrix per arm is the bug criterion 2 exists
+    # to prevent; it must NOT reproduce the equality asserted above.
+    per_arm_womens = evaluation.bootstrap_indices(
+        (segment[womens_mask] == config.ARMS["womens"]).astype("int64"),
+        REFACTOR_REPLICATES,
+        20260902,
+    )
+    per_arm_mens = evaluation.bootstrap_indices(
+        (segment[mens_mask] == config.ARMS["mens"]).astype("int64"),
+        REFACTOR_REPLICATES,
+        20260902,
+    )
+    assert not np.array_equal(
+        per_arm_womens[:, control_in_womens],
+        per_arm_mens[:, control_in_mens],
+    ), (
+        "two SEPARATE per-arm bootstrap matrices produced identical control "
+        "draws, so the equality asserted above is vacuous -- it would pass "
+        "on the very construction this test exists to rule out."
+    )
+
+
+def _one_level_labels():
+    return np.ones(10, dtype="int64")
+
+
+def _oversized_labels():
+    """A vector past the int32 index ceiling that costs no memory.
+
+    `np.broadcast_to` returns a zero-stride read-only view, so this is
+    2.1 billion elements in a few dozen bytes. The guard runs before the
+    distinct-level check, which is why an all-zero vector reaches it.
+    """
+    return np.broadcast_to(np.int64(0), (np.iinfo(np.int32).max + 3,))
+
+
+# One row per guard in `stratified_indices`, and the needle is the offending
+# VALUE where the guard has one to name. A guard whose message does not
+# identify what was wrong sends the caller back to read the source.
+STRATIFIED_GUARD_CASES = (
+    pytest.param(
+        lambda: np.zeros((4, 4), dtype="int64"), {}, "(4, 4)", id="2-D"
+    ),
+    pytest.param(
+        lambda: np.array([], dtype="int64"), {}, "empty", id="empty"
+    ),
+    pytest.param(_one_level_labels, {}, "[1]", id="one-level"),
+    pytest.param(
+        lambda: np.repeat([0, 1], 10),
+        {"n_resamples": 0},
+        "`n_resamples` is 0",
+        id="n_resamples",
+    ),
+    pytest.param(
+        _oversized_labels, {}, "2147483647", id="int32-ceiling"
+    ),
+    pytest.param(
+        lambda: np.repeat([0, 1], 10),
+        {"level_order": (0, 1, 2)},
+        "[0, 1, 2]",
+        id="level_order",
+    ),
+)
+
+
+@pytest.mark.parametrize("factory, kwargs, needle", STRATIFIED_GUARD_CASES)
+def test_stratified_indices_rejects_malformed_input(factory, kwargs, needle):
+    """T-05-05: six named `ValueError`s, none of them a bare assert.
+
+    `assert` is compiled out under `python -O`, so a guard written that way
+    is a guard that disappears in exactly the deployment where a malformed
+    label vector would be hardest to notice -- it would build a matrix over
+    the wrong population and return it.
+    """
+    with pytest.raises(ValueError) as raised:
+        evaluation.stratified_indices(factory(), seed=5, **kwargs)
+
+    assert needle in str(raised.value), (
+        f"the guard raised {str(raised.value)!r}, which does not name "
+        f"{needle!r}. A validation message that omits the offending value "
+        "sends the caller to read the source to find out what they passed."
+    )
+
+
+def test_evaluation_guards_use_no_bare_assert():
+    """The no-`assert` rule for input guards, structural rather than prose.
+
+    Added for the same reason plan 05-01 added the equivalent to
+    `tests/test_economics.py`: a rule stated only in a plan survives
+    exactly as long as the next author remembers it. `stratified_indices`
+    added six guards to this module in one commit, which is the moment to
+    make the rule enforceable.
+
+    Comments AND string literals are stripped with `tokenize` before the
+    sweep, following `test_evaluation_module_has_exactly_one_sort`. The
+    module docstring quotes two `assert` lines on purpose when it describes
+    what a caller can check, and a line-based grep would count those and be
+    unable to express the property at all.
+
+    The token is assembled by concatenation so this file does not trip its
+    own check if the sweep is ever widened to cover `tests/`.
+    """
+    code = "".join(
+        token.string
+        for token in tokenize.generate_tokens(
+            io.StringIO(_evaluation_source()).readline
+        )
+        if token.type not in (tokenize.COMMENT, tokenize.STRING)
+    )
+
+    assert "asse" + "rt" not in code, (
+        "evaluation.py's executable code contains a bare assert. Input "
+        "guards here must raise a named ValueError: assert statements are "
+        "removed by `python -O`, so the guard vanishes in exactly the "
+        "configuration where a silently wrong resample matrix over the "
+        "wrong population would be hardest to catch."
+    )
 
 
 # --------------------------------------------------------------------------
