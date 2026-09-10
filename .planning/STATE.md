@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-09-10T00:47:06.345Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-09-10T01:01:42.020Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 35
-  completed_plans: 27
+  completed_plans: 28
   percent: 57
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [████████░░] 77%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [████████░░] 77%
 | Phase 04 P08 | 214min | 3 tasks | 16 files |
 | Phase 04 P09 | 39min | 3 tasks | 2 files |
 | Phase 05 P01 | 9min | 3 tasks | 4 files |
+| Phase 05 P02 | 6min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,8 @@ Recent decisions affecting current work:
 - [Phase 05]: economics.py declares no cost and no margin constant, enforced by a vars(economics) namespace sweep rather than by the docstring alone (D-10)
 - [Phase 05]: emails_at_capacity rejects a non-integral population instead of truncating it -- a fraction passed where a count belongs is a unit error truncation would hide
 - [Phase 05]: The criterion-5 purity sweep bans the substring 'st.', which collides with ordinary English: no word ending in -st may be followed by a period in evaluation.py or economics.py prose
+- [Phase 05]: 05-02: bootstrap_indices delegates to stratified_indices with an explicit level_order=(1, 0) — The (1, 0) draw order is load-bearing: reversing it moves 99.991% of the matrix (measured, R=500, real 21,347-row womens column). Bit-identity is pinned against a frozen inline copy of the pre-refactor loop.
+- [Phase 05]: 05-02: Phase 5 and 6 use ONE three-level resample matrix over all 32,001 holdout rows — Masking its columns by segment gives the womens+control and mens+control frames with the shared control drawn once per replicate (ROADMAP criterion 2). Its womens draws are deliberately NOT bootstrap_indices' womens draws.
 
 ### Pending Todos
 
@@ -215,6 +218,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T00:47:06.338Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-09-10T01:01:42.013Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
