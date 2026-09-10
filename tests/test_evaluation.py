@@ -2911,3 +2911,335 @@ def test_policy_prose_pins_the_weight_the_units_and_the_denominator():
             "units a number carries, or why the per-targeted figure "
             "divides by the realized count."
         )
+
+
+# --------------------------------------------------------------------------
+# D-05: the argmax policy, its naive comparator, and the estimator variants
+# --------------------------------------------------------------------------
+
+# The three-arm frame's known-propensity weight. It is 3 here and 2 on the
+# womens+control frame, and both are correct: each is one over the
+# probability that a customer's realized arm agrees with the action the
+# policy prescribes, on the frame the estimator runs on. Written out in the
+# tests as well as in the module so a reader comparing the two constants
+# never has to take either on faith.
+THREE_ARM_WEIGHT = 3.0
+
+
+def _three_arm_frame(n=9000, effects=(0.4, 1.1), seed=23):
+    """A synthetic three-arm randomization with a known constant effect.
+
+    Returns `(arm_codes, outcome, scores_by_arm, analytic)`. Arm codes are
+    the strings 0, 1 and 2 as an object array so the estimator is exercised
+    on labels rather than on integers -- the real `segment` column carries
+    'No E-Mail', 'Mens E-Mail' and 'Womens E-Mail'.
+
+    The scores are NOISE plus the arm's own constant effect, so the argmax
+    picks arm b on most rows but not on all of them, and the analytic value
+    of the argmax policy is the share-weighted mixture of the two constant
+    effects plus the control mean. That mixture is computable in the test
+    from the prescription alone, which is what makes this a recovery check
+    rather than a restatement of the implementation.
+    """
+    rng = np.random.default_rng(seed)
+    codes = np.array(["none", "a", "b"], dtype=object)[rng.integers(0, 3, n)]
+    base = rng.normal(size=n)
+    outcome = base.copy()
+    outcome[codes == "a"] += effects[0]
+    outcome[codes == "b"] += effects[1]
+    scores = {
+        "a": effects[0] + rng.normal(scale=0.6, size=n),
+        "b": effects[1] + rng.normal(scale=0.6, size=n),
+    }
+    return codes, outcome, scores
+
+
+def test_argmax_policy_value_recovers_a_known_three_arm_value():
+    """The honest side of D-05, checked against an analytic target.
+
+    The prescribed arm is a deterministic function of the two score
+    arrays, so the true value of the argmax policy on this frame is
+    `mean(base) + mean(effect of the prescribed arm)` -- both computable
+    without touching the estimator. Recovery is to Monte-Carlo tolerance
+    because the estimator sees only the third of the rows whose realized
+    arm happens to agree with the prescription.
+    """
+    codes, outcome, scores = _three_arm_frame()
+    result = evaluation.argmax_policy_value(
+        scores, codes, outcome, weight=THREE_ARM_WEIGHT, no_action="none"
+    )
+
+    prescribed = np.where(scores["b"] >= scores["a"], "b", "a")
+    analytic = float(
+        np.mean(np.where(prescribed == "b", 1.1, 0.4))
+    )
+
+    assert result.n == outcome.size
+    assert result.weight == THREE_ARM_WEIGHT
+    np.testing.assert_allclose(
+        result.delta_none,
+        analytic,
+        atol=0.12,
+        err_msg=(
+            "the argmax policy's Horvitz-Thompson value does not recover "
+            "the analytic value of the policy it prescribes. The estimator "
+            "counts a row only where its realized arm matches the "
+            "prescription, so a mismatched mask is the reachable defect."
+        ),
+    )
+    np.testing.assert_allclose(
+        sum(result.prescribed_share.values()), 1.0, atol=1e-12
+    )
+
+
+def test_argmax_requires_scores_on_treated_rows():
+    """D-15's whole reason for existing, as a raise rather than a nan.
+
+    Before plan 05-03 every score column was nan on the rows randomized
+    into the OTHER arm, which are exactly the rows a Horvitz-Thompson
+    numerator counts for an argmax policy. A nan there does not raise on
+    its own: `np.argmax` would rank it, the masked sum would be nan, and a
+    nan would arrive as a published policy value. It must raise.
+    """
+    codes, outcome, scores = _three_arm_frame(n=600)
+    poisoned = dict(scores)
+    poisoned["a"] = np.where(codes == "b", np.nan, scores["a"])
+
+    with pytest.raises(ValueError, match="nan"):
+        evaluation.argmax_policy_value(
+            poisoned, codes, outcome, weight=THREE_ARM_WEIGHT,
+            no_action="none",
+        )
+
+
+def test_argmax_rejects_an_arm_the_code_vector_never_realized():
+    """A named arm nobody was randomized into values a policy at zero.
+
+    Every row prescribed that arm contributes nothing to the numerator,
+    so the estimator would return a number that is quietly too small
+    rather than raising. The guard names both sets.
+    """
+    codes, outcome, scores = _three_arm_frame(n=600)
+    scores = dict(scores)
+    scores["c"] = np.zeros(outcome.size)
+
+    with pytest.raises(ValueError, match="c"):
+        evaluation.argmax_policy_value(
+            scores, codes, outcome, weight=THREE_ARM_WEIGHT,
+            no_action="none",
+        )
+
+
+def test_argmax_with_one_named_arm_is_the_blanket_send_of_that_arm():
+    """The decomposition's other half, computed by the SAME code path.
+
+    `winners_curse = gap_argmax - gap_womens` is only a clean subtraction
+    if both gaps are measured on one frame with one estimator, differing
+    in nothing but the number of arms the argmax chooses between. With a
+    single named arm the prescription is constant, so the value must equal
+    the plain Horvitz-Thompson mean of that arm.
+    """
+    codes, outcome, scores = _three_arm_frame(n=4000)
+    one = evaluation.argmax_policy_value(
+        {"b": scores["b"]}, codes, outcome,
+        weight=THREE_ARM_WEIGHT, no_action="none",
+    )
+
+    n = outcome.size
+    expected = THREE_ARM_WEIGHT * outcome[codes == "b"].sum() / n
+    np.testing.assert_allclose(one.value, expected, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        one.v_none,
+        THREE_ARM_WEIGHT * outcome[codes == "none"].sum() / n,
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert one.prescribed_share == {"b": 1.0}
+
+
+def test_argmax_needs_the_no_action_arm_named_when_it_is_ambiguous():
+    """Two unnamed levels is a question, not a default.
+
+    With `no_action` omitted the do-nothing arm is derived as the single
+    level the score mapping does not name. On a three-level vector naming
+    one arm there are two such levels, and guessing one of them would put
+    the wrong baseline under every gap in the exhibit.
+    """
+    codes, outcome, scores = _three_arm_frame(n=600)
+    with pytest.raises(ValueError, match="no_action"):
+        evaluation.argmax_policy_value(
+            {"b": scores["b"]}, codes, outcome, weight=THREE_ARM_WEIGHT
+        )
+
+
+def test_naive_policy_value_is_at_least_the_max_of_the_arm_means():
+    """Jensen, asserted as the inequality it is.
+
+    `mean(max(u_a, u_b)) >= max(mean(u_a), mean(u_b))` holds for every
+    pair of arrays, with equality only where one arm dominates everywhere.
+    It cannot fail for a correct implementation, and it fails loudly for
+    one that has transposed the max onto the wrong axis or averaged first.
+    """
+    _, _, scores = _three_arm_frame(n=4000)
+    naive = evaluation.naive_policy_value(scores)
+    best_arm_mean = max(float(np.mean(v)) for v in scores.values())
+
+    assert naive >= best_arm_mean, (
+        f"mean(max) came back as {naive}, below the largest arm mean "
+        f"{best_arm_mean}. Jensen's inequality makes that impossible for a "
+        "correct elementwise maximum."
+    )
+    assert naive > best_arm_mean, (
+        "these two arms overlap, so the Jensen gap on this frame is "
+        "strictly positive; an exact tie means the max collapsed onto one "
+        "arm."
+    )
+
+
+def test_naive_policy_value_over_one_arm_is_that_arm_s_mean():
+    """One arm is not a choice, so there is no Jensen gap to speak of.
+
+    The single-arm call is what supplies the womens-only side of the
+    decomposition, and it must be the plain mean of the predicted uplift
+    rather than anything cleverer.
+    """
+    _, _, scores = _three_arm_frame(n=1500)
+    np.testing.assert_allclose(
+        evaluation.naive_policy_value({"b": scores["b"]}),
+        float(np.mean(scores["b"])),
+        rtol=0.0,
+        atol=1e-15,
+    )
+
+
+def test_naive_policy_value_rejects_a_nan_and_a_length_mismatch():
+    """Both defects arrive as a silent nan or a broadcast, never a raise."""
+    _, _, scores = _three_arm_frame(n=400)
+    poisoned = dict(scores)
+    poisoned["a"] = np.where(np.arange(400) == 7, np.nan, scores["a"])
+    with pytest.raises(ValueError, match="nan"):
+        evaluation.naive_policy_value(poisoned)
+
+    ragged = {"a": scores["a"], "b": scores["b"][:-1]}
+    with pytest.raises(ValueError, match="length"):
+        evaluation.naive_policy_value(ragged)
+
+
+def test_hajek_reproduces_the_arm_means_on_synthetic_data():
+    """The defining property of the ratio estimator, stated as equality.
+
+    At k = 1 the policy IS the treated arm, so a Hajek estimator's
+    `v_all` is the realized treated mean outcome EXACTLY. The
+    Horvitz-Thompson form divides by the frame size and multiplies by a
+    fixed weight instead, so it lands on the treated mean only when the
+    realized arm sizes happen to be exactly equal. That difference is the
+    entire content of the robustness note.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=3001)
+    variants = evaluation.policy_value_variants(
+        score,
+        treatment,
+        outcome,
+        k=0.2,
+        weight=evaluation.POLICY_WEIGHT,
+        m0=np.zeros(outcome.size),
+        m1=np.zeros(outcome.size),
+    )
+
+    treated_mean = float(outcome[treatment == 1].mean())
+    control_mean = float(outcome[treatment == 0].mean())
+    np.testing.assert_allclose(
+        variants.hajek.v_all, treated_mean, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        variants.hajek.v_none, control_mean, rtol=0.0, atol=1e-12
+    )
+    assert variants.ht.v_all != pytest.approx(treated_mean, abs=1e-12), (
+        "the Horvitz-Thompson v_all landed exactly on the treated arm "
+        "mean, which happens only when the two arm sizes are equal. This "
+        "frame has an odd row count on purpose so the two estimators are "
+        "distinguishable."
+    )
+
+
+def test_aipw_with_zero_outcome_models_is_the_horvitz_thompson_value():
+    """The augmentation term is what AIPW adds and nothing else.
+
+    With both outcome models identically zero the doubly-robust form
+    collapses to the inverse-probability form, so any difference between
+    the two at that setting is an arithmetic slip in the augmentation
+    rather than a property of the data.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=2000)
+    zeros = np.zeros(outcome.size)
+    variants = evaluation.policy_value_variants(
+        score, treatment, outcome, k=0.35,
+        weight=evaluation.POLICY_WEIGHT, m0=zeros, m1=zeros,
+    )
+    np.testing.assert_allclose(
+        variants.aipw.delta_none,
+        variants.ht.delta_none,
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def test_policy_value_variants_agree_with_the_curve_at_the_same_k():
+    """One ranking, one head: the variants must not sort differently.
+
+    `policy_value_curve` and `policy_value_variants` both select the top
+    `int(n * k)` rows of the project's single ordering. If the variants
+    grew a second sort the two would disagree here while both continuing
+    to look reasonable on their own.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=2000)
+    zeros = np.zeros(outcome.size)
+    curve = evaluation.policy_value_curve(
+        score, treatment, outcome, n_grid=101
+    )
+    variants = evaluation.policy_value_variants(
+        score, treatment, outcome, k=0.2,
+        weight=evaluation.POLICY_WEIGHT, m0=zeros, m1=zeros,
+    )
+    anchor = int(np.argmin(np.abs(curve.grid - 0.2)))
+    assert variants.n_targeted == int(curve.n_targeted[anchor])
+    np.testing.assert_allclose(
+        variants.ht.delta_none,
+        curve.delta_none[anchor],
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def test_ranking_order_is_the_one_ordering_the_curve_uses():
+    """The public ordering primitive, pinned against the curve it feeds.
+
+    `pipeline.policy()` needs the top-k head to compute the model's own
+    belief over exactly the customers the Horvitz-Thompson value was
+    computed on. Reimplementing the sort there would be a second ranking
+    in a project whose central claim is that it has one.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=1000)
+    take = evaluation.ranking_order(score, seed=20260902)
+
+    assert take.shape == (score.size,)
+    assert np.array_equal(np.sort(take), np.arange(score.size))
+    ranked = score[take]
+    assert np.all(np.diff(ranked) <= 0.0), (
+        "ranking_order did not return positions in descending score order"
+    )
+
+    curve = evaluation.policy_value_curve(
+        score, treatment, outcome, n_grid=101, seed=20260902
+    )
+    head = take[: int(curve.n_targeted[20])]
+    n = score.size
+    by_hand = evaluation.POLICY_WEIGHT * (
+        outcome[head][treatment[head] == 1].sum()
+        + outcome[np.setdiff1d(np.arange(n), head)][
+            treatment[np.setdiff1d(np.arange(n), head)] == 0
+        ].sum()
+    ) / n
+    np.testing.assert_allclose(
+        by_hand, curve.v_pi[20], rtol=0.0, atol=1e-12
+    )
