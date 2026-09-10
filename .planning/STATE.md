@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-09-10T22:39:58.430Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-09-10T23:21:04.297Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 36
+  completed_plans: 37
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [████████░░] 82%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ Progress: [████████░░] 82%
 | Phase 05 P07 | 40min | 3 tasks | 5 files |
 | Phase 05 P08 | 153min | 3 tasks | 9 files |
 | Phase 06 P01 | 22min | 2 tasks | 6 files |
+| Phase 06 P02 | 37min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -222,6 +223,9 @@ Recent decisions affecting current work:
 - [Phase 06-01]: requirements.txt gained a recorded decision the plan did not ask for -- matplotlib is NOT a required streamlit dependency (it sits behind the charts extra), so the explicit serve-time pin is load-bearing and trimming it as redundant would break the figures
 - [Phase 06-01]: the serve-time requirements test asserts the five REQUIRED packages in the same test as the four banned ones, because the negative half passes trivially against an empty or truncated file
 - [Phase 06-01]: APP-02 left Pending despite appearing in this plan's requirements frontmatter -- 06-01 installs streamlit and makes a default deployment honest, but deploys nothing and adds no live link; the requirement is not satisfied until 06-08/06-09 do, following the VALID-01/02, UPLIFT-01 and UPLIFT-02 precedent. C-4 and D-10 are a ROADMAP criterion and a CONTEXT decision, not requirement IDs, and are correctly absent from REQUIREMENTS.md
+- [Phase 06-02]: OUTCOMES and SMD_THRESHOLD relocated to config.py with re-export-by-assignment shims in ate.py/balance.py -- identity is preserved deliberately, because re-wrapping in a fresh MappingProxyType passes every equality assertion while letting two definitions drift
+- [Phase 06-02]: the plots.py import closure is proven out-of-process and asserts package ABSENCES, never a module count -- the count is environment-dependent (2,046 measured here vs research's 2,029) and pinning it would fail on any unrelated dependency upgrade
+- [Phase 06-02]: two plots.py docstrings dropped their ate./balance. module qualifiers -- a module that no longer imports ate should not read as though it does, and the plan's own grep gate enforces it
 
 ### Pending Todos
 
@@ -252,6 +256,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T22:39:35.057Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-09-10T23:21:04.289Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
