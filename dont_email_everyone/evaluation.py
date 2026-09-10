@@ -240,6 +240,8 @@ selling point is that its numbers are correct.
     from the other without its seed.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 
 # Band defaults, pinned in the style of `coverage.CELL_SIZES` -- each is a
@@ -654,6 +656,308 @@ def tie_diagnostics(score) -> dict:
     }
 
 
+# POLICY VALUE, AND THE ONE CONSTANT IT TURNS ON.
+#
+# POLICY_WEIGHT is a Horvitz-Thompson weight -- the reciprocal of the
+# probability that a customer this policy wants to email actually received
+# an email in the experiment. Hillstrom randomized a third of the list into
+# each of three arms, so the DESIGN propensity is 1/3 and ROADMAP criterion
+# 1 was first written as "known-propensity (1/3) IPW". That fraction is
+# right about the design and wrong about this estimator, and the gap
+# between the two is 50% of every dollar figure in the phase.
+#
+# The derivation in full, because a transcribed fraction is precisely
+# Pitfall 1 of this phase's research:
+#
+#   1. `uplift_womens_*` is nan on every mens holdout row, so the policy
+#      cannot rank a mens-arm customer at all. The frame this estimator
+#      necessarily runs on is the womens+control rows.
+#   2. `A in {womens, control}` is a function of the randomly assigned arm
+#      alone. Conditioning on it conditions on a coin flip, induces no
+#      selection bias, and leaves the two remaining arms exchangeable.
+#   3. P(A = womens | A in {womens, control}) = (1/3) / (2/3) = 1/2.
+#   4. The Horvitz-Thompson weight on that frame is 1 / (1/2) = 2.
+#
+# REJECTED, WITH ITS MEASURED COST -- weight 3 on this same frame. It
+# reports V(email everyone) on spend as $1.7227 per customer against a
+# womens-arm mean of $1.1462 measured on the very same rows, a 50.3%
+# inflation; and its implied ATE of 0.6335 misses ate.parquet's committed
+# womens/spend effect of 0.4244 by 49%. Neither failure raises anything.
+# Both simply publish.
+#
+# REJECTED, AND ARITHMETICALLY EQUIVALENT -- weight 3 over the full
+# 32,001-row holdout, which keeps the design propensity and pays for it in
+# the denominator. It differs from the form below by
+# (3 x 21,347) / (2 x 32,001) = 1.00061, six hundredths of one percent, so
+# it is a different bookkeeping of one estimator rather than a second
+# estimator. The two-arm form was chosen because CONTEXT.md D-11 already
+# names the 21,347-row frame as the reported population, and because it
+# divides by a number the reader can count in the frame in front of them.
+#
+# `test_policy_weight_is_the_conditioned_design_propensity` is the canary:
+# it cross-checks this constant against the womens arm's own mean spend and
+# against the committed ATE artifact, and asserts that a 3 fails both.
+POLICY_WEIGHT = 2.0
+
+
+def _guard_grid_points(n_grid) -> None:
+    """Raise unless `n_grid` is an integer count of at least 2.
+
+    Extracted from `_guard_band_grid`, which still carries the `level`
+    half and now calls this for the other half. `policy_value_curve` needs
+    the grid check without the level check, and a second hand-written copy
+    is how two grids end up disagreeing about what a one-point curve means.
+    """
+    if not isinstance(n_grid, (int, np.integer)) or n_grid < 2:
+        raise ValueError(
+            f"`n_grid` is {n_grid!r}; the band grid needs an integer count "
+            "of at least 2 points. A one-point band is a pair of numbers "
+            "that `plots.qini_plot` would happily fill between and render "
+            "as an empty ribbon."
+        )
+
+
+def _guard_weight(weight) -> float:
+    """Raise unless `weight` is a finite, strictly positive number.
+
+    A weight is a reciprocal propensity, so it is bounded below by 1 in
+    theory and by "positive and finite" in the only sense worth enforcing.
+    Each rejected case has a specific silent behaviour: a zero weight
+    values every policy at nothing and reports every contrast as an exact
+    tie, a negative weight reverses the recommendation, and a nan or an
+    infinity travels through all four contrasts and out into the band
+    without raising. Never `assert` -- these gates stand between an
+    arithmetic slip and a published dollar figure, and asserts are
+    compiled out under `python -O`.
+    """
+    try:
+        value = float(weight)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"`weight` is {weight!r}; the IPW weight must be a number."
+        ) from error
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(
+            f"`weight` is {weight!r}; the IPW weight must be finite and "
+            "strictly positive. It is a reciprocal propensity, so a value "
+            "of 0 values every policy at nothing, a negative value flips "
+            "the sign of the recommendation, and a nan propagates through "
+            "every contrast and into the bootstrap band unnoticed."
+        )
+    return value
+
+
+@dataclass(frozen=True, eq=False)
+class PolicyValueCurve:
+    """The seven curves and four scalars `policy_value_curve` returns.
+
+    A FROZEN DATACLASS rather than `types.SimpleNamespace`, chosen for one
+    property: the field set is fixed. A namespace accepts
+    `result.delta_al = ...` silently and hands the typo back to whoever
+    reads the right spelling later, which on this object means a contrast
+    that quietly stops being the one that was computed. `frozen=True`
+    turns that into an error at the assignment.
+
+    `eq=False` because the generated `__eq__` would compare NumPy arrays
+    elementwise and raise "truth value of an array is ambiguous" the first
+    time two of these met an `==`. Freezing rebinds the FIELDS, not the
+    arrays: `result.delta_none[0] = 9` still works, and nothing here
+    pretends otherwise.
+
+    Every array has length `n_grid` and dtype float64, EXCEPT
+    `n_targeted`, which is an integer count of emails. Carrying a count of
+    emails as a float is a unit error waiting for a reader -- D-07 puts
+    that absolute count in front of a marketer beside the percentage --
+    so it stays an integer array here.
+    """
+
+    grid: np.ndarray
+    n_targeted: np.ndarray
+    v_pi: np.ndarray
+    delta_none: np.ndarray
+    delta_all: np.ndarray
+    delta_random: np.ndarray
+    per_targeted: np.ndarray
+    v_all: float
+    v_none: float
+    n: int
+    weight: float
+
+
+def policy_value_curve(
+    score,
+    treatment,
+    outcome,
+    *,
+    weight: float = POLICY_WEIGHT,
+    n_grid: int = BAND_GRID_POINTS,
+    seed: int = 20260902,
+) -> PolicyValueCurve:
+    """Known-propensity IPW value of the top-k policy, over a grid of k.
+
+    THE VALUE COMES FROM THE RANDOMIZATION, NEVER FROM THE MODEL. `score`
+    enters this function only as a ranking device; the arithmetic that
+    produces a number touches `treatment` and `outcome` alone. Summing
+    predicted uplift over the targeted head would make the headline a
+    restatement of the model's own belief about itself, which is what
+    CONTEXT.md D-02 forbids and what this phase's research measured: at
+    the anchor the spend model believes it is delivering twice what the
+    randomization says it delivered.
+
+    The estimator. Rank the frame once, take the top `int(n * k)` rows as
+    the targeted set T, and value the policy that emails T and leaves the
+    rest alone:
+
+        V(pi_k) = (weight / n) * [ sum_{i in T, A = treated} Y_i
+                                 + sum_{i not in T, A = control} Y_i ]
+
+    Each customer contributes only when the arm they were randomized into
+    agrees with what the policy would have done to them, which is the
+    Horvitz-Thompson inverse-probability construction. `weight` is
+    `POLICY_WEIGHT`; the block above it derives the 2 from the frame and
+    names what a transcribed 3 costs.
+
+    THREE CONTRASTS, ALL FROM ONE PASS, because ROADMAP criterion 1 needs
+    two of them and D-08a makes the third the headline:
+
+        delta_none   = V(pi_k) - V(nobody)   -- versus emailing nobody
+        delta_all    = V(pi_k) - V(everyone) -- versus emailing everyone
+        delta_random = delta_none - k * (V(everyone) - V(nobody))
+
+    `delta_random` compares the targeted send against a RANDOM send OF THE
+    SAME SIZE, which is the comparator D-08a promotes to the headline. A
+    random send of fraction k delivers k times the incremental outcome of
+    a blanket send, so the comparator is the chord and the contrast is the
+    gap above it. Under a capacity constraint "email everyone" is not on
+    the menu at all, and the decision actually facing a marketer is how to
+    spend a fixed budget of sends.
+
+    THE SIGN IDENTITY, STATED HERE SO IT IS NOT LATER "FIXED". Writing T
+    for the targeted head and its complement for the untargeted tail:
+
+        delta_none(k) = +(weight/n) * [ sum_{T, treated} Y
+                                      - sum_{T, control} Y ]
+        delta_all(k)  = -(weight/n) * [ sum_{tail, treated} Y
+                                      - sum_{tail, control} Y ]
+
+    The second is MINUS the incremental outcome of the bottom (1 - k). At
+    zero cost, beating a blanket send therefore requires a segment that
+    email measurably HARMS, and the Hillstrom womens arm has a positive
+    ATE on all three outcomes. So `delta_all` is non-positive at every k
+    on this data, and that is arithmetic rather than model failure. It is
+    also the whole reason D-08a overturned D-08 and moved the headline
+    onto the contrast against a random send of the same size.
+
+    `delta_random` IS NOT THE QINI CURVE MINUS ITS RANDOM CHORD. The two
+    are close -- measured correlation 0.9997 across the 101-point grid on
+    the real womens frame, spend outcome -- and they are different
+    quantities: `qini_curve` normalizes per treated head and applies a
+    CUMULATIVE treated/control ratio correction inside the selection,
+    while this carries a fixed weight and a per-population-customer
+    denominator. No test asserts they are equal, and no reader should be
+    left to infer it.
+
+    THREE UNITS LIVE IN THIS MODULE NOW, and decision (g) above already
+    calls conflating two of them PITFALLS.md Pitfall 8's headline failure
+    mode. Naming all three at their point of definition:
+
+        Q(phi)      per TREATED customer in the whole population
+        delta_*     per POPULATION customer of the evaluation frame
+        per_targeted  per TARGETED customer, i.e. per email sent
+
+    `per_targeted` is `delta_none * n / n_targeted`: the total incremental
+    outcome delivered, divided by the number of emails actually sent. At
+    `grid[0] == 0` no emails are sent and the entry is `np.nan`, never a
+    zero and never an infinity.
+
+    DIVIDING BY THE REALIZED COUNT IS A DECISION, and this phase's
+    research document computed the same figure the other way. `delta_none
+    / k` uses the exact k, which is not the size of the selection because
+    `int(n * k)` truncates. On the committed frame at k = 0.20 the two
+    give $0.930401 (this definition, dividing by 4,269) and $0.930313
+    (dividing by 4,269.4); on visit, 0.070274 against 0.070267. The
+    realized count wins because D-07 shows that absolute count beside the
+    percentage precisely so a reader can multiply back and land on the
+    published total, and `delta_none / k` does not have that property.
+    Both numbers are recorded here so the 0.01% discrepancy reads as
+    resolved rather than as unnoticed drift.
+
+    Arguments and returns. `weight`, `n_grid` and `seed` are keyword-only,
+    so no caller can positionally pass a seed into the weight slot and
+    value a policy at 20-million-fold inverse propensity. Returns a
+    `PolicyValueCurve`; its docstring states why the return type is a
+    frozen dataclass and which of its arrays is not float64.
+
+    `_ranked_arrays` is called rather than a second sort being written
+    here, for the reason `uplift_at_k` records: the project's ONE ranking
+    means the policy curve, the Qini curve and the uplift-at-k number all
+    describe the same ordering of the same customers.
+    Raises `ValueError` on a non-binary treatment, a nan score, a nan
+    outcome, mismatched lengths (all inherited from `_guard_inputs`), a
+    grid of fewer than two points, and a weight that is not finite and
+    positive.
+    """
+    weight = _guard_weight(weight)
+    _guard_grid_points(n_grid)
+
+    t, y = _ranked_arrays(score, treatment, outcome, seed)
+    n = int(t.size)
+
+    # A leading 0.0 is PREPENDED rather than computed, for the reason
+    # `qini_curve` prepends its origin: V(pi_0) must equal V(nobody)
+    # exactly, not to within rounding, so that `delta_none[0]` is a
+    # structural zero. Both arrays then have length n + 1 and index
+    # directly by a selection SIZE rather than by a position.
+    cum_t = np.concatenate([[0.0], np.cumsum(np.where(t == 1.0, y, 0.0))])
+    cum_c = np.concatenate([[0.0], np.cumsum(np.where(t == 0.0, y, 0.0))])
+
+    grid = np.linspace(0.0, 1.0, n_grid)
+    # TRUNCATION, never rounding -- module docstring, decision (f), and
+    # the same expression `uplift_at_k` and `economics.emails_at_capacity`
+    # both size their selections with. One row of disagreement over a
+    # rounding rule is two documents quoting different counts for the same
+    # capacity.
+    n_targeted = (n * grid).astype(int)
+
+    # The targeted head contributes its TREATED rows and the untargeted
+    # tail contributes its CONTROL rows: each customer counts only where
+    # the arm they landed in matches what the policy would have done.
+    v_pi = weight * (cum_t[n_targeted] + (cum_c[-1] - cum_c[n_targeted])) / n
+    v_all = float(weight * cum_t[-1] / n)
+    v_none = float(weight * cum_c[-1] / n)
+
+    delta_none = v_pi - v_none
+    delta_all = v_pi - v_all
+    delta_random = delta_none - grid * (v_all - v_none)
+
+    # `where=` rather than a branch or a guarded slice: at grid[0] the
+    # selection is empty, and a plain divide would emit a RuntimeWarning
+    # and write an infinity into a per-email figure. With `out` prefilled
+    # with nan, "no emails were sent" reads as missing rather than as
+    # unbounded.
+    per_targeted = np.full(n_grid, np.nan)
+    np.divide(
+        delta_none * n,
+        n_targeted,
+        out=per_targeted,
+        where=n_targeted > 0,
+    )
+
+    return PolicyValueCurve(
+        grid=grid,
+        n_targeted=n_targeted,
+        v_pi=v_pi,
+        delta_none=delta_none,
+        delta_all=delta_all,
+        delta_random=delta_random,
+        per_targeted=per_targeted,
+        v_all=v_all,
+        v_none=v_none,
+        n=n,
+        weight=weight,
+    )
+
+
 def stratified_indices(
     labels,
     n_resamples: int = BOOTSTRAP_BAND_RESAMPLES,
@@ -905,13 +1209,7 @@ def _guard_band_grid(n_grid, level) -> None:
     band functions with two hand-written copies of these checks are two
     band functions that eventually disagree about what a level of 0 means.
     """
-    if not isinstance(n_grid, (int, np.integer)) or n_grid < 2:
-        raise ValueError(
-            f"`n_grid` is {n_grid!r}; the band grid needs an integer count "
-            "of at least 2 points. A one-point band is a pair of numbers "
-            "that `plots.qini_plot` would happily fill between and render "
-            "as an empty ribbon."
-        )
+    _guard_grid_points(n_grid)
     if not 0.0 < level < 1.0:
         raise ValueError(
             f"`level` is {level!r}; a two-sided coverage level must satisfy "
