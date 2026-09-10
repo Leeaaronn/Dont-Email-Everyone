@@ -33,6 +33,15 @@ from dont_email_everyone import config
 # The last four are Phase 4's, written by pipeline.train(): appending them
 # here is exactly how a new artifact becomes covered by the existence and
 # git-tracking assertions, which is why the list is maintained by hand.
+#
+# `scored_holdout.parquet` is the one that costs anything to carry, and it
+# grew in plan 05-03 when the six `_all` uplift columns landed: 3,101,202
+# bytes at 37 columns, 4,143,959 at 43, both measured on the committed file.
+# That is a point-in-time record rather than an assertion -- no test pins a
+# Parquet's byte size, because pyarrow embeds run-specific metadata -- and it
+# is recorded because the deployed app's load budget is a few megabytes and
+# a future widening should be weighed against that number rather than
+# against nothing.
 ARTIFACT_NAMES = [
     "analysis_table.parquet",
     "mens_vs_control.parquet",
@@ -190,6 +199,53 @@ def test_committed_model_results_are_not_stale():
         ("womens", "visit", "linear"),
         ("womens", "conversion", "linear"),
     }, f"the committed shipping cells are {sorted(shipped)}"
+
+
+def test_scored_holdout_carries_both_arms_on_every_row():
+    """Both arms' uplift is available on every holdout row (CONTEXT.md D-15).
+
+    Reads the artifact as COMMITTED -- no `trained` fixture and no refit --
+    because what is under test is what a fresh clone actually gets.
+
+    The original per-arm uplift columns are NaN outside their own arm's
+    frame, which is correct for them and leaves a per-customer argmax over
+    the two arms undefined on exactly the TREATED rows an inverse-propensity
+    policy value has to count: on a womens-arm customer the mens score is
+    absent, so there is nothing to take a maximum over. Only the shared
+    control rows carried both. The `_all` family closes that, and this test
+    is what tells the downstream policy plan its input exists.
+    """
+    scored = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    all_columns = [c for c in scored.columns if c.endswith("_all")]
+    assert all_columns, (
+        "the committed scored_holdout.parquet carries no `_all` uplift "
+        "column -- it is stale. Regenerate it with "
+        "`python -m dont_email_everyone.pipeline train`."
+    )
+    for column in all_columns:
+        missing = int(scored[column].isna().sum())
+        assert missing == 0, (
+            f"{column} is missing on {missing} of {len(scored)} rows. An "
+            "`_all` column that is NaN anywhere leaves the cross-arm argmax "
+            "undefined on exactly the rows it exists to serve, which is the "
+            "defect the column was added to remove"
+        )
+
+    # The argmax needs BOTH arms of the same outcome present. The lookup is
+    # by suffix rather than by literal name because the unproven_ prefix
+    # travels with the number wherever it appears (CONTEXT.md D-03) -- the
+    # mens visit cell did not clear Phase 4's bar, so its column carries the
+    # prefix, and naming either column literally here would break the moment
+    # a ship decision moved.
+    for arm in ("mens", "womens"):
+        matches = [
+            c for c in all_columns if c.endswith(f"uplift_{arm}_visit_all")
+        ]
+        assert len(matches) == 1, (
+            f"expected exactly one {arm} visit `_all` column, found "
+            f"{matches}. The per-customer argmax over the two arms needs "
+            "both of them on the same rows"
+        )
 
 
 def test_committed_ate_effects_are_not_stale():
