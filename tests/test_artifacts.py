@@ -17,22 +17,32 @@ that -- it pins the committed mens visit effect rather than merely checking
 the table's shape.
 """
 
+import ast
 import json
 import subprocess
 import sys
 
+import numpy as np
 import pandas as pd
+import pytest
 
-from dont_email_everyone import config
+from dont_email_everyone import config, economics, evaluation
 
 # A presence allowlist, not an exhaustive equality check -- the tests below
 # loop over it and assert each entry is present and tracked. Appending is
 # therefore safe, and omitting a newly written artifact would silently
 # under-test it: the glob readability check picks a new Parquet up
 # automatically, but the existence and git-tracking assertions never would.
-# The last four are Phase 4's, written by pipeline.train(): appending them
-# here is exactly how a new artifact becomes covered by the existence and
+# The middle four are Phase 4's, written by pipeline.train(), and the LAST
+# FOUR are Phase 5's, written by pipeline.policy(): appending them here is
+# exactly how a new artifact becomes covered by the existence and
 # git-tracking assertions, which is why the list is maintained by hand.
+#
+# The Phase 5 four are the ones Phase 6's app and Phase 7's README read, and
+# they are deliberately tiny -- 41,239 / 66,314 / 41,340 bytes of Parquet
+# and a 10,282-byte JSON block, all four measured on the committed files.
+# ROADMAP criterion 4 asks for small and format-stable, and only
+# `manifest.json` carries an asserted bound, below.
 #
 # `scored_holdout.parquet` is the one that costs anything to carry, and it
 # grew in plan 05-03 when the six `_all` uplift columns landed: 3,101,202
@@ -53,6 +63,10 @@ ARTIFACT_NAMES = [
     "permutation_null.parquet",
     "model_results.parquet",
     "model.json",
+    "policy_curve.parquet",
+    "policy_bands.parquet",
+    "cost_sweep.parquet",
+    "manifest.json",
 ]
 
 # `split` joins the four original string columns for the same pandas 3.0
@@ -376,3 +390,411 @@ def test_committed_artifacts_carry_the_split_column():
             f"{sorted(frame['split'].unique().tolist())}, expected exactly "
             "['holdout', 'train']"
         )
+
+
+# --------------------------------------------------------------------------
+# Phase 5: the policy artifacts
+# --------------------------------------------------------------------------
+#
+# These read the committed files directly and rebuild nothing, following
+# `test_committed_ate_effects_are_not_stale`'s precedent: `pipeline.policy()`
+# writing a correct manifest proves nothing about the file a fresh clone,
+# the deployed app or Phase 7's README actually reads. None of them carries
+# the `slow` marker, because none of them fits anything.
+
+# ROADMAP criterion 4 says the committed artifacts must be SMALL and
+# format-stable. `manifest.json` measured 10,282 bytes when 05-06 wrote it.
+# The bound below is a generous multiple of that rather than a tight pin: a
+# pin would fail on any honest addition, while a sixfold headroom still
+# fails loudly if a future plan pastes a curve, a replicate stack or a row
+# per customer into the scalar block -- which is the failure mode the
+# criterion exists to prevent, and which would arrive as megabytes.
+MANIFEST_SIZE_BOUND = 64 * 1024
+
+# Spelled in halves so the sweep in
+# `test_headline_reproduces_from_committed_columns` cannot match its own
+# source -- the same defence tests/test_evaluation.py uses on its own
+# forbidden-token list. A test whose forbidden token appears in the test is
+# a test that fails for the wrong reason and then gets weakened.
+MODEL_FILE_SUFFIXES = ("." + "pkl", "." + "job" + "lib", "." + "pic" + "kle")
+
+
+def _manifest():
+    return json.loads(
+        (config.PROCESSED / "manifest.json").read_text(encoding="utf-8")
+    )
+
+
+def _policy_frame_rows():
+    """The womens+control row count, derived from the scored artifact.
+
+    Never a literal 21,347: the point of every check below is that the
+    manifest agrees with the file it claims to describe, and a literal
+    would agree with neither if the scored artifact were regenerated.
+    """
+    scored = pd.read_parquet(config.PROCESSED / "scored_holdout.parquet")
+    segment = scored["segment"].to_numpy()
+    return scored, segment != config.ARMS["mens"]
+
+
+def test_manifest_headline_block():
+    manifest = _manifest()
+    for block in ("generated_by", "generated_from", "frame", "headline",
+                  "cost_exhibit", "sensitivity"):
+        assert block in manifest, f"manifest.json is missing {block!r}"
+
+    frame = manifest["frame"]
+    for key in ("n_customers", "n_targeted", "capacity_k", "weight",
+                "ranking", "arm", "outcomes", "seed"):
+        assert key in frame, f"manifest.json frame block is missing {key!r}"
+
+    scored, mask = _policy_frame_rows()
+    assert frame["n_customers"] == int(mask.sum()), (
+        f"manifest frame.n_customers is {frame['n_customers']} against "
+        f"{int(mask.sum())} womens+control rows in the scored artifact -- "
+        "one of the two files is stale"
+    )
+    assert frame["n_targeted"] == economics.emails_at_capacity(
+        frame["n_customers"], economics.HEADLINE_CAPACITY
+    ), (
+        "manifest frame.n_targeted disagrees with emails_at_capacity on the "
+        "same frame; the truncation convention is int(n*k), never a round"
+    )
+    assert frame["capacity_k"] == economics.HEADLINE_CAPACITY
+    assert frame["weight"] == evaluation.POLICY_WEIGHT, (
+        f"manifest frame.weight is {frame['weight']} against "
+        f"{evaluation.POLICY_WEIGHT}; the Horvitz-Thompson weight on the "
+        "two-arm evaluation frame is derived, not transcribed from the "
+        "criterion's 1/3 -- see evaluation.POLICY_WEIGHT's comment block"
+    )
+
+    headline = manifest["headline"]
+    assert headline["contrast"].startswith("vs_random"), (
+        "CONTEXT.md D-08a makes the headline contrast the targeted send "
+        "against a RANDOM send of the same size; both criterion-1 "
+        "differences are present but neither is the headline"
+    )
+    for outcome in ("visit", "conversion", "spend"):
+        block = headline["per_outcome"][outcome]
+        for key in ("total", "per_targeted", "vs_nobody", "vs_everyone",
+                    "vs_random"):
+            for suffix in ("", "_lo", "_hi"):
+                assert key + suffix in block, (
+                    f"headline.per_outcome.{outcome} is missing "
+                    f"{key + suffix!r}"
+                )
+            assert block[key + "_lo"] <= block[key] <= block[key + "_hi"], (
+                f"headline.per_outcome.{outcome}.{key} sits outside its own "
+                "band"
+            )
+
+    size = (config.PROCESSED / "manifest.json").stat().st_size
+    assert size < MANIFEST_SIZE_BOUND, (
+        f"manifest.json is {size} bytes, over the {MANIFEST_SIZE_BOUND}-byte "
+        "bound. ROADMAP criterion 4 wants this file small and "
+        "format-stable; something whose grain is tabular has probably been "
+        "pasted into the scalar block and belongs in a Parquet beside it"
+    )
+
+
+def test_headline_reproduces_from_committed_columns():
+    """ROADMAP criterion 4, demonstrated rather than asserted.
+
+    Rebuilds the headline from `scored_holdout.parquet` and the manifest's
+    OWN recorded seed, ranking column and truncation rule, using nothing
+    but pandas and numpy. NO MODEL FILE IS READ ANYWHERE HERE -- that is
+    the property under test, and this module imports neither `models` nor
+    any serializer, which the assertions at the foot of the function pin
+    so a future edit cannot quietly reintroduce one.
+    """
+    manifest = _manifest()
+    frame_block = manifest["frame"]
+    scored, mask = _policy_frame_rows()
+    sub = scored.loc[mask]
+    n = len(sub)
+
+    # `evaluation._ranked_arrays`' convention, reimplemented here on
+    # purpose: permute FIRST at the recorded seed so tie order comes from
+    # the seed rather than from row order, then take a STABLE descending
+    # sort. Calling the function itself would test that the artifact
+    # agrees with the code that wrote it, which is not the claim.
+    score = sub[frame_block["ranking"]].to_numpy(dtype=float)
+    permutation = np.random.default_rng(frame_block["seed"]).permutation(n)
+    order = np.argsort(-score[permutation], kind="stable")
+    head = sub.iloc[permutation[order][: int(n * frame_block["capacity_k"])]]
+    assert len(head) == frame_block["n_targeted"]
+
+    treated = head["segment"].to_numpy() == frame_block["arm"]
+    for outcome in frame_block["outcomes"]:
+        values = head[outcome].to_numpy(dtype=float)
+        total = frame_block["weight"] * (
+            values[treated].sum() - values[~treated].sum()
+        )
+        quoted = manifest["headline"]["per_outcome"][outcome]["total"]
+        assert total == pytest.approx(quoted, rel=0, abs=1e-8), (
+            f"the {outcome} headline total recomputes to {total} from the "
+            f"committed scores against the manifest's {quoted}. The "
+            "manifest's own reproduce sentence states this arithmetic; if "
+            "the two disagree, the manifest is stale -- regenerate it with "
+            "`python -m dont_email_everyone.pipeline policy`"
+        )
+        assert quoted / frame_block["n_targeted"] == pytest.approx(
+            manifest["headline"]["per_outcome"][outcome]["per_targeted"]
+        ), (
+            "per_targeted must divide by the REALIZED int(n*k) count, so a "
+            "reader can multiply it back and land on the published total"
+        )
+
+    assert all(
+        not name.endswith(MODEL_FILE_SUFFIXES)
+        for name in manifest["generated_from"]
+    ), (
+        "manifest.generated_from names a serialized model. Criterion 4 "
+        "requires every headline number to reproduce from committed data "
+        "with arithmetic alone, and model files are gitignored"
+    )
+    # By construction, read off the module's own import graph rather than
+    # off its text: the words below appear in this file as prose and as
+    # artifact names, so a substring sweep would match itself. `ast` sees
+    # only what is actually imported.
+    tree = ast.parse(
+        (config.ROOT / "tests" / "test_artifacts.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        for alias in getattr(node, "names", [])
+    }
+    for banned in ("models", "job" + "lib", "pic" + "kle"):
+        assert banned not in imported, (
+            f"tests/test_artifacts.py imports {banned!r}; this test's whole "
+            "value is that it reaches a headline number without one"
+        )
+
+
+def test_headline_carries_no_unproven_number():
+    """CONTEXT.md D-03: the label is inseparable from the number."""
+    manifest = _manifest()
+    serialized = json.dumps(manifest["headline"])
+    assert "unproven" not in serialized, (
+        "an unproven_-prefixed ranking contributed a number to the headline "
+        "block. The four cells that failed their Phase 4 nulls may be shown "
+        "as LABELLED sensitivity only; nothing they produce may reach a "
+        "headline position"
+    )
+    assert manifest["frame"]["ranking"] == "uplift_womens_visit", (
+        "D-01 locks the headline ranking on Phase 4 evidence -- holdout "
+        "Qini +0.009569 at an empirical p of 0.0100 -- before any policy "
+        "curve existed"
+    )
+
+    sensitivity = manifest["sensitivity"]
+    assert sensitivity, "the sensitivity block is empty"
+    scored, _ = _policy_frame_rows()
+    for ranking, block in sensitivity.items():
+        assert ranking in scored.columns, (
+            f"sensitivity is keyed by {ranking!r}, which is not a column of "
+            "the scored artifact. The key must be the artifact's own column "
+            "name, so the label cannot be stripped by renaming"
+        )
+        assert block["published"] == (not ranking.startswith("unproven_"))
+    assert any(
+        ranking.startswith("unproven_") for ranking in sensitivity
+    ), (
+        "no unproven ranking is present at all, so this test proves nothing "
+        "about where its label travels"
+    )
+
+
+def test_headline_carries_the_zero_cost_caveat():
+    """CONTEXT.md D-08a: the caveat travels with the headline, in full."""
+    caveat = _manifest()["headline"]["caveat"]
+    assert len(caveat) > 200, (
+        f"the caveat is {len(caveat)} characters. D-08a requires it stated "
+        "rather than buried, and an abbreviation of it is a burial"
+    )
+    lowered = caveat.lower()
+    assert "free" in lowered and "everyone" in lowered, (
+        "the caveat must say that with genuinely free email the correct "
+        "action is to email everyone -- the half of the argument that "
+        "concedes the point"
+    )
+    assert "budget" in lowered, (
+        "the caveat must say that this result is about spending a FIXED "
+        "BUDGET well -- the half of the argument that keeps the headline"
+    )
+    assert "interval" in lowered, (
+        "D-08a's PRECISION CORRECTION: the versus-everyone claim is about "
+        "the INTERVAL, never about the point estimate, which is positive at "
+        "20 to 37 of 101 grid points depending on outcome"
+    )
+
+
+def test_policy_curve_endpoints_and_shape():
+    curve = pd.read_parquet(config.PROCESSED / "policy_curve.parquet")
+    assert curve["ranking"].nunique() == 3
+    assert set(curve["outcome"]) == {"visit", "conversion", "spend"}
+
+    for (ranking, outcome), group in curve.groupby(["ranking", "outcome"]):
+        label = f"{ranking}/{outcome}"
+        group = group.sort_values("k")
+        assert len(group) == evaluation.BAND_GRID_POINTS, (
+            f"{label} has {len(group)} rows, expected "
+            f"{evaluation.BAND_GRID_POINTS}"
+        )
+        assert group["delta_none"].iloc[0] == 0.0, (
+            f"{label} delta_none at k = 0 is not a structural zero; the "
+            "leading origin is prepended rather than computed precisely so "
+            "it is exact"
+        )
+        assert group["delta_all"].iloc[-1] == pytest.approx(0.0, abs=1e-12), (
+            f"{label} delta_all at k = 1 is not zero -- targeting everyone "
+            "IS emailing everyone, so the contrast has to vanish there"
+        )
+        counts = group["n_targeted"].to_numpy()
+        assert np.all(np.diff(counts) >= 0), (
+            f"{label} n_targeted is not non-decreasing in k"
+        )
+        n_frame = group["n_frame"].to_numpy()
+        assert counts[-1] == n_frame[-1], (
+            f"{label} targets {counts[-1]} of {n_frame[-1]} at k = 1"
+        )
+        assert np.array_equal(
+            counts, (n_frame * group["k"].to_numpy()).astype(int)
+        ), (
+            f"{label} n_targeted is not int(n*k) elementwise; truncation is "
+            "the project-wide convention and a round would put two "
+            "documents on different counts for the same capacity"
+        )
+
+
+def test_policy_bands_bracket_the_curve():
+    curve = pd.read_parquet(config.PROCESSED / "policy_curve.parquet")
+    bands = pd.read_parquet(config.PROCESSED / "policy_bands.parquet")
+
+    assert bool((bands["lo"] <= bands["hi"]).all()), (
+        "a band row has lo above hi"
+    )
+    assert not bool(bands[["lo", "hi"]].isna().to_numpy().any()), (
+        "a band row carries a nan. per_targeted at k = 0 has no per-email "
+        "figure to band, and pipeline.policy() drops that row rather than "
+        "writing two nans into a two-float-column artifact"
+    )
+    assert bands["lo"].dtype == "float64"
+    assert bands["hi"].dtype == "float64"
+
+    point = curve.melt(
+        id_vars=["ranking", "outcome", "k"],
+        value_vars=list(evaluation.POLICY_CONTRASTS),
+        var_name="contrast",
+        value_name="estimate",
+    )
+    joined = bands.merge(
+        point, on=["ranking", "outcome", "contrast", "k"], how="inner"
+    )
+    assert len(joined) == len(bands), (
+        f"{len(bands) - len(joined)} band rows found no matching curve row; "
+        "the two artifacts describe different grids"
+    )
+    inside = (joined["lo"] <= joined["estimate"]) & (
+        joined["estimate"] <= joined["hi"]
+    )
+    # Asserted as a FRACTION of grid points and never per point: a
+    # percentile band is not an envelope, and demanding containment at
+    # every k would be asserting something the construction does not
+    # promise. The measured fraction is 1.0000 across all 3,627 rows.
+    assert inside.mean() > 0.90, (
+        f"the point estimate sits inside its own band at only "
+        f"{inside.mean():.4f} of grid points"
+    )
+
+
+def test_optimal_k_moves_with_cost():
+    """ROADMAP criterion 3, on the real curve rather than a synthetic one.
+
+    `tests/test_economics.py` proves the same shape closed-form on
+    constructed curves. This is the assertion that the OPTIMUM ACTUALLY
+    MOVES on the data the project publishes, which no synthetic curve can
+    establish.
+    """
+    sweep = pd.read_parquet(config.PROCESSED / "cost_sweep.parquet")
+    swept = sweep.loc[~sweep["illustrative"]].sort_values("cost_over_margin")
+    k_star = swept["k_star"].to_numpy()
+
+    assert np.all(np.diff(k_star) <= 0), (
+        "k* is not monotonically non-increasing in c/m. A dearer email "
+        "cannot make a deeper send optimal"
+    )
+    assert len(np.unique(k_star)) >= 4, (
+        f"k* takes only {len(np.unique(k_star))} distinct values over the "
+        "swept axis; criterion 3 requires it to demonstrably move"
+    )
+    assert k_star[0] > k_star[-1]
+    assert k_star[-1] == 0.0, (
+        "at the dearest swept ratio the optimum must be to send nothing"
+    )
+
+    manifest = _manifest()
+    exhibit = manifest["cost_exhibit"]
+    assert exhibit["k_star_at_zero_cost"] == k_star[0]
+    assert exhibit["n_distinct_k_star"] == len(np.unique(k_star))
+    assert exhibit["k_star_at_ratio_1_5"] == k_star[-1]
+    # RE-MEASURED in plan 05-06 from the regenerated curve, not carried
+    # forward: 0.80 at c/m = 0, six distinct optima, the first breakpoint
+    # at 0.068 and k* first reaching zero at 1.397. All four reproduce the
+    # figures `economics.cost_margin_sweep`'s docstring quotes, so the
+    # docstring stands. If a future regeneration disagrees, THE ARTIFACT
+    # WINS and both this literal and that docstring are what change.
+    assert k_star[0] == 0.80
+    assert exhibit["first_breakpoint"] == pytest.approx(0.068)
+
+    illustrative = sweep.loc[sweep["illustrative"]]
+    assert len(illustrative) >= 2, (
+        "the exhibit carries no illustrative (cost, margin) pair"
+    )
+    assert illustrative["cost_per_email"].notna().all()
+    assert illustrative["gross_margin"].notna().all()
+    assert set(illustrative["profit_unit"]) == {
+        "dollars_per_population_customer"
+    }, (
+        "an illustrative row must say that its profit is in dollars: the "
+        "swept rows are per unit of gross margin, because the sweep names "
+        "no margin, and one column carrying two units without a label is "
+        "the silent-wrong-number defect this project exists to avoid"
+    )
+    assert swept["cost_per_email"].isna().all(), (
+        "a swept row named a cost. D-10 keeps every published figure free "
+        "of an invented constant; Hillstrom carries no cost data at all"
+    )
+
+
+def test_committed_policy_artifacts_are_not_stale():
+    # The Phase 5 canary, mirroring test_committed_model_results_are_not_
+    # stale and test_committed_ate_effects_are_not_stale: cross-checks the
+    # manifest's own account of its frame against the artifact it claims
+    # to have been computed from, so a stale file cannot sit in the repo
+    # backing a fresh claim in the app or the README.
+    manifest = _manifest()
+    scored, mask = _policy_frame_rows()
+    curve = pd.read_parquet(config.PROCESSED / "policy_curve.parquet")
+
+    assert manifest["frame"]["ranking"] in scored.columns, (
+        f"the manifest ranks by {manifest['frame']['ranking']!r}, which is "
+        "not a column of scored_holdout.parquet"
+    )
+    assert manifest["frame"]["n_customers"] == int(mask.sum())
+    assert manifest["frame"]["arm"] == config.ARMS["womens"]
+
+    for ranking in curve["ranking"].unique():
+        assert ranking in scored.columns, (
+            f"policy_curve.parquet values a ranking called {ranking!r}, "
+            "which is not a column of the scored artifact. Regenerate both "
+            "with `python -m dont_email_everyone.pipeline policy`"
+        )
+    assert set(curve["n_frame"]) == {int(mask.sum())}, (
+        "policy_curve.parquet was computed on a frame of a different size "
+        "than the committed scored artifact holds"
+    )
+    assert set(curve["weight"]) == {evaluation.POLICY_WEIGHT}

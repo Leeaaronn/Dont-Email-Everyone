@@ -1267,3 +1267,131 @@ def test_pipeline_pairs_every_savefig_with_a_close():
 def test_pipeline_writes_every_parquet_without_an_index():
     body = _pipeline_body()
     assert body.count("to_parquet(") == body.count("index=False") == 9
+
+
+# --------------------------------------------------------------------------
+# Phase 5: policy()
+# --------------------------------------------------------------------------
+
+# policy() reads what train() and analyze() wrote and fits NOTHING, which is
+# the whole of ROADMAP criterion 4: every headline number has to come back
+# out of the committed scores with arithmetic alone.
+POLICY_INPUT_ARTIFACTS = (
+    "scored_holdout.parquet",
+    "ate.parquet",
+    "model.json",
+)
+
+POLICY_ARTIFACTS = (
+    "policy_curve.parquet",
+    "policy_bands.parquet",
+    "cost_sweep.parquet",
+    "manifest.json",
+)
+
+
+@pytest.fixture(scope="module")
+def policied(tmp_path_factory):
+    """Run `policy()` once against a redirected directory; return the paths.
+
+    `analyzed` and `trained`'s exact shape: the three committed inputs are
+    copied in BEFORE the constants are patched, so the copy reads the real
+    artifacts and the run reads only the tmp ones.
+
+    Deliberately NOT marked `slow`, unlike every `trained` consumer. This
+    fixture fits nothing and runs in about twenty seconds, dominated by
+    the nine bootstrap bands; `trained` takes minutes because of the eight
+    refit permutation nulls, and that is the distinction the marker is
+    for. `reports/` is never created, because policy() writes no figure.
+    """
+    root = tmp_path_factory.mktemp("policy")
+    processed = root / "processed"
+    reports = root / "reports"
+    processed.mkdir(parents=True)
+    for name in POLICY_INPUT_ARTIFACTS:
+        shutil.copyfile(config.PROCESSED / name, processed / name)
+
+    stdout = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config, "PROCESSED", processed)
+        mp.setattr(config, "REPORTS", reports)
+        mp.setattr(config, "FIGURES", reports / "figures")
+        with redirect_stdout(stdout):
+            pipeline.policy()
+
+    return SimpleNamespace(
+        processed=processed,
+        reports=reports,
+        stdout=stdout.getvalue(),
+        curve=pd.read_parquet(processed / "policy_curve.parquet"),
+        bands=pd.read_parquet(processed / "policy_bands.parquet"),
+        sweep=pd.read_parquet(processed / "cost_sweep.parquet"),
+        manifest=json.loads(
+            (processed / "manifest.json").read_text(encoding="utf-8")
+        ),
+    )
+
+
+def test_policy_writes_exactly_the_expected_artifact_set(policied):
+    written = {p.name for p in policied.processed.iterdir()}
+    assert written == set(POLICY_INPUT_ARTIFACTS) | set(POLICY_ARTIFACTS), (
+        "policy() must write four artifacts beside the three inputs and no "
+        "others -- an unlisted file is one no test asserts on and no report "
+        "traces a number to"
+    )
+    assert not policied.reports.exists(), (
+        "policy() created reports/; it writes no figure, and a directory "
+        "appearing here means a figure was written where no test asserts "
+        "on it"
+    )
+    for name in POLICY_INPUT_ARTIFACTS:
+        assert (policied.processed / name).is_file(), (
+            f"policy() removed or replaced its own input {name}"
+        )
+
+
+def test_policy_raises_when_its_input_is_missing(tmp_path):
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    for name in POLICY_INPUT_ARTIFACTS:
+        shutil.copyfile(config.PROCESSED / name, processed / name)
+    (processed / "scored_holdout.parquet").unlink()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config, "PROCESSED", processed)
+        with pytest.raises(FileNotFoundError) as excinfo:
+            pipeline.policy()
+
+    message = str(excinfo.value)
+    assert "scored_holdout.parquet" in message, (
+        "the raise must name the absent path, not merely that something "
+        "was absent"
+    )
+    assert "train" in message, (
+        "the raise must name the subcommand that produces the file. This "
+        "is the train -> policy ordering dependency made diagnosable at "
+        "the point it is violated, exactly as train() does for analyze"
+    )
+
+
+def test_policy_is_registered_and_chained():
+    # Source-level, following test_model_report_keeps_the_regenerate_line_
+    # true's style of checking the code rather than trusting the docstring:
+    # a docstring saying `all` chains four steps is worth nothing if the
+    # dispatch runs three.
+    source = _pipeline_source()
+    assert '"policy",' in source, "policy is not registered with add_parser"
+    assert 'args.command == "policy"' in source, (
+        "the policy subcommand is registered but never dispatched"
+    )
+
+    body = _pipeline_body()
+    branch = body.split('elif args.command == "all":', 1)[1]
+    branch = branch.split("else:", 1)[0]
+    for call in ("ingest.build_all()", "analyze()", "train()", "policy()"):
+        assert call in branch, f"`all` does not call {call}"
+    assert branch.index("train()") < branch.index("policy()"), (
+        "`all` calls policy() before train(), so it would rank customers "
+        "with the PREVIOUS run's scored_holdout.parquet"
+    )
+    assert branch.index("analyze()") < branch.index("train()")
