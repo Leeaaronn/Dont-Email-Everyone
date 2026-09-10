@@ -113,18 +113,25 @@ def test_economics_module_uses_no_bare_assert():
     )
 
 
-# `emails_at_capacity` is the only public function in `economics.py` as of
-# plan 05-01, so the call list below is complete as it stands. Any LATER
-# plan adding public surface -- 05-04's policy value, 05-05's cost-optimal
-# sweep -- MUST extend it. A call list that quietly stops growing turns this
-# guarantee into a guarantee about history, which is the failure
-# `tests/test_evaluation.py` records the same warning against.
+# THE CALL LIST BELOW MUST NAME EVERY PUBLIC FUNCTION IN `economics.py`.
+# It named one as of plan 05-01 and names four as of plan 05-05, which added
+# `profit_curve`, `optimal_k` and `cost_margin_sweep` and extended this list
+# in the SAME commit that added them. A call list that quietly stops growing
+# turns this guarantee into a guarantee about history, which is the failure
+# `tests/test_evaluation.py` records the same warning against;
+# `test_economics_public_surface_is_pinned` below fails loudly if a later
+# plan forgets, so the two tests are read together.
 def test_economics_module_writes_nothing(tmp_path, monkeypatch):
     """Call every public function from an empty directory; it stays empty."""
     monkeypatch.chdir(tmp_path)
 
     economics.emails_at_capacity(EVALUATION_FRAME_ROWS)
     economics.emails_at_capacity(EVALUATION_FRAME_ROWS, 0.5)
+
+    delta, grid = _concave_curve()
+    economics.profit_curve(delta, grid, cost_per_email=0.1, gross_margin=0.4)
+    economics.optimal_k(delta, grid, cost_per_email=0.1, gross_margin=0.4)
+    economics.cost_margin_sweep(delta, grid, _RATIO_SWEEP)
 
     assert list(tmp_path.iterdir()) == [], (
         "economics.py wrote to disk. Only the orchestrator touches the "
@@ -341,7 +348,7 @@ def test_economics_declares_no_cost_or_margin_default():
         )
 
 
-def test_economics_public_surface_is_exactly_one_function():
+def test_economics_public_surface_is_pinned():
     """Guards the completeness claim the writes-nothing test rests on.
 
     That test asserts "every public function leaves the directory empty".
@@ -356,7 +363,12 @@ def test_economics_public_surface_is_exactly_one_function():
         and inspect.isfunction(value)
         and value.__module__ == economics.__name__
     )
-    assert public == ["emails_at_capacity"], (
+    assert public == [
+        "cost_margin_sweep",
+        "emails_at_capacity",
+        "optimal_k",
+        "profit_curve",
+    ], (
         f"economics.py's public functions are {public}. If a plan added "
         "one, extend test_economics_module_writes_nothing's call list in "
         "the same commit and then update this expectation -- an unextended "
@@ -639,7 +651,10 @@ def test_optimal_k_tie_rule_picks_the_smallest_k():
     )
     assert k_star == tied.min()
 
-    doc = economics.optimal_k.__doc__
+    # Case-folded: the module writes its load-bearing rules in capitals for
+    # emphasis, and a case-sensitive check would pin the typography rather
+    # than the rule.
+    doc = economics.optimal_k.__doc__.lower()
     for phrase in ("tie", "smallest"):
         assert phrase in doc, (
             f"`optimal_k`'s docstring no longer contains {phrase!r}. The "

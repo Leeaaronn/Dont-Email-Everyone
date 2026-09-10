@@ -112,15 +112,52 @@ a deliverable is quietly wrong.
     `tests/test_economics.py::test_economics_declares_no_cost_or_margin_default`
     sweeps the module namespace to keep it that way.
 
-    Cost and margin arrive in plan 05-05 as REQUIRED keyword arguments, and
-    they go to work only in the cost-optimal-k exhibit, where k is swept so
-    that the optimum is seen to move as the cost of contact moves. The
-    headline is stated at cost = 0 and margin = 100 percent, which is why it
-    can be stated with no assumption clause attached -- and why the
+    Cost and margin arrived in plan 05-05 as REQUIRED KEYWORD ARGUMENTS
+    of `profit_curve` and `optimal_k`, with no default value on either
+    parameter and no module constant behind them. `cost_margin_sweep` goes
+    further and takes neither: it sweeps the ratio `c / m`, so this module
+    never commits to a cost figure at all. Two named industry candidates
+    were weighed and rejected as defaults -- $0.10 per email and a 40
+    percent retail gross margin -- and both survive as reasonable
+    ILLUSTRATIVE inputs to the sweep, which exists to show the optimum
+    moving across a range rather than to adopt one point of it.
+
+    The headline is stated at cost = 0 and margin = 100 percent, where
+    `profit_curve` reduces to the incremental outcome exactly. That is why
+    it can be stated with no assumption clause attached -- and why the
     zero-cost caveat has to be stated beside it rather than buried: with
     genuinely free email the correct action is to email everyone, and this
     result is about spending a fixed budget well.
+
+(e) THE COST-OPTIMAL EXHIBIT, AND ITS STANDING (CONTEXT.md D-09).
+
+    `profit_curve`, `optimal_k` and `cost_margin_sweep` discharge ROADMAP
+    criterion 3, whose three clauses map onto three pieces of surface with
+    no prose in between: cost per email and gross margin are explicit
+    parameters of the money functions, the optimal targeting depth is seen
+    to move as cost moves, and `emails_at_capacity` above keeps a capacity
+    framing that needs neither of them.
+
+    The exhibit's standing is settled in advance and it is not the
+    headline. `k*` is selected by maximizing over the same evaluation grid
+    the curve was measured on, so it carries precisely the optimism the
+    exogenous anchor in (c) exists in order to avoid. D-09 rules that the
+    exhibit is built, it is shown, it is never quoted as the
+    recommendation, and `k*` never appears anywhere without the cost and
+    the margin that produced it printed beside it.
+
+    The sweep is one-dimensional because `m * delta - c * k` is
+    `m * (delta - (c / m) * k)`: a positive margin cannot move an argmax,
+    so only the RATIO reaches the answer. `optimal_k` carries the
+    derivation, and `cost_margin_sweep` carries the measured consequence --
+    on this project's curve the optimum does not move at all until the
+    ratio is far above anything a real mailing costs, which is a finding
+    rather than a disappointment.
 """
+
+import math
+
+import numpy as np
 
 # 0.20 -- the headline capacity anchor. See decision (c) above for the
 # provenance argument and for the alternatives (k <= 0.10, k = 0.15,
@@ -235,3 +272,349 @@ def emails_at_capacity(n_customers, k: float = HEADLINE_CAPACITY) -> int:
     # TRUNCATION, not rounding -- `evaluation.py` decision (f), and the same
     # expression `uplift_at_k` uses to size its own top-k selection.
     return int(count * capacity)
+
+
+def _guard_cost(cost_per_email) -> float:
+    """Raise unless `cost_per_email` is a finite, non-negative number.
+
+    There is no default and there is no upper bound. A negative cost is a
+    subsidy, which is not a thing this model represents, and a nan cost
+    poisons the whole profit array -- `np.argmax` over an array containing
+    a nan returns the nan's position, so an unguarded nan does not raise
+    at all. It returns a targeting depth with a nan beside it, which is a
+    recommendation carrying no number.
+    """
+    try:
+        cost = float(cost_per_email)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"`cost_per_email` is {cost_per_email!r}; the cost of one "
+            "email must be a finite number of currency units, at least "
+            "zero. It has no default (CONTEXT.md D-10) -- every caller "
+            "states it."
+        ) from error
+
+    if not math.isfinite(cost) or cost < 0.0:
+        raise ValueError(
+            f"`cost_per_email` is {cost_per_email!r}; it must be finite "
+            "and at least zero. A negative cost per email is a subsidy "
+            "rather than a campaign, and a nan cost survives the "
+            "arithmetic silently: the argmax then returns the nan's own "
+            "position and reports a targeting depth with no profit "
+            "attached to it."
+        )
+    return cost
+
+
+def _guard_margin(gross_margin) -> float:
+    """Raise unless `gross_margin` is a finite fraction in (0, 1].
+
+    Zero and negative are rejected because they invert or erase the
+    objective: at a margin of zero the profit curve collapses to
+    `-cost * k`, whose maximum sits at k = 0, and "email nobody" would be
+    returned as a recommendation rather than as the input error it is.
+
+    Above 1 is rejected because a gross margin greater than 100 percent
+    does not exist, and the way that value arrives is a unit error -- `40`
+    typed for "40 percent" where `0.40` belongs. That mistake multiplies
+    every published dollar figure by 100 while raising nothing, which is
+    precisely the class of silent-wrong-number bug this project exists to
+    not have. There is no default (CONTEXT.md D-10).
+    """
+    try:
+        margin = float(gross_margin)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"`gross_margin` is {gross_margin!r}; the gross margin must be "
+            "a number in (0, 1], expressed as a fraction. It has no "
+            "default (CONTEXT.md D-10) -- every caller states it."
+        ) from error
+
+    if not math.isfinite(margin) or not 0.0 < margin <= 1.0:
+        raise ValueError(
+            f"`gross_margin` is {gross_margin!r}; the gross margin must "
+            "satisfy 0 < m <= 1 and be finite. A margin of zero collapses "
+            "the objective to -cost * k, whose optimum is to email "
+            "nobody; a margin above 1 is the unit error of typing 40 for "
+            "40 percent, which multiplies every dollar figure by a "
+            "hundred without raising anything."
+        )
+    return margin
+
+
+def _guard_curve(delta_none, grid):
+    """Validate the (uplift curve, capacity grid) pair the money is made of.
+
+    Returns both as float64 arrays. Every check here has a specific silent
+    failure behind it:
+
+      MISMATCHED LENGTHS are the dangerous one. NumPy broadcasts a
+      length-1 array against a 101-point grid without complaint, so a
+      caller who handed in a scalar uplift where a curve belongs would get
+      a full-length profit array back and no error whatsoever.
+
+      A NON-FINITE entry survives the arithmetic and then captures the
+      argmax, as `_guard_cost` records for itself.
+
+      A GRID THAT DOES NOT INCREASE breaks the tie rule. `optimal_k`
+      resolves ties to the smallest k by taking the FIRST maximum, and
+      that is only the smallest k when the grid ascends.
+
+      A GRID OUTSIDE [0, 1] is a unit error: `k` is a fraction of the
+      population, and a grid of absolute customer counts would multiply
+      the cost term by tens of thousands while the margin term stayed a
+      per-customer average.
+    """
+    try:
+        delta = np.asarray(delta_none, dtype=float)
+        fraction = np.asarray(grid, dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "`delta_none` and `grid` must both be arrays of numbers; got "
+            f"{delta_none!r} and {grid!r}."
+        ) from error
+
+    if delta.ndim != 1 or fraction.ndim != 1:
+        raise ValueError(
+            f"`delta_none` has {delta.ndim} dimensions and `grid` has "
+            f"{fraction.ndim}; both must be one-dimensional curves over "
+            "the same capacity grid."
+        )
+
+    if delta.size != fraction.size:
+        raise ValueError(
+            f"`delta_none` has {delta.size} points and `grid` has "
+            f"{fraction.size}. They must be the same length: NumPy would "
+            "broadcast a length-1 uplift against a full grid and return a "
+            "full-length profit array with no error raised, so a scalar "
+            "handed in where a curve belongs would be published."
+        )
+
+    if delta.size < 2:
+        raise ValueError(
+            f"the curve has {delta.size} point(s); a profit curve needs at "
+            "least two so that an optimum means something. A one-point "
+            "curve makes every capacity the optimal capacity."
+        )
+
+    for name, values in (("delta_none", delta), ("grid", fraction)):
+        if not np.isfinite(values).all():
+            raise ValueError(
+                f"`{name}` contains a non-finite value. It would survive "
+                "the profit arithmetic and then capture the argmax, so "
+                "the optimum would be reported at the position of the bad "
+                "entry with a nan profit beside it."
+            )
+
+    if fraction.min() < 0.0 or fraction.max() > 1.0:
+        raise ValueError(
+            f"`grid` spans [{fraction.min()}, {fraction.max()}]; a "
+            "capacity grid is a fraction of the population and must lie "
+            "in [0, 1]. A grid of absolute customer counts would multiply "
+            "the cost term by the population size while the margin term "
+            "stayed a per-customer average."
+        )
+
+    if np.any(np.diff(fraction) <= 0.0):
+        raise ValueError(
+            "`grid` is not strictly increasing. `optimal_k` resolves ties "
+            "to the smallest k by taking the first maximum, and the first "
+            "maximum is the smallest k only on an ascending grid -- on a "
+            "descending or repeating grid the stated tie rule would "
+            "quietly become its opposite."
+        )
+
+    return delta, fraction
+
+
+def _guard_ratios(ratios):
+    """Validate the `c / m` sweep axis: finite, non-negative, ascending.
+
+    Strictly ascending rather than merely sorted, because this array
+    becomes an exhibit's x-axis and a repeated point draws a vertical
+    segment through a step function that has no vertical segments.
+    """
+    try:
+        swept = np.asarray(ratios, dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"`ratios` is {ratios!r}; the sweep axis must be an array of "
+            "cost-to-margin ratios."
+        ) from error
+
+    if swept.ndim != 1 or swept.size < 2:
+        raise ValueError(
+            f"`ratios` has shape {swept.shape}; the sweep axis must be a "
+            "one-dimensional array of at least two ratios. A one-point "
+            "sweep shows nothing moving, which is the one thing the "
+            "exhibit exists to show."
+        )
+
+    if not np.isfinite(swept).all():
+        raise ValueError("`ratios` contains a non-finite value.")
+
+    if swept.min() < 0.0:
+        raise ValueError(
+            f"`ratios` reaches {swept.min()}; a cost-to-margin ratio "
+            "cannot be negative. `_guard_cost` and `_guard_margin` record "
+            "why each half of it cannot be."
+        )
+
+    if np.any(np.diff(swept) <= 0.0):
+        raise ValueError(
+            "`ratios` is not strictly increasing. This array becomes the "
+            "exhibit's x-axis, and an unsorted or repeating axis renders "
+            "a step function that never happened."
+        )
+
+    return swept
+
+
+def profit_curve(delta_none, grid, *, cost_per_email, gross_margin):
+    """Profit per population customer: `m * delta_none(k) - c * k`.
+
+    `delta_none` is the incremental outcome of targeting the top k of the
+    list versus emailing nobody, averaged over the WHOLE population, which
+    is what `evaluation.policy_value_curve` returns. Both terms therefore
+    carry the same denominator: mailing a fraction k of the population
+    costs `c * k` per member of that population. Multiplying the cost term
+    by a customer COUNT instead is the arithmetic slip that makes a profit
+    curve wrong by a factor of tens of thousands while still plotting.
+
+    Returns a float array the same length as the grid. It is not clipped
+    at zero: a negative profit at deep k is the finding, not an error.
+
+    CONTEXT.md D-10 -- `cost_per_email` AND `gross_margin` ARE REQUIRED
+    KEYWORD ARGUMENTS AND HAVE NO DEFAULT, HERE OR ANYWHERE ELSE IN THIS
+    MODULE. Hillstrom carries no cost data of any kind. Two named
+    industry figures were weighed as candidate defaults and rejected:
+    $0.10 per email, and a 40 percent retail gross margin. Both are
+    plausible and neither is measured in this experiment, so either as a
+    default would be an invented constant wearing the authority of code,
+    inherited by every downstream caller without a single person having
+    chosen it. They remain perfectly reasonable ILLUSTRATIVE values to
+    feed into `cost_margin_sweep`, whose job is to show the optimum moving
+    across a range rather than to adopt one point of it.
+
+    They are keyword-only for a second reason. `profit_curve(d, g, 0.1,
+    0.4)` reads as two anonymous numbers; `cost_per_email=0.1,
+    gross_margin=0.4` reads as an assumption, and it stays legible in the
+    diff of every call site that makes one.
+
+    The project headline is stated at `cost_per_email=0.0` and
+    `gross_margin=1.0`, where this function reduces to `delta_none`
+    exactly -- incremental REVENUE, inheriting no economic assumption at
+    all. That is what lets the headline be stated in one sentence with no
+    assumption clause attached (D-06 with D-10).
+
+    Raises `ValueError` on a margin outside (0, 1], on a negative or
+    non-finite cost, on curves of mismatched length, on non-finite
+    entries, and on a grid that is not strictly increasing within [0, 1].
+    """
+    delta, fraction = _guard_curve(delta_none, grid)
+    cost = _guard_cost(cost_per_email)
+    margin = _guard_margin(gross_margin)
+
+    return margin * delta - cost * fraction
+
+
+def optimal_k(delta_none, grid, *, cost_per_email, gross_margin):
+    """Return `(k_star, profit_at_k_star)` maximizing `profit_curve`.
+
+    `k_star` is a point of the supplied grid, so the resolution of the
+    answer is the resolution of the grid and never finer.
+
+    THE TIE RULE, WHICH IS A CHOICE AND NOT AN ACCIDENT. When several
+    capacities tie for the maximum profit, the SMALLEST of them wins --
+    the cheapest campaign among equally profitable ones. Implemented by
+    `np.argmax`, which returns the first maximum, on a grid `_guard_curve`
+    requires to be strictly increasing; the guard is what turns an
+    implementation detail into the stated rule. A plateau of tied maxima
+    is common in practice, because a flat tail on the uplift curve at zero
+    cost ties every depth beyond the point where the uplift stops growing,
+    and mailing half the list beats mailing all of it for the same money.
+
+    ONLY THE RATIO `c / m` CAN MOVE THE ANSWER. `m * delta - c * k` equals
+    `m * (delta - (c / m) * k)`, and a positive `m` cannot move an argmax,
+    so `k_star` depends on cost and margin only through their ratio while
+    the profit LEVEL scales with `m`. `cost_margin_sweep` is
+    one-dimensional for exactly this reason, and its axis is labelled
+    `c / m` rather than dressed up with a single adopted cost figure.
+
+    THE SELECTION CAVEAT -- READ BEFORE QUOTING ANY NUMBER FROM HERE
+    (CONTEXT.md D-09). `k_star` is chosen by maximizing over the same
+    evaluation grid on which the curve was measured, so it carries exactly
+    the optimism that an exogenous anchor is there to avoid: it is the
+    best depth ON THESE ROWS, which is an optimistic estimate of the best
+    depth in general. `HEADLINE_CAPACITY` exists because of this. D-09
+    settles the standing of the result: the cost-optimal exhibit is built,
+    it is shown, and it is never the headline. And `k_star` may never be
+    quoted without the `(cost_per_email, gross_margin)` that produced it
+    printed beside it -- an optimum with no cost attached reads as a
+    recommendation about the list rather than a statement about a price.
+
+    Raises the same `ValueError`s `profit_curve` raises.
+    """
+    _, fraction = _guard_curve(delta_none, grid)
+    profit = profit_curve(
+        delta_none,
+        grid,
+        cost_per_email=cost_per_email,
+        gross_margin=gross_margin,
+    )
+
+    # FIRST maximum, on a strictly increasing grid: the tie rule above.
+    best = int(np.argmax(profit))
+    return float(fraction[best]), float(profit[best])
+
+
+def cost_margin_sweep(delta_none, grid, ratios):
+    """Return `(ratios, k_star, profit_at_k_star)` over a `c / m` axis.
+
+    The D-09 exhibit's entire data source. One dimension rather than two
+    because `optimal_k` records the derivation: `m * delta - c * k` is
+    `m * (delta - (c / m) * k)`, so the optimum depends on cost and margin
+    through their ratio alone. A cost-by-margin grid would be a square of
+    duplicated answers.
+
+    THIS FUNCTION TAKES NO COST AND NO MARGIN ARGUMENT AT ALL. D-10's
+    claim is stronger than "no default": this module never commits to a
+    cost figure. `profit_at_k_star` is therefore denominated PER UNIT OF
+    GROSS MARGIN -- computed at `gross_margin=1.0` -- and a caller wanting
+    dollars multiplies by whichever margin it is willing to name in
+    public, out loud, beside the number.
+
+    WHAT THE SWEEP ACTUALLY SHOWS, AND WHY THAT IS THE BUSINESS FINDING.
+    The optimum does not budge until the ratio reaches roughly 0.068 on
+    this project's measured curve (re-measure it from the committed
+    artifact rather than quoting this line; plan 05-06 owns that
+    assertion). At a realistic tenth of a cent per email against a 40
+    percent margin the ratio is about 0.0025, which is nowhere near the
+    first breakpoint, so nothing moves. That insensitivity IS the result:
+    email is nearly free relative to the incremental purchase it produces,
+    and the targeting question is therefore about capacity and annoyance
+    rather than about the cost of sending. Labelling the axis in `c / m`
+    is what lets a reader see this. Adopting one cost would hide it behind
+    a single number that happens to sit in the flat region.
+
+    Raises `ValueError` on the curve and grid conditions `profit_curve`
+    checks, and on a ratio axis that is not finite, non-negative and
+    strictly increasing.
+    """
+    delta, fraction = _guard_curve(delta_none, grid)
+    swept = _guard_ratios(ratios)
+
+    k_star = np.empty(swept.size, dtype=float)
+    profit_at_k_star = np.empty(swept.size, dtype=float)
+    for index in range(swept.size):
+        # `gross_margin=1.0` is not an adopted margin -- it is the
+        # normalization that makes the output per unit of margin, which is
+        # the only honest denominator when no margin has been named.
+        k_star[index], profit_at_k_star[index] = optimal_k(
+            delta,
+            fraction,
+            cost_per_email=float(swept[index]),
+            gross_margin=1.0,
+        )
+
+    return swept, k_star, profit_at_k_star
