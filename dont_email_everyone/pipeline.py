@@ -1953,7 +1953,14 @@ def policy() -> None:
     # is about, and a quoted path literal in this module is banned by
     # `test_pipeline_paths_all_come_from_config` for the good reason that
     # every path here is ROOT-anchored.
-    scored_relative = scored_path.relative_to(config.ROOT).as_posix()
+    try:
+        scored_relative = scored_path.relative_to(config.ROOT).as_posix()
+    except ValueError:
+        # `config.PROCESSED` is patched out of the repository entirely by
+        # the integration fixtures, and a reproduce sentence is not worth
+        # raising over. The absolute path is the honest thing to name for
+        # a run whose artifacts landed outside the tree.
+        scored_relative = scored_path.as_posix()
     womens_name = config.ARMS["womens"]
 
     caveat = (
