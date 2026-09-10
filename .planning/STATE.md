@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-09-10T01:45:41.931Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-09-10T03:03:12.085Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 35
-  completed_plans: 29
+  completed_plans: 30
   percent: 57
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 05 (business-policy-layer) — EXECUTING
-Plan: 4 of 9
+Plan: 5 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Progress: [████████░░] 83%
 | Phase 05 P01 | 9min | 3 tasks | 4 files |
 | Phase 05 P02 | 6min | 2 tasks | 2 files |
 | Phase 05 P03 | 19min | 3 tasks | 4 files |
+| Phase 05 P05 | 8min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-02: Phase 5 and 6 use ONE three-level resample matrix over all 32,001 holdout rows — Masking its columns by segment gives the womens+control and mens+control frames with the shared control drawn once per replicate (ROADMAP criterion 2). Its womens draws are deliberately NOT bootstrap_indices' womens draws.
 - [Phase 05-03]: the six `_all` column names stay OUT of model.json's unproven_columns -- that list is Phase 4's published labelling contract and this plan asserts model.json byte-identical; D-03's label still travels because the `_all` name is derived from the already-prefixed one
 - [Phase 05-03]: no `git checkout` restore was performed after the train re-run -- the thirteen figures and the other three artifacts came back byte-identical, so git status listed only the widened artifact and threat T-05-08 (a restore hiding a real change) never arose
+- [Phase 05]: cost and margin have no default anywhere in economics.py; cost_margin_sweep takes neither, only the c/m ratio — D-10: Hillstrom carries no cost data, so any default would be a fabricated constant the headline silently inherits. Enforced at three levels: namespace sweep (05-01), inspect.Parameter.empty on every cost/margin parameter, and TypeError on omission.
+- [Phase 05]: optimal_k resolves ties to the smallest k, guaranteed by a strictly-increasing-grid guard rather than by np.argmax alone — The cheapest campaign among equally profitable ones. On a descending grid np.argmax's first-maximum behaviour would silently invert the stated rule, so _guard_curve makes the docstring true.
 
 ### Pending Todos
 
@@ -221,6 +224,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T01:45:41.923Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-09-10T03:03:12.071Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None
