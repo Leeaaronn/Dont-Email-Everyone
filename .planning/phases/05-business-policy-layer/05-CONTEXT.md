@@ -81,9 +81,18 @@ decision below is shaped by that fact.
   incremental outcome of the bottom (1−k) customers. At zero cost, beating a blanket send therefore
   requires a segment that email measurably *harms*, and the Hillstrom womens arm has a positive ATE
   on every outcome. Swept across 3 outcomes x 3 ranking scores x 101 grid points, **not one k
-  produces a CI excluding zero** on the vs-everyone contrast, and at k=0.10 on spend it is
-  significantly negative. D-06, D-08 and D-10 chosen together were mutually incompatible with a
-  positive headline. This is arithmetic, not model failure, and no anchor choice could have fixed it.
+  produces a CI excluding zero** on the vs-everyone contrast. D-06, D-08 and D-10 chosen together
+  were mutually incompatible with a positive *publishable* headline. This is arithmetic, not model
+  failure, and no anchor choice could have fixed it.
+
+  > **PRECISION CORRECTION (2026-09-09, from plan 05-04's execution — read this before writing any
+  > prose about the vs-everyone contrast).** An earlier draft of this block, and of the amended
+  > ROADMAP goal, said the vs-everyone contrast is "non-positive at every k". **That is false as
+  > stated and must not be repeated.** The *point estimate* is positive at 20–37 of 101 grid points
+  > depending on outcome, all at k >= 0.49. The claim D-08a actually rests on is about the
+  > **interval**: at R=500, not one k gives a vs-everyone band excluding zero from above on any
+  > outcome. State the interval claim, never the point-estimate claim. A checkable falsehood in a
+  > document whose whole value is that its claims are checkable is the worst defect available here.
 
   **Why vs-random is the right comparator, not a retreat to a friendlier one.** D-06 already locked
   the capacity framing, and under a capacity constraint "email everyone" is not on the menu — the
