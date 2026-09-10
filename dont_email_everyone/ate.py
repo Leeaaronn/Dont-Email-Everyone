@@ -57,8 +57,6 @@ selling point is that its numbers are correct.
     than being bit-identical -- a difference of units, not of method.
 """
 
-import types
-
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
@@ -67,17 +65,19 @@ from statsmodels.stats.multitest import multipletests
 
 from dont_email_everyone import config
 
-# Outcome name -> the unit its effect is measured in. MappingProxyType, not
-# a plain dict, matching config.ARMS: this constant decides how a number is
-# rendered, so it must not be mutable-by-reference (code review WR-01).
+# Re-export shim, not a definition. The definition and its full rationale
+# moved to `config.py` under D-04 so that `plots.py` -- which needs this one
+# mapping -- can be imported without dragging statsmodels into the Phase 6
+# serve-time dependency closure, which this module would.
 #
-# The `unit` column exists so a formatter dispatches on it. A shared helper
-# that multiplies every coefficient by 100 and appends "pp" renders the
-# spend ATE as "+76.98pp" -- visit and conversion are proportions, spend is
-# dollars (PITFALLS.md Pitfall 9). The dict is also the row generator: the
-# six table rows come from config.ARMS x OUTCOMES, never a hand-written
-# list, so adding an arm or an outcome cannot leave the table half-updated.
-OUTCOMES = types.MappingProxyType({"visit": "pp", "conversion": "pp", "spend": "$"})
+# Bound by plain assignment, so `ate.OUTCOMES is config.OUTCOMES`. Object
+# identity is preserved DELIBERATELY: re-wrapping it in a fresh proxy over a
+# copy of the dict would build a second object that satisfies every equality
+# assertion in the suite while letting the two copies drift apart, which is
+# the exact failure the relocation exists to make unrepresentable. Every
+# existing `ate.OUTCOMES` call site -- here, in `pipeline.py`, and in the
+# tests -- keeps working unchanged.
+OUTCOMES = config.OUTCOMES
 
 
 def _guard_arm_vs_control(frame, arm_key: str) -> None:

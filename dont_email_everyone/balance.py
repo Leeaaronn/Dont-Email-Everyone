@@ -62,12 +62,18 @@ from scipy import stats
 
 from dont_email_everyone import config
 
-# Austin (2009): "a standardized difference of 10% is equivalent to having a
-# phi coefficient of 0.05". Named here rather than repeated as a literal
-# across this module, the tests, and the Love plot, so the acceptance
-# threshold cannot drift between the number that is checked and the number
-# that is drawn.
-SMD_THRESHOLD = 0.1
+# Re-export shim, not a definition. The definition and the Austin (2009)
+# citation behind the 0.1 value moved to `config.py` under D-04 -- see the
+# comment there -- so that `plots.py`, which takes this as `love_plot`'s
+# default argument, can be imported without dragging statsmodels into the
+# Phase 6 serve-time dependency closure, which this module would.
+#
+# Bound by plain assignment rather than restated as a literal: a second
+# assignment of the value here would let the number that is CHECKED drift
+# from the number that is DRAWN, which is the drift the single-constant rule
+# exists to prevent. Every existing `balance.SMD_THRESHOLD` call site keeps
+# working unchanged.
+SMD_THRESHOLD = config.SMD_THRESHOLD
 
 # The columns that must never appear as a balance covariate: the three
 # outcomes, the assignment label, and the treatment indicator derived from

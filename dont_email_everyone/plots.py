@@ -72,12 +72,21 @@ import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.ticker as mticker  # noqa: E402
 import numpy as np  # noqa: E402
 
-# `ate.OUTCOMES` is the project's single outcome -> unit mapping, and
+# `config.OUTCOMES` is the project's single outcome -> unit mapping, and
 # the Phase 5 factories read it rather than holding a second copy: an
 # outcome whose unit disagreed between two modules would draw dollars
 # on a percentage-point axis, which is `ate_forest`'s own reason for
-# panelling. `ate` imports only `config`, so this adds no cycle.
-from dont_email_everyone import ate, balance  # noqa: E402
+# panelling. `config.SMD_THRESHOLD` is the same argument for the Love
+# plot's acceptance line.
+#
+# The source is `config` and NOT `ate`/`balance`, where both constants
+# used to live: those two modules import statsmodels, and ROADMAP
+# criterion 4 requires the Phase 6 serve-time set to exclude it -- so
+# importing them here would put statsmodels (and scipy, and patsy) in the
+# deployed app's dependency closure for the sake of one dictionary lookup
+# and one float. `config` imports only `pathlib` and `types`, so this adds
+# neither a cycle nor a package.
+from dont_email_everyone import config  # noqa: E402
 
 # Markers cycle so the three pairwise comparisons stay distinguishable in
 # greyscale print, not only by colour.
@@ -147,15 +156,15 @@ def _guard_unit(unit, source: str) -> None:
         )
 
 
-def love_plot(balance_df, threshold: float = balance.SMD_THRESHOLD):
-    """Return a Love plot Figure for a `balance.balance_table` frame.
+def love_plot(balance_df, threshold: float = config.SMD_THRESHOLD):
+    """Return a Love plot Figure for a `balance_table` frame.
 
     Consumes the `comparison`, `covariate`, and `smd` columns; any extra
     column the orchestrator has joined on is ignored. One marker series per
     comparison, sharing a y position per covariate so a covariate's three
     values line up horizontally and can be read as a single row.
 
-    `threshold` defaults to `balance.SMD_THRESHOLD` rather than to a literal,
+    `threshold` defaults to `config.SMD_THRESHOLD` rather than to a literal,
     so the line that is drawn and the number the acceptance rule checks come
     from one constant and cannot drift apart.
 
@@ -209,7 +218,7 @@ def love_plot(balance_df, threshold: float = balance.SMD_THRESHOLD):
 
 
 def ate_forest(ate_df):
-    """Return an ATE forest plot Figure for an `ate.ate_table` frame.
+    """Return an ATE forest plot Figure for an `ate_table` frame.
 
     Consumes `arm`, `outcome`, `unit`, `effect`, `ci_low`, and `ci_high`. One
     horizontal error bar per row spanning the confidence interval, with a
@@ -1746,7 +1755,7 @@ def optimism_plot(optimism, *, title=None):
                 f"this module has no noun for; it knows "
                 f"{sorted(OUTCOME_NOUN)}."
             )
-        unit = ate.OUTCOMES[outcome]
+        unit = config.OUTCOMES[outcome]
         _guard_unit(unit, f"the unit of outcome {outcome!r}")
         grain = cell.get("unit")
         if grain != "per_targeted_customer":
