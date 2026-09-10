@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-09-10T23:21:04.297Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-09-10T23:53:00.394Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 37
+  completed_plans: 38
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -88,6 +88,7 @@ Progress: [████████░░] 84%
 | Phase 05 P08 | 153min | 3 tasks | 9 files |
 | Phase 06 P01 | 22min | 2 tasks | 6 files |
 | Phase 06 P02 | 37min | 2 tasks | 8 files |
+| Phase 06 P03 | 32min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -226,6 +227,9 @@ Recent decisions affecting current work:
 - [Phase 06-02]: OUTCOMES and SMD_THRESHOLD relocated to config.py with re-export-by-assignment shims in ate.py/balance.py -- identity is preserved deliberately, because re-wrapping in a fresh MappingProxyType passes every equality assertion while letting two definitions drift
 - [Phase 06-02]: the plots.py import closure is proven out-of-process and asserts package ABSENCES, never a module count -- the count is environment-dependent (2,046 measured here vs research's 2,029) and pinning it would fail on any unrelated dependency upgrade
 - [Phase 06-02]: two plots.py docstrings dropped their ate./balance. module qualifiers -- a module that no longer imports ate should not read as though it does, and the plan's own grep gate enforces it
+- [Phase 06-03]: The selected= guards were moved above plt.subplots, beside the anchor's, rather than beside their draw site as 06-RESEARCH's verified shape had them -- the researched placement raised after the figure existed and leaked a pyplot figure the caller had no handle to close, and the plan's own acceptance criterion forbade that
+- [Phase 06-03]: The marker test asserts LINESTYLE and MARKER, never colour -- the UI-SPEC's non-colour-channel requirement is the property under test, and a colour assertion would pass on two indistinguishable dashed lines
+- [Phase 06-03]: No committed-PNG checksum test was written; D-06's byte-identity demand is discharged as a regeneration gate (pipeline all, then an empty git status over data/processed and reports/figures), because matplotlib and pyarrow embed run-specific metadata and a byte assertion is wrong in both directions
 
 ### Pending Todos
 
@@ -256,6 +260,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T23:21:04.289Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-09-10T23:53:00.386Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
