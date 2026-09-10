@@ -130,16 +130,19 @@ Plans:
 **Plans:** 0/9 plans executed
 
 Plans:
-**Wave 1** *(no shared files; independently executable)*
+**Wave 0** *(blocking gate — must be the phase's first commit)*
 
-- [ ] 05-01-PLAN.md — Pre-register the k = 0.20 anchor on provenance grounds; create economics.py with HEADLINE_CAPACITY, emails_at_capacity and criterion 5's two purity tests (wave 1)
+- [ ] 05-01-PLAN.md — Pre-register the k = 0.20 anchor on provenance grounds; create economics.py with HEADLINE_CAPACITY, emails_at_capacity and criterion 5's two purity tests (wave 0 — gates the phase, because D-13's anchor argument is provenance-based and is worthless unless this commit precedes every Phase 5 number)
+
+**Wave 1** *(blocked on Wave 0; no shared files among themselves — evaluation.py, pipeline.py and economics.py respectively)*
+
 - [ ] 05-02-PLAN.md — evaluation.stratified_indices generalizing the resample engine to any number of arms, with bootstrap_indices delegating at level_order=(1, 0) and a bit-identity regression test (wave 1)
 - [ ] 05-03-PLAN.md — D-15: two additive lines in pipeline.train() so both arms score all 32,001 holdout rows; regenerate scored_holdout.parquet and prove every Phase 4 number bit-identical (wave 1)
+- [ ] 05-05-PLAN.md — economics.profit_curve / optimal_k / cost_margin_sweep, with cost and margin as required parameters that have no defaults anywhere (wave 1)
 
 **Wave 2** *(blocked on Wave 1)*
 
 - [ ] 05-04-PLAN.md — POLICY_WEIGHT = 2 derived from the frame, policy_value_curve with all three contrasts, and policy_value_band on caller-supplied shared draws (wave 2)
-- [ ] 05-05-PLAN.md — economics.profit_curve / optimal_k / cost_margin_sweep, with cost and margin as required parameters that have no defaults anywhere (wave 2)
 
 **Wave 3** *(blocked on Wave 2)*
 
