@@ -1433,6 +1433,24 @@ def test_bootstrap_indices_rejects_a_degenerate_arm():
         evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
 
 
+def test_bootstrap_indices_still_rejects_a_three_valued_column():
+    """The wrapper NARROWS the general engine; it must not widen it.
+
+    `stratified_indices` accepts any number of levels >= 2, and
+    `bootstrap_indices` now delegates to it. That delegation is exactly how
+    a two-arm entry point silently starts accepting the full analysis table
+    -- Pitfall 1, a contaminated control arm, arriving through the one
+    function whose whole job is to keep the two arms separate.
+    `_guard_treatment` therefore stays in the wrapper and runs BEFORE the
+    delegation, so the Pitfall-1 message is raised from here rather than a
+    three-level matrix being built and returned.
+    """
+    treatment = np.repeat([0, 1, 2], 50)
+
+    with pytest.raises(ValueError, match="only 0 and 1 are admissible"):
+        evaluation.bootstrap_indices(treatment, INDEX_REPLICATES)
+
+
 # --------------------------------------------------------------------------
 # stratified_indices -- D-14's generalization of the same engine
 # --------------------------------------------------------------------------
