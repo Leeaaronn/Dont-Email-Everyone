@@ -1626,6 +1626,38 @@ ILLUSTRATIVE_COST_MARGIN_PAIRS = (
 )
 
 
+# The predicted-uplift column pair per outcome, spelled out rather than
+# assembled from a prefix rule. The `unproven_` marker is part of the column
+# name -- that is the whole point of 04-09's naming -- and a rule that built
+# these names would be a rule that could build them wrongly and then look up
+# a column that does not exist, or worse, one that does.
+POLICY_SCORE_COLUMNS = {
+    "visit": {
+        "mens": "unproven_uplift_mens_visit",
+        "womens": "uplift_womens_visit",
+    },
+    "conversion": {
+        "mens": "unproven_uplift_mens_conversion",
+        "womens": "uplift_womens_conversion",
+    },
+    "spend": {
+        "mens": "unproven_uplift_mens_spend",
+        "womens": "unproven_uplift_womens_spend",
+    },
+}
+
+# D-15's suffix. The unsuffixed column is nan on the rows randomized into the
+# other arm; the suffixed one carries a score on all 32,001 holdout rows, and
+# an argmax policy's inverse-probability numerator counts exactly those rows.
+ALL_ROWS_SUFFIX = "_all"
+
+# The cell the estimator-variant note runs on: the HEADLINE ranking against
+# the spend outcome, so what is being probed for robustness is the published
+# dollar figure itself and not a neighbouring one. `POLICY_ROBUSTNESS_CELL`
+# names the base-model columns AIPW augments with.
+POLICY_ROBUSTNESS_OUTCOME = "spend"
+POLICY_ROBUSTNESS_CELL = "womens_spend"
+
 def policy() -> None:
     """Value the top-k targeting policies and write the four Phase 5
     artifacts described in the module docstring.
@@ -1693,7 +1725,7 @@ def policy() -> None:
     model_block = json.loads(model_path.read_text(encoding="utf-8"))
     unproven_columns = list(model_block["headline"]["unproven_columns"])
     print(
-        f"[1/6] inputs: scored={scored.shape} ate={committed_ate.shape} "
+        f"[1/7] inputs: scored={scored.shape} ate={committed_ate.shape} "
         f"unproven cells named by model.json: {len(unproven_columns)}"
     )
 
@@ -1747,7 +1779,7 @@ def policy() -> None:
         name: frame[name].to_numpy(dtype=float) for name in POLICY_OUTCOMES
     }
     print(
-        f"[2/6] one three-level draw: {indices_all.shape} over all holdout "
+        f"[2/7] one three-level draw: {indices_all.shape} over all holdout "
         f"rows, masked to {indices.shape} on the womens+control frame "
         f"({int(treatment.sum())} treated / {int((treatment == 0).sum())} "
         "control)"
@@ -1827,7 +1859,7 @@ def policy() -> None:
 
     curve_out = pd.concat(curve_parts, ignore_index=True)
     band_out = pd.concat(band_parts, ignore_index=True)
-    print(f"[3/6] curves={curve_out.shape} bands={band_out.shape}")
+    print(f"[3/7] curves={curve_out.shape} bands={band_out.shape}")
 
     # D-09's exhibit, on the headline ranking and the spend outcome only:
     # money is the axis a cost sweep is about, and the other eight cells
@@ -1907,7 +1939,7 @@ def policy() -> None:
     zeroed = np.flatnonzero(k_star == 0.0)
     first_zero_ratio = float(swept[zeroed[0]]) if zeroed.size else None
     print(
-        f"[4/6] cost exhibit: {sweep_out.shape} rows, k* from {zero_cost_k} "
+        f"[4/7] cost exhibit: {sweep_out.shape} rows, k* from {zero_cost_k} "
         f"at c/m = 0 to {float(k_star[-1])} at {POLICY_RATIO_MAX}, "
         f"{int(np.unique(k_star).size)} distinct optima, first breakpoint "
         f"{first_breakpoint}"
@@ -1916,6 +1948,381 @@ def policy() -> None:
     capacity_k = economics.HEADLINE_CAPACITY
     anchor = int(np.argmin(np.abs(headline_curve.grid - capacity_k)))
     n_targeted = economics.emails_at_capacity(n_frame, capacity_k)
+
+    # ----------------------------------------------------------------
+    # D-05: the optimism of the per-customer argmax, MEASURED
+    # ----------------------------------------------------------------
+    # Phase 4's D-19 delivered a quantified cross-arm incomparability and
+    # explicitly deferred the policy call to Phase 5. D-04 answered it --
+    # the shipped policy targets the womens arm only -- and D-05 requires
+    # the argmax that was NOT shipped to be valued anyway, so its optimism
+    # is a number rather than a caution. Everything below is that number
+    # and its decomposition:
+    #
+    #     gap_womens    = naive_womens - honest_womens   miscalibration
+    #     gap_argmax    = naive_argmax - honest_argmax   miscalibration
+    #                                                    + winner's curse
+    #     winners_curse = gap_argmax - gap_womens        the isolated part
+    #
+    # Both gaps are measured on the SAME 32,001-row three-arm frame at the
+    # same weight 3, by the same estimator, differing in nothing but how
+    # many arms the argmax chooses between. The womens model's own
+    # miscalibration therefore cancels in the subtraction and what is left
+    # is the cost of choosing per customer between two correlated noisy
+    # estimates.
+    three_arm_weight = float(len(policy_levels))
+    mens_name = config.ARMS["mens"]
+    womens_name = config.ARMS["womens"]
+    control_rows = segment == config.CONTROL
+    band_tail = (1.0 - evaluation.BOOTSTRAP_BAND_LEVEL) / 2.0 * 100.0
+
+    # Named by column rather than surfaced as a bare KeyError from deep
+    # inside the loop, for the reason the three input checks at the top of
+    # this function are plain if/raise statements: a scored artifact
+    # regenerated without D-15's `_all` columns is the reachable failure,
+    # and the diagnosis is "re-run train", which a KeyError does not say.
+    required_columns = [
+        column + suffix
+        for pair in POLICY_SCORE_COLUMNS.values()
+        for column in pair.values()
+        for suffix in ("", ALL_ROWS_SUFFIX)
+    ] + [
+        f"m0_{POLICY_ROBUSTNESS_CELL}",
+        f"m1_{POLICY_ROBUSTNESS_CELL}",
+    ]
+    absent = [name for name in required_columns if name not in scored.columns]
+    if absent:
+        raise ValueError(
+            f"the scored holdout artifact is missing {absent!r}. The "
+            "optimism exhibit values an argmax policy from the "
+            "randomization, and an inverse-probability numerator counts "
+            "the rows whose realized arm matches the prescribed action -- "
+            "which are the rows the unsuffixed columns leave as nan. "
+            "Re-run `python -m dont_email_everyone.pipeline train`, which "
+            "writes the suffixed columns D-15 added."
+        )
+
+    miscalibration = {}
+    decomposition = {}
+    jensen = {}
+    for outcome in POLICY_OUTCOMES:
+        columns = POLICY_SCORE_COLUMNS[outcome]
+        womens_column = columns["womens"]
+        mens_column = columns["mens"]
+        # DERIVED, never typed: the `unproven_` label is already carried by
+        # the artifact's own column name, so reading the prefix off it
+        # cannot disagree with the data the way a hand-typed flag can.
+        # This is 05-06's `published` boolean applied to key names.
+        label = "unproven_" if womens_column.startswith("unproven_") else ""
+
+        # -- the womens-only side, on the two-arm frame at weight 2, per
+        # -- TARGETED customer: the model's own mean predicted uplift over
+        # -- the head against what the randomization delivered on that
+        # -- same head. `ranking_order` is called rather than a second
+        # -- sort written here, so the two numbers are over identical rows.
+        curve = curves[(womens_column, outcome)][0]
+        frame_score = frame[womens_column].to_numpy(dtype=float)
+        head = evaluation.ranking_order(frame_score, seed=POLICY_SEED)
+        head_size = int(curve.n_targeted[anchor])
+        naive_at_capacity = evaluation.naive_policy_value(
+            {womens_column: frame_score[head[:head_size]]}
+        )
+        honest_at_capacity = float(curve.per_targeted[anchor])
+        naive_at_one = evaluation.naive_policy_value({womens_column: frame_score})
+        honest_at_one = float(curve.per_targeted[-1])
+        miscalibration[outcome] = {
+            "score_column": womens_column,
+            "published": not womens_column.startswith("unproven_"),
+            "frame": "womens_and_control",
+            "unit": "per_targeted_customer",
+            "k_capacity": float(capacity_k),
+            "n_targeted": head_size,
+            f"{label}naive_at_capacity": naive_at_capacity,
+            f"{label}honest_at_capacity": honest_at_capacity,
+            f"{label}gap_at_capacity": naive_at_capacity - honest_at_capacity,
+            f"{label}ratio_at_capacity": naive_at_capacity / honest_at_capacity,
+            f"{label}naive_at_k_1": naive_at_one,
+            f"{label}honest_at_k_1": honest_at_one,
+            f"{label}gap_at_k_1": naive_at_one - honest_at_one,
+            f"{label}ratio_at_k_1": naive_at_one / honest_at_one,
+        }
+
+        # -- the decomposition, on the three-arm frame at weight 3.
+        scores_all = {
+            mens_name: scored[mens_column + ALL_ROWS_SUFFIX].to_numpy(dtype=float),
+            womens_name: scored[womens_column + ALL_ROWS_SUFFIX].to_numpy(dtype=float),
+        }
+        outcome_all = scored[outcome].to_numpy(dtype=float)
+        honest_argmax = evaluation.argmax_policy_value(
+            scores_all,
+            segment,
+            outcome_all,
+            weight=three_arm_weight,
+            no_action=config.CONTROL,
+        )
+        naive_argmax = evaluation.naive_policy_value(scores_all)
+        womens_only = {womens_name: scores_all[womens_name]}
+        honest_womens = evaluation.argmax_policy_value(
+            womens_only,
+            segment,
+            outcome_all,
+            weight=three_arm_weight,
+            no_action=config.CONTROL,
+        )
+        naive_womens = evaluation.naive_policy_value(womens_only)
+        mens_only = {mens_name: scores_all[mens_name]}
+        honest_mens = evaluation.argmax_policy_value(
+            mens_only,
+            segment,
+            outcome_all,
+            weight=three_arm_weight,
+            no_action=config.CONTROL,
+        )
+        naive_mens = evaluation.naive_policy_value(mens_only)
+        gap_argmax = naive_argmax - honest_argmax.delta_none
+        gap_womens = naive_womens - honest_womens.delta_none
+        gap_mens = naive_mens - honest_mens.delta_none
+        share_mens = honest_argmax.prescribed_share[mens_name]
+        share_womens = honest_argmax.prescribed_share[womens_name]
+        # What the argmax's gap would be if choosing per customer were
+        # free: each arm's OWN miscalibration, weighted by how often the
+        # argmax prescribes that arm. Subtracting the womens gap alone --
+        # which is the decomposition this exhibit publishes, because it is
+        # the one D-05 names -- leaves the mens model's calibration inside
+        # the residual, and on the visit outcome that term dominates and
+        # turns the residual negative. A negative winner's curse is not a
+        # thing; the blended comparator below is what separates the two,
+        # and both are reported so the reader can see which is which.
+        gap_blended = share_mens * gap_mens + share_womens * gap_womens
+
+        # The argmax band comes from the SAME three-level matrix every
+        # other band in this phase is a view of, unmasked here because the
+        # argmax policy runs on all three arms. Three intervals from one
+        # draw are jointly valid; three independently drawn ones quietly
+        # disagree (D-12).
+        replicates = np.empty(indices_all.shape[0])
+        for position, take in enumerate(indices_all):
+            replicates[position] = evaluation.argmax_policy_value(
+                {arm: values[take] for arm, values in scores_all.items()},
+                segment[take],
+                outcome_all[take],
+                weight=three_arm_weight,
+                no_action=config.CONTROL,
+            ).delta_none
+        argmax_lo, argmax_hi = np.percentile(
+            replicates, [band_tail, 100.0 - band_tail]
+        )
+
+        decomposition[outcome] = {
+            # Neutral bookkeeping; the values carry their own labels.
+            "score_columns": {
+                "mens": mens_column + ALL_ROWS_SUFFIX,
+                "womens": womens_column + ALL_ROWS_SUFFIX,
+            },
+            "unproven_naive_argmax": naive_argmax,
+            "unproven_honest_argmax": honest_argmax.delta_none,
+            "unproven_honest_argmax_lo": float(argmax_lo),
+            "unproven_honest_argmax_hi": float(argmax_hi),
+            "unproven_gap_argmax": gap_argmax,
+            "unproven_ratio_argmax": naive_argmax / honest_argmax.delta_none,
+            "unproven_naive_womens": naive_womens,
+            "unproven_honest_womens": honest_womens.delta_none,
+            "unproven_gap_womens": gap_womens,
+            "unproven_naive_mens": naive_mens,
+            "unproven_honest_mens": honest_mens.delta_none,
+            "unproven_gap_mens": gap_mens,
+            "unproven_gap_blended": gap_blended,
+            "unproven_winners_curse_vs_blended": gap_argmax - gap_blended,
+            # winners_curse = gap_argmax - gap_womens. Written out rather
+            # than folded into one expression so the identity is visible
+            # in the source as well as assertable in the artifact.
+            "unproven_winners_curse": gap_argmax - gap_womens,
+            "unproven_argmax_share_mens": honest_argmax.prescribed_share[
+                mens_name
+            ],
+            "unproven_argmax_share_womens": honest_argmax.prescribed_share[
+                womens_name
+            ],
+            "unproven_n_matched": honest_argmax.n_matched,
+        }
+
+        # -- the Jensen gap, on the SHARED CONTROL rows so it is directly
+        # -- comparable with model.json's cross_arm_metrics block, which
+        # -- Phase 4 computed there by different code.
+        control_scores = {
+            arm: values[control_rows] for arm, values in scores_all.items()
+        }
+        arm_means = {
+            mens_column + ALL_ROWS_SUFFIX: float(
+                control_scores[mens_name].mean()
+            ),
+            womens_column + ALL_ROWS_SUFFIX: float(
+                control_scores[womens_name].mean()
+            ),
+        }
+        mean_of_max = evaluation.naive_policy_value(control_scores)
+        prescribed_on_control = honest_argmax.prescribed[control_rows]
+        jensen[outcome] = {
+            "n_shared_control_rows": int(control_rows.sum()),
+            "unproven_arm_means": arm_means,
+            "unproven_mean_of_the_elementwise_max": mean_of_max,
+            "unproven_jensen_gap": mean_of_max - max(arm_means.values()),
+            "unproven_correlation_between_arms": float(
+                np.corrcoef(
+                    control_scores[mens_name], control_scores[womens_name]
+                )[0, 1]
+            ),
+            "unproven_argmax_share_mens": float(
+                np.count_nonzero(prescribed_on_control == mens_name)
+                / int(control_rows.sum())
+            ),
+        }
+
+    argmax_note = (
+        "Every number in this block values a policy this project does NOT "
+        "ship: D-04 targets the womens arm only, because a per-customer "
+        "argmax rests on mens rankings that failed their own permutation "
+        "nulls. It is reported so the optimism of choosing per customer "
+        "between two correlated noisy estimates is a measured number "
+        "rather than a caution, which is the obligation Phase 4's D-19 "
+        "deferred to this phase. It is not a recommendation and it is not "
+        "a headline."
+    )
+    decomposition_note = (
+        "winners_curse = gap_argmax - gap_womens, where each gap is the "
+        "model's own mean predicted uplift minus the value the "
+        f"randomization delivered, measured on all {len(scored)} holdout "
+        f"rows at the known-propensity weight {three_arm_weight}. Every "
+        f"action in {list(policy_levels)} is realized with probability "
+        "1/3 on this frame, so it is the one place ROADMAP criterion 1's "
+        "literal 1/3 applies unmodified; the headline frame drops the "
+        "mens arm and renormalizes the weight to "
+        f"{evaluation.POLICY_WEIGHT}. Both gaps come from the same "
+        "estimator on the same rows and differ in nothing but how many "
+        "arms the argmax chooses between, so the womens model's own "
+        "miscalibration cancels. WHAT THE RESIDUAL IS AND IS NOT: it "
+        "carries the cost of choosing per customer between two "
+        "correlated noisy estimates, and it also carries any difference "
+        "between the two arms' models in how well calibrated they are. "
+        "Where the mens model is the better calibrated of the pair the "
+        "residual can come out negative, which is a statement about "
+        "calibration and never about a negative winner's curse. "
+        "winners_curse_vs_blended subtracts each arm's own gap weighted "
+        "by how often the argmax prescribes it, which removes that term. "
+        "Part of what is left is arithmetic rather than error in either "
+        "sense: mean(max) is at least max(mean) for any two arrays, and "
+        "the jensen block measures that part on its own, on the shared "
+        "control rows where it is comparable with the cross_arm_metrics "
+        "block Phase 4 committed."
+    )
+    # D-09's robustness note, on the HEADLINE cell: the same top-k policy
+    # the headline publishes, valued three ways. Horvitz-Thompson stays
+    # the published estimator; the other two are one line of evidence that
+    # the number does not depend on that choice.
+    robustness_m0 = frame[f"m0_{POLICY_ROBUSTNESS_CELL}"].to_numpy(dtype=float)
+    robustness_m1 = frame[f"m1_{POLICY_ROBUSTNESS_CELL}"].to_numpy(dtype=float)
+    headline_score = frame[POLICY_HEADLINE_RANKING].to_numpy(dtype=float)
+    robustness_outcome = outcome_values[POLICY_ROBUSTNESS_OUTCOME]
+    variants = evaluation.policy_value_variants(
+        headline_score,
+        treatment,
+        robustness_outcome,
+        k=capacity_k,
+        weight=evaluation.POLICY_WEIGHT,
+        m0=robustness_m0,
+        m1=robustness_m1,
+        seed=POLICY_SEED,
+    )
+    variant_stacks = {"ht": [], "hajek": [], "aipw": []}
+    for position, take in enumerate(indices):
+        replicate = evaluation.policy_value_variants(
+            headline_score[take],
+            treatment[take],
+            robustness_outcome[take],
+            k=capacity_k,
+            weight=evaluation.POLICY_WEIGHT,
+            m0=robustness_m0[take],
+            m1=robustness_m1[take],
+            seed=POLICY_SEED + position,
+        )
+        for name in variant_stacks:
+            variant_stacks[name].append(
+                getattr(replicate, name).delta_none
+            )
+
+    def _variant_block(name: str) -> dict:
+        """One estimator's point value at the anchor, with its own band.
+
+        Defined here rather than at module scope because it closes over
+        this run's frame, its shared draw matrix and its anchor, exactly
+        as `_outcome_block` above does and for the same reason.
+        """
+        point = getattr(variants, name)
+        lo, hi = np.percentile(
+            np.asarray(variant_stacks[name]),
+            [band_tail, 100.0 - band_tail],
+        )
+        return {
+            "v_pi": point.v_pi,
+            "v_all": point.v_all,
+            "v_none": point.v_none,
+            "delta_none": point.delta_none,
+            "per_targeted": point.per_targeted,
+            "ci_lo": float(lo),
+            "ci_hi": float(hi),
+            "ci_width": float(hi - lo),
+        }
+
+    variant_blocks = {name: _variant_block(name) for name in variant_stacks}
+    womens_arm_mean = float(
+        robustness_outcome[treatment == 1.0].mean()
+    )
+    estimator_robustness = {
+        "note": (
+            "A robustness note, not a restructure. Horvitz-Thompson is "
+            "ROADMAP criterion 1's literal reading and reduces to a "
+            "two-term subtraction a reader can check by hand, so it stays "
+            "the published estimator. Hajek divides by the realized arm "
+            "counts instead, which is why its v_all is the womens arm's "
+            "own mean outcome exactly where the Horvitz-Thompson v_all is "
+            "not. AIPW augments with the committed base-model predictions "
+            "and buys almost nothing here, because those models explain "
+            "essentially none of this outcome's variance."
+        ),
+        "frame": {
+            "ranking": POLICY_HEADLINE_RANKING,
+            "outcome": POLICY_ROBUSTNESS_OUTCOME,
+            "k": float(capacity_k),
+            "n_customers": int(n_frame),
+            "n_targeted": int(variants.n_targeted),
+            "weight": float(evaluation.POLICY_WEIGHT),
+            "augmentation_columns": [
+                f"m0_{POLICY_ROBUSTNESS_CELL}",
+                f"m1_{POLICY_ROBUSTNESS_CELL}",
+            ],
+            "n_resamples": int(indices.shape[0]),
+            "band_level": float(evaluation.BOOTSTRAP_BAND_LEVEL),
+        },
+        "variants": variant_blocks,
+        "hajek_v_all_minus_womens_arm_mean": (
+            variant_blocks["hajek"]["v_all"] - womens_arm_mean
+        ),
+        "ht_v_all_minus_womens_arm_mean": (
+            variant_blocks["ht"]["v_all"] - womens_arm_mean
+        ),
+        "aipw_ci_width_over_ht_ci_width": (
+            variant_blocks["aipw"]["ci_width"]
+            / variant_blocks["ht"]["ci_width"]
+        ),
+    }
+    print(
+        f"[5/7] optimism: winners_curse on {POLICY_ROBUSTNESS_OUTCOME} = "
+        f"{decomposition[POLICY_ROBUSTNESS_OUTCOME]['unproven_winners_curse']}"
+        f", argmax picks {mens_name} on "
+        f"{decomposition[POLICY_ROBUSTNESS_OUTCOME]['unproven_argmax_share_mens']}"
+        f" of rows; aipw/ht CI width ratio "
+        f"{estimator_robustness['aipw_ci_width_over_ht_ci_width']}"
+    )
 
     def _outcome_block(ranking: str, outcome: str) -> dict:
         """The per-outcome scalars at the capacity anchor, with bands.
@@ -1961,7 +2368,6 @@ def policy() -> None:
         # raising over. The absolute path is the honest thing to name for
         # a run whose artifacts landed outside the tree.
         scored_relative = scored_path.as_posix()
-    womens_name = config.ARMS["womens"]
 
     caveat = (
         "With genuinely free email the correct action is to email "
@@ -2064,9 +2470,36 @@ def policy() -> None:
             for ranking in POLICY_RANKINGS
             if ranking != POLICY_HEADLINE_RANKING
         },
+        # D-05, and OUTSIDE `headline` deliberately (D-03, D-04). Every
+        # conclusion drawn from this block rests on mens rankings that
+        # failed their own permutation nulls, so every key carrying a
+        # number in `decomposition` and `jensen` takes the `unproven_`
+        # prefix -- the label travels with the number, which is the
+        # discipline Phase 4 applied to the data itself. `miscalibration`
+        # is the womens-only exhibit and takes the prefix only where its
+        # own score column does, derived from that column's name.
+        "optimism": {
+            "argmax_note": argmax_note,
+            "decomposition_note": decomposition_note,
+            "frame": {
+                "n_customers": int(len(scored)),
+                "weight": three_arm_weight,
+                "levels": list(policy_levels),
+                "no_action": config.CONTROL,
+                "two_arm_n_customers": int(n_frame),
+                "two_arm_weight": float(evaluation.POLICY_WEIGHT),
+                "n_resamples": int(indices_all.shape[0]),
+                "band_level": float(evaluation.BOOTSTRAP_BAND_LEVEL),
+                "seed": int(POLICY_SEED),
+            },
+            "miscalibration": miscalibration,
+            "decomposition": decomposition,
+            "jensen": jensen,
+        },
+        "estimator_robustness": estimator_robustness,
     }
     print(
-        f"[5/6] manifest assembled: headline on {POLICY_HEADLINE_RANKING} "
+        f"[6/7] manifest assembled: headline on {POLICY_HEADLINE_RANKING} "
         f"at k = {capacity_k} ({n_targeted} of {n_frame} customers), "
         f"{len(manifest['sensitivity'])} sensitivity rankings"
     )
@@ -2088,7 +2521,7 @@ def policy() -> None:
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
 
-    print(f"[6/6] wrote 4 policy artifacts to {config.PROCESSED}")
+    print(f"[7/7] wrote 4 policy artifacts to {config.PROCESSED}")
 
 
 def main(argv=None) -> None:

@@ -1605,6 +1605,14 @@ class ArgmaxPolicyValue:
     `prescribed_share` maps each named arm to the fraction of rows the
     argmax prescribed it. On the real data that mapping IS D-04's
     justification restated as a measurement.
+
+    `prescribed` is that same prescription per row, as an object array of
+    arm labels. It is returned rather than left for the caller to
+    recompute because the caller needs the share on a SUBSET of the rows
+    -- the shared control rows, where the Jensen gap is comparable with
+    Phase 4's own cross-arm block -- and a second `np.argmax` written
+    there would be a second tie rule in a project whose central claim is
+    that it has one of everything.
     """
 
     value: float
@@ -1615,6 +1623,7 @@ class ArgmaxPolicyValue:
     weight: float
     no_action: object
     prescribed_share: dict
+    prescribed: np.ndarray
 
 
 def _guard_score_mapping(scores_by_arm):
@@ -1858,6 +1867,7 @@ def argmax_policy_value(
             arm: float(np.count_nonzero(chosen == position) / n)
             for position, arm in enumerate(arms)
         },
+        prescribed=prescribed,
     )
 
 
@@ -1981,14 +1991,17 @@ def policy_value_variants(
         V = (1/n) * sum_i [ m_{T(i)}(X_i)
                           + weight * 1{A(i) = T(i)} * (Y_i - m_{T(i)}(X_i)) ]
 
-    It is doubly robust, and on this data it buys almost nothing: the
-    narrowing of the interval is a fraction of a percent, because the base
-    models explain essentially none of spend's variance and an
-    augmentation term that predicts nothing subtracts nothing from the
-    residual it is meant to shrink. That measurement is recorded in
-    the policy manifest's `estimator_robustness` block, written by the
-    run that produced it, rather than quoted here as a literal that
-    would go stale.
+    It is doubly robust, and on this data it buys nothing at all. The
+    interval does not narrow: under this phase's shared three-level draw
+    it comes out marginally WIDER than the inverse-probability one, by
+    well under one percent. The committed base models explain essentially
+    none of this outcome's variance, so the augmentation term predicts
+    nothing, subtracts nothing from the residual it exists to shrink, and
+    contributes its own sampling noise on top of it. An earlier
+    measurement taken on a different draw matrix reported a slight
+    narrowing instead, which is exactly why the number belongs in the
+    policy manifest's `estimator_robustness` block, written by the run
+    that produced it, rather than as a literal here that would go stale.
     With `m0` and `m1` identically zero the augmentation vanishes and this
     reduces to the Horvitz-Thompson value exactly, which is what pins the
     arithmetic.

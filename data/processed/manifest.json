@@ -228,5 +228,235 @@
         }
       }
     }
+  },
+  "optimism": {
+    "argmax_note": "Every number in this block values a policy this project does NOT ship: D-04 targets the womens arm only, because a per-customer argmax rests on mens rankings that failed their own permutation nulls. It is reported so the optimism of choosing per customer between two correlated noisy estimates is a measured number rather than a caution, which is the obligation Phase 4's D-19 deferred to this phase. It is not a recommendation and it is not a headline.",
+    "decomposition_note": "winners_curse = gap_argmax - gap_womens, where each gap is the model's own mean predicted uplift minus the value the randomization delivered, measured on all 32001 holdout rows at the known-propensity weight 3.0. Every action in ['No E-Mail', 'Mens E-Mail', 'Womens E-Mail'] is realized with probability 1/3 on this frame, so it is the one place ROADMAP criterion 1's literal 1/3 applies unmodified; the headline frame drops the mens arm and renormalizes the weight to 2.0. Both gaps come from the same estimator on the same rows and differ in nothing but how many arms the argmax chooses between, so the womens model's own miscalibration cancels. WHAT THE RESIDUAL IS AND IS NOT: it carries the cost of choosing per customer between two correlated noisy estimates, and it also carries any difference between the two arms' models in how well calibrated they are. Where the mens model is the better calibrated of the pair the residual can come out negative, which is a statement about calibration and never about a negative winner's curse. winners_curse_vs_blended subtracts each arm's own gap weighted by how often the argmax prescribes it, which removes that term. Part of what is left is arithmetic rather than error in either sense: mean(max) is at least max(mean) for any two arrays, and the jensen block measures that part on its own, on the shared control rows where it is comparable with the cross_arm_metrics block Phase 4 committed.",
+    "frame": {
+      "n_customers": 32001,
+      "weight": 3.0,
+      "levels": [
+        "No E-Mail",
+        "Mens E-Mail",
+        "Womens E-Mail"
+      ],
+      "no_action": "No E-Mail",
+      "two_arm_n_customers": 21347,
+      "two_arm_weight": 2.0,
+      "n_resamples": 500,
+      "band_level": 0.95,
+      "seed": 20260902
+    },
+    "miscalibration": {
+      "visit": {
+        "score_column": "uplift_womens_visit",
+        "published": true,
+        "frame": "womens_and_control",
+        "unit": "per_targeted_customer",
+        "k_capacity": 0.2,
+        "n_targeted": 4269,
+        "naive_at_capacity": 0.0884971699668027,
+        "honest_at_capacity": 0.07027406886858752,
+        "gap_at_capacity": 0.018223101098215178,
+        "ratio_at_capacity": 1.2593147286276019,
+        "naive_at_k_1": 0.05172657225937483,
+        "honest_at_k_1": 0.03944348151965148,
+        "gap_at_k_1": 0.012283090739723355,
+        "ratio_at_k_1": 1.311409902637618
+      },
+      "conversion": {
+        "score_column": "uplift_womens_conversion",
+        "published": true,
+        "frame": "womens_and_control",
+        "unit": "per_targeted_customer",
+        "k_capacity": 0.2,
+        "n_targeted": 4269,
+        "naive_at_capacity": 0.007377388256626641,
+        "honest_at_capacity": 0.0084328882642305,
+        "gap_at_capacity": -0.0010555000076038585,
+        "ratio_at_capacity": 0.8748352907649758,
+        "naive_at_k_1": 0.0026273830169107307,
+        "honest_at_k_1": 0.0035602192345528644,
+        "gap_at_k_1": -0.0009328362176421337,
+        "ratio_at_k_1": 0.7379834902893865
+      },
+      "spend": {
+        "score_column": "unproven_uplift_womens_spend",
+        "published": false,
+        "frame": "womens_and_control",
+        "unit": "per_targeted_customer",
+        "k_capacity": 0.2,
+        "n_targeted": 4269,
+        "unproven_naive_at_capacity": 1.4921490186605053,
+        "unproven_honest_at_capacity": 0.7446427734832508,
+        "unproven_gap_at_capacity": 0.7475062451772545,
+        "unproven_ratio_at_capacity": 2.003845430045079,
+        "unproven_naive_at_k_1": 0.4208951805870547,
+        "unproven_honest_at_k_1": 0.42234693399540973,
+        "unproven_gap_at_k_1": -0.0014517534083550165,
+        "unproven_ratio_at_k_1": 0.9965626519538774
+      }
+    },
+    "decomposition": {
+      "visit": {
+        "score_columns": {
+          "mens": "unproven_uplift_mens_visit_all",
+          "womens": "uplift_womens_visit_all"
+        },
+        "unproven_naive_argmax": 0.08127297757579992,
+        "unproven_honest_argmax": 0.07574763288647231,
+        "unproven_honest_argmax_lo": 0.06651120277491328,
+        "unproven_honest_argmax_hi": 0.08545279835005157,
+        "unproven_gap_argmax": 0.00552534468932761,
+        "unproven_ratio_argmax": 1.0729441235161603,
+        "unproven_naive_womens": 0.05171945550271944,
+        "unproven_honest_womens": 0.03946751664010499,
+        "unproven_gap_womens": 0.012251938862614449,
+        "unproven_naive_mens": 0.079910976500784,
+        "unproven_honest_mens": 0.07265397956313867,
+        "unproven_gap_mens": 0.007256996937645338,
+        "unproven_gap_blended": 0.008316047622340048,
+        "unproven_winners_curse_vs_blended": -0.002790702933012437,
+        "unproven_winners_curse": -0.006726594173286839,
+        "unproven_argmax_share_mens": 0.7879753757695072,
+        "unproven_argmax_share_womens": 0.2120246242304928,
+        "unproven_n_matched": 10733
+      },
+      "conversion": {
+        "score_columns": {
+          "mens": "unproven_uplift_mens_conversion_all",
+          "womens": "uplift_womens_conversion_all"
+        },
+        "unproven_naive_argmax": 0.0086412976691206,
+        "unproven_honest_argmax": 0.005531077153838943,
+        "unproven_honest_argmax_lo": 0.002763194900159371,
+        "unproven_honest_argmax_hi": 0.00796850098434424,
+        "unproven_gap_argmax": 0.003110220515281657,
+        "unproven_ratio_argmax": 1.5623173260425327,
+        "unproven_naive_womens": 0.0026352511406556025,
+        "unproven_honest_womens": 0.003562388675353895,
+        "unproven_gap_womens": -0.0009271375346982923,
+        "unproven_naive_mens": 0.008450954176918652,
+        "unproven_honest_mens": 0.005062341801818694,
+        "unproven_gap_mens": 0.003388612375099958,
+        "unproven_gap_blended": 0.002776604216271657,
+        "unproven_winners_curse_vs_blended": 0.00033361629901000004,
+        "unproven_winners_curse": 0.0040373580499799494,
+        "unproven_argmax_share_mens": 0.8581919315021406,
+        "unproven_argmax_share_womens": 0.14180806849785943,
+        "unproven_n_matched": 10609
+      },
+      "spend": {
+        "score_columns": {
+          "mens": "unproven_uplift_mens_spend_all",
+          "womens": "unproven_uplift_womens_spend_all"
+        },
+        "unproven_naive_argmax": 0.8870765664682265,
+        "unproven_honest_argmax": 0.7888534733289585,
+        "unproven_honest_argmax_lo": 0.36293362707415405,
+        "unproven_honest_argmax_hi": 1.1999132839598763,
+        "unproven_gap_argmax": 0.09822309313926803,
+        "unproven_ratio_argmax": 1.1245137360234556,
+        "unproven_naive_womens": 0.4230459744039541,
+        "unproven_honest_womens": 0.4226042936158245,
+        "unproven_gap_womens": 0.00044168078812956146,
+        "unproven_naive_mens": 0.8117166152445245,
+        "unproven_honest_mens": 0.7241567451017155,
+        "unproven_gap_mens": 0.08755987014280908,
+        "unproven_gap_blended": 0.07049340568655815,
+        "unproven_winners_curse_vs_blended": 0.027729687452709872,
+        "unproven_winners_curse": 0.09778141235113846,
+        "unproven_argmax_share_mens": 0.8040998718790038,
+        "unproven_argmax_share_womens": 0.19590012812099622,
+        "unproven_n_matched": 10707
+      }
+    },
+    "jensen": {
+      "visit": {
+        "n_shared_control_rows": 10653,
+        "unproven_arm_means": {
+          "unproven_uplift_mens_visit_all": 0.07998450500297007,
+          "uplift_womens_visit_all": 0.051745408744223204
+        },
+        "unproven_mean_of_the_elementwise_max": 0.08135446738866106,
+        "unproven_jensen_gap": 0.0013699623856909954,
+        "unproven_correlation_between_arms": 0.42274237471270437,
+        "unproven_argmax_share_mens": 0.786539003097719
+      },
+      "conversion": {
+        "n_shared_control_rows": 10653,
+        "unproven_arm_means": {
+          "unproven_uplift_mens_conversion_all": 0.008450466418165008,
+          "uplift_womens_conversion_all": 0.0026313382690838997
+        },
+        "unproven_mean_of_the_elementwise_max": 0.008632824557921918,
+        "unproven_jensen_gap": 0.0001823581397569097,
+        "unproven_correlation_between_arms": 0.45628955916222824,
+        "unproven_argmax_share_mens": 0.8596639444287995
+      },
+      "spend": {
+        "n_shared_control_rows": 10653,
+        "unproven_arm_means": {
+          "unproven_uplift_mens_spend_all": 0.8144132266418846,
+          "unproven_uplift_womens_spend_all": 0.42036965640716023
+        },
+        "unproven_mean_of_the_elementwise_max": 0.8877394589980532,
+        "unproven_jensen_gap": 0.07332623235616853,
+        "unproven_correlation_between_arms": 0.49930329495658826,
+        "unproven_argmax_share_mens": 0.8083169060358585
+      }
+    }
+  },
+  "estimator_robustness": {
+    "note": "A robustness note, not a restructure. Horvitz-Thompson is ROADMAP criterion 1's literal reading and reduces to a two-term subtraction a reader can check by hand, so it stays the published estimator. Hajek divides by the realized arm counts instead, which is why its v_all is the womens arm's own mean outcome exactly where the Horvitz-Thompson v_all is not. AIPW augments with the committed base-model predictions and buys almost nothing here, because those models explain essentially none of this outcome's variance.",
+    "frame": {
+      "ranking": "uplift_womens_visit",
+      "outcome": "spend",
+      "k": 0.2,
+      "n_customers": 21347,
+      "n_targeted": 4269,
+      "weight": 2.0,
+      "augmentation_columns": [
+        "m0_womens_spend",
+        "m1_womens_spend"
+      ],
+      "n_resamples": 500,
+      "band_level": 0.95
+    },
+    "variants": {
+      "ht": {
+        "v_pi": 0.9121487796880123,
+        "v_all": 1.1484330350868976,
+        "v_none": 0.7260861010914883,
+        "delta_none": 0.18606267859652403,
+        "per_targeted": 0.9304005621925506,
+        "ci_lo": 0.009239822925938172,
+        "ci_hi": 0.43368314048812484,
+        "ci_width": 0.4244433175621867
+      },
+      "hajek": {
+        "v_pi": 0.9185135816450831,
+        "v_all": 1.146231531700019,
+        "v_none": 0.727483338026847,
+        "delta_none": 0.19103024361823617,
+        "per_targeted": 0.9552407145744876,
+        "ci_lo": 0.012151497602390026,
+        "ci_hi": 0.437776768339819,
+        "ci_width": 0.42562527073742895
+      },
+      "aipw": {
+        "v_pi": 0.9202191224712992,
+        "v_all": 1.1432447450729297,
+        "v_none": 0.7299414860947587,
+        "delta_none": 0.1902776363765405,
+        "per_targeted": 0.9514773257741883,
+        "ci_lo": 0.007637488727717623,
+        "ci_hi": 0.4347344979990928,
+        "ci_width": 0.42709700927137517
+      }
+    },
+    "hajek_v_all_minus_womens_arm_mean": 0.0,
+    "ht_v_all_minus_womens_arm_mean": 0.002201503386878745,
+    "aipw_ci_width_over_ht_ci_width": 1.0062521698407931
   }
 }
