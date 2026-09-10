@@ -31,7 +31,7 @@ import subprocess
 
 import pandas as pd
 
-from dont_email_everyone import config
+from dont_email_everyone import config, economics
 
 # The two Phase 2 figures, held as their own tuple because
 # `test_validity_report_numbers_trace_to_committed_artifacts` below asserts
@@ -111,7 +111,16 @@ MIN_FIGURE_BYTES = 5_000
 # it under the presence, git-tracking and byte-floor assertions below; the
 # Phase 4 assertions further down are additional to those three, not a
 # replacement for them.
-REPORT_NAMES = ("validity.md", "metric.md", "model.md")
+#
+# `policy.md` (Phase 5's write-up) joins in plan 05-01, in the commit that
+# brings the file under test rather than in the plan that finishes writing
+# it -- the file is created as a pre-registration in 05-01 and its results
+# are authored in 05-09, and a write-up that spends eight plans uncovered is
+# a write-up nothing stops from being deleted. It is a ONE-LINE tuple
+# literal on purpose: the acceptance check below and in 04-09 read this
+# literal up to its first `)`, so rebinding the name on a continuation line
+# breaks them. 04-09 recorded the same disposition.
+REPORT_NAMES = ("validity.md", "metric.md", "model.md", "policy.md")
 
 # In the spirit of MIN_FIGURE_BYTES above, and for the same failure mode: a
 # stub write-up -- a title and a TODO -- passes `.is_file()` and fails a
@@ -689,3 +698,89 @@ def test_model_report_keeps_the_regenerate_line_true():
             f"{sorted(registered)}). The claim in a committed document has "
             "stopped being true."
         )
+
+
+# --------------------------------------------------------------------------
+# Phase 5's write-up, `reports/policy.md`
+#
+# Only ONE assertion lives here in plan 05-01, because only one section of
+# the document exists yet: the capacity anchor, pre-registered on its own
+# commit before any Phase 5 number was computed. The rest of the write-up --
+# the policy value, its interval, the vs-random contrast, the cost-optimal
+# exhibit and the optimism measurement -- is authored in plan 05-09, which
+# brings the ordering, honesty and number-tracing tests that `model.md` has
+# above.
+#
+# THE ORDERING ASSERTION IS DELIBERATELY NOT WRITTEN HERE. Its `model.md`
+# analogue compares the offset of the criteria section against the offset of
+# the first result; `policy.md` contains no result yet, so the same
+# assertion would pass on any document and would be testing nothing. Plan
+# 05-09 adds it in the commit that adds the first result, and proves it
+# non-vacuous by transposition. The gap is scheduled, not forgotten.
+# --------------------------------------------------------------------------
+
+POLICY_REPORT = "policy.md"
+
+
+def _policy_report_text():
+    return (config.REPORTS / POLICY_REPORT).read_text(encoding="utf-8")
+
+
+def test_policy_anchor_matches_the_constant():
+    """T-05-01: the report and the constant cannot drift apart.
+
+    Both spellings of the anchor are DERIVED from
+    `economics.HEADLINE_CAPACITY` rather than retyped as literals, which is
+    the whole point of the test. A hardcoded "0.20" here would agree with a
+    retuned constant exactly as happily as with the right one; deriving the
+    strings means that retuning the constant fails this test unless the
+    write-up is edited in the same commit, which is the only mechanism
+    stopping a published anchor from quietly disagreeing with the code that
+    produced the number beside it.
+    """
+    anchor = economics.HEADLINE_CAPACITY
+    flat = _flat(_policy_report_text())
+
+    for spelling in (f"{anchor:.2f}", f"{anchor * 100:.0f}%"):
+        assert spelling in flat, (
+            f"reports/policy.md does not state the anchor as {spelling!r}. "
+            f"economics.HEADLINE_CAPACITY is {anchor!r}, and CONTEXT.md "
+            "D-07 requires the capacity to appear as a percentage of the "
+            "list with its absolute count alongside. If the constant was "
+            "retuned, the write-up has to be retuned with it."
+        )
+
+    # The provenance argument is what the anchor rests on, so the commit
+    # that carries it is named in the document by hash. The same hash is
+    # checked against git itself by
+    # tests/test_economics.py::test_headline_capacity_predates_the_first_model
+    # -- this assertion only establishes that the write-up makes the claim,
+    # and that one establishes that the claim is true.
+    assert "9581e84" in flat, (
+        "reports/policy.md does not name the provenance commit 9581e84. "
+        "The anchor is defended on the grounds that it predates every "
+        "uplift score in the project, and a provenance argument that does "
+        "not say which commit it means cannot be checked by a reader."
+    )
+
+    # D-07: the anchor is a reading convention, and it is only that if the
+    # whole curve is published beside it.
+    for phrase in ("101-point grid", "published in full"):
+        assert phrase in flat, (
+            f"reports/policy.md does not state {phrase!r}. The anchor is "
+            "defensible as a READING CONVENTION only while any other "
+            "capacity can be read off a published grid; without that it is "
+            "a load-bearing choice wearing a convention's clothes."
+        )
+
+    # And the claim the document must NOT make. Asserting the presence of
+    # the disclaimer rather than the absence of a boast is deliberate: a
+    # ban on phrases can always be evaded by rewording, while a required
+    # sentence has to be deleted to be removed, and deleting it shows up in
+    # a diff.
+    assert "it is not the best point on the curve" in flat.lower(), (
+        "reports/policy.md does not state plainly that the anchor is not "
+        "the best point on the curve. It was not selected for where it "
+        "lands, no optimality criterion was applied to it, and a write-up "
+        "that leaves that unsaid invites the reader to assume otherwise."
+    )
