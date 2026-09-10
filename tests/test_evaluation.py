@@ -2693,3 +2693,153 @@ def test_policy_value_curve_rejects_an_unusable_weight(bad_weight):
         evaluation.policy_value_curve(
             score, treatment, outcome, weight=bad_weight
         )
+
+
+# The four contrasts `policy_value_band` bands. Written out literally
+# rather than read back from the returned mapping, so a contrast that
+# silently stops being banded fails this list instead of shortening it --
+# the disposition `ORIGINAL_SYNTHETIC_COLUMNS` above records for itself.
+BANDED_CONTRASTS = ("delta_none", "delta_all", "delta_random", "per_targeted")
+
+
+def test_policy_value_band_requires_shared_draws():
+    """T-05-11: there is no path to a band built from its own draws.
+
+    `indices` is required AND keyword-only, deliberately stricter than
+    `qini_bootstrap_band`'s optional `indices=None` hook. D-12's claim is
+    that the Qini band, the policy band and Phase 6's revenue band are
+    jointly valid because they are built from the SAME replicates. A
+    default that quietly built its own matrix would turn that claim into a
+    comment about a property the code does not have, and nothing would
+    raise.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=400)
+    good = evaluation.stratified_indices(treatment, 8, 20260902)
+
+    with pytest.raises(TypeError):
+        evaluation.policy_value_band(score, treatment, outcome)
+
+    with pytest.raises(ValueError, match="shape"):
+        evaluation.policy_value_band(
+            score, treatment, outcome, indices=good[:, :-1]
+        )
+    with pytest.raises(ValueError, match="dtype"):
+        evaluation.policy_value_band(
+            score, treatment, outcome, indices=good.astype(float)
+        )
+    with pytest.raises(ValueError, match="replicate"):
+        evaluation.policy_value_band(
+            score, treatment, outcome, indices=good[:0]
+        )
+
+    grid, bands = evaluation.policy_value_band(
+        score, treatment, outcome, indices=good
+    )
+    again, repeated = evaluation.policy_value_band(
+        score, treatment, outcome, indices=good
+    )
+    other = evaluation.stratified_indices(treatment, 8, 71717171)
+    _, elsewhere = evaluation.policy_value_band(
+        score, treatment, outcome, indices=other
+    )
+
+    assert tuple(bands) == BANDED_CONTRASTS, (
+        f"the band covers {tuple(bands)}; all four of {BANDED_CONTRASTS} "
+        "must be banded, because every one of them is quoted somewhere in "
+        "the phase and an unbanded number reads as a point estimate."
+    )
+    np.testing.assert_array_equal(grid, again)
+    for name in BANDED_CONTRASTS:
+        lo, hi = bands[name]
+        assert lo.shape == hi.shape == grid.shape
+        assert lo.dtype == hi.dtype == np.dtype(float)
+        finite = np.isfinite(lo) & np.isfinite(hi)
+        assert np.all(lo[finite] <= hi[finite]), (
+            f"`{name}` has a lower bound above its upper bound; the two "
+            "percentiles have been swapped."
+        )
+        np.testing.assert_array_equal(lo, repeated[name][0])
+        np.testing.assert_array_equal(hi, repeated[name][1])
+
+    assert not np.array_equal(
+        bands["delta_none"][0], elsewhere["delta_none"][0]
+    ), (
+        "two different draw matrices produced the same band, so the band "
+        "is not a function of the draws it was handed and the shared-draw "
+        "contract means nothing."
+    )
+
+
+def test_policy_band_varies_the_tie_seed_and_never_the_draw(monkeypatch):
+    """`seed + r` per replicate, and the caller's rows unaltered.
+
+    `qini_bootstrap_band` advances the TIE-BREAK seed across replicates
+    while taking the draw from the shared matrix, and the two bands must
+    not settle onto different conventions -- a band that re-drew its own
+    rows would be independent of the Qini band it is quoted beside.
+
+    Asserted by construction with a recording wrapper rather than by
+    comparing numbers, because on this data the tie seed changes nothing:
+    the womens score's largest tie group is 0.14% of the rows, and the
+    k = 0.20 spend policy value is IDENTICAL across eight consecutive tie
+    seeds (measured, spread exactly 0.0). Varying it costs nothing here
+    and buys convention alignment; a numeric test could not tell the two
+    conventions apart at all.
+    """
+    score, treatment, outcome = _constant_effect_frame(n=400)
+    indices = evaluation.stratified_indices(treatment, 6, 20260902)
+    seen = []
+    original = evaluation.policy_value_curve
+
+    def spy(replicate_score, *args, **kwargs):
+        seen.append((kwargs["seed"], np.asarray(replicate_score).copy()))
+        return original(replicate_score, *args, **kwargs)
+
+    monkeypatch.setattr(evaluation, "policy_value_curve", spy)
+    evaluation.policy_value_band(
+        score, treatment, outcome, indices=indices, seed=555
+    )
+
+    assert [seed for seed, _ in seen] == [555 + r for r in range(6)], (
+        f"the replicate tie seeds were {[s for s, _ in seen]}; they must "
+        "advance as `seed + r`, exactly as qini_bootstrap_band's loop does."
+    )
+    for r, (_, replicate_score) in enumerate(seen):
+        np.testing.assert_array_equal(
+            replicate_score,
+            score[indices[r]],
+            err_msg=(
+                f"replicate {r} did not receive the caller's own draw row. "
+                "The tie seed varies per replicate; the DRAW must not."
+            ),
+        )
+
+
+def test_policy_band_contains_the_point_estimate_on_real_data():
+    """A percentile band, so containment is a fraction and not an envelope.
+
+    The point estimate can and does sit outside a pointwise percentile
+    band at a few grid points -- most likely near the ends, where the
+    replicate spread collapses and the bootstrap distribution is skewed.
+    Asserting containment at every point would be asserting that this is
+    an envelope, which is exactly the misreading `evaluation.py` decision
+    (h) warns about for the other two bands.
+    """
+    score, treatment, spend = _policy_inputs("spend")
+    point = evaluation.policy_value_curve(score, treatment, spend)
+    indices = evaluation.stratified_indices(
+        treatment, POLICY_BAND_REPLICATES, 20260902
+    )
+    _, bands = evaluation.policy_value_band(
+        score, treatment, spend, indices=indices
+    )
+
+    lo, hi = bands["delta_none"]
+    inside = float(np.mean((lo <= point.delta_none) & (point.delta_none <= hi)))
+    assert inside > POLICY_BAND_CONTAINMENT, (
+        f"the point estimate sits inside the delta_none band at "
+        f"{inside:.3f} of the grid points, below the "
+        f"{POLICY_BAND_CONTAINMENT} floor. A bootstrap band that misses "
+        "its own point estimate over a tenth of the grid is not a "
+        "precision interval for that estimate."
+    )
