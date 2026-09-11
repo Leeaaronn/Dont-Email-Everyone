@@ -2227,3 +2227,91 @@ def test_first_paint_numbers_appear_verbatim_in_the_policy_report():
         "report; add an allowlist entry only if the report genuinely writes "
         "the same quantity in another convention, and justify it there."
     )
+
+
+# --------------------------------------------------------------------------
+# Plan 06-08: the deployment readiness gate
+# --------------------------------------------------------------------------
+
+# Community Cloud's dependency-file discovery, in the platform's own
+# priority order. It searches the entrypoint's own directory FIRST and then
+# the repository root, and within a directory it installs the first file it
+# finds in this order -- then stops looking. `requirements.txt` sits fourth,
+# so any of the three above it wins outright.
+#
+# [CITED: docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/
+#  app-dependencies -- "If you include more than one ... only the first file
+#  encountered will be used".]
+CLOUD_DEPENDENCY_PRIORITY = ("uv.lock", "Pipfile", "environment.yml", "requirements.txt")
+
+# The three that outrank the serve-time file. Named as a separate constant
+# rather than sliced out of the tuple above so that the priority order stays
+# readable as documentation even if this set is edited.
+OUTRANK_REQUIREMENTS_TXT = ("uv.lock", "Pipfile", "environment.yml")
+
+APP_ENTRYPOINT = "streamlit_app.py"
+
+
+def test_no_competing_dependency_file_exists():
+    """A higher-priority dependency file would install a DIFFERENT set, silently.
+
+    Every criterion-4 guarantee in this file is a statement about
+    `requirements.txt`: that it excludes the analysis stack, that each
+    package is pinned once, that the measured import closure matches it.
+    All of them are conditional on Community Cloud actually installing that
+    file. It installs the first one it finds in
+    `CLOUD_DEPENDENCY_PRIORITY` order, searching the entrypoint's own
+    directory and then the repository root -- so a `uv.lock`, a `Pipfile` or
+    an `environment.yml` in either place is installed INSTEAD, and every
+    test above goes on passing against a file the deployment never reads.
+
+    The failure mode is silent in the strongest sense available: the app
+    builds, starts, renders and behaves identically, because the analysis
+    stack is a superset of the serve-time set. Nothing on the page, in the
+    logs or in this suite would differ. The only signals are this test and a
+    human reading the build log, which is why plan 06-08's deploy checkpoint
+    requires both.
+    """
+    entrypoint = config.ROOT / APP_ENTRYPOINT
+    assert entrypoint.is_file(), (
+        f"{APP_ENTRYPOINT} is not at the repository root. The root entrypoint "
+        "is what makes the root requirements.txt the file Community Cloud "
+        "installs (06-RESEARCH.md Pattern 1); moving it changes which "
+        "directory is searched first, and the deployed app's dashboard record "
+        "still points at the old path with no repo-side signal."
+    )
+
+    # The entrypoint's directory and the repo root -- the two places Cloud
+    # looks, deduplicated because for a root entrypoint they are the same
+    # directory. Derived from the entrypoint rather than assumed, so that a
+    # future move of the entrypoint widens this test instead of blinding it.
+    searched = {entrypoint.parent.resolve(), config.ROOT.resolve()}
+
+    found = [
+        directory / name
+        for directory in sorted(searched)
+        for name in OUTRANK_REQUIREMENTS_TXT
+        if (directory / name).exists()
+    ]
+    assert not found, (
+        f"{[str(path) for path in found]} exist(s) where Streamlit Community "
+        "Cloud looks for dependencies. Cloud searches the entrypoint's own "
+        "directory and then the repository root, installs the FIRST file it "
+        f"finds in the order {CLOUD_DEPENDENCY_PRIORITY!r}, and stops -- so "
+        "any of these is installed INSTEAD of requirements.txt. The "
+        "deployment would then carry a set that was never the one "
+        "test_serve_time_requirements_exclude_the_analysis_stack and "
+        "test_app_import_closure_is_slim verified, and the app would build, "
+        "start and render exactly as it does now. Delete the competing file; "
+        "do not try to keep it in sync with requirements.txt."
+    )
+
+    root_requirements = config.ROOT / "requirements.txt"
+    assert root_requirements.is_file(), (
+        "requirements.txt is missing from the repository root. Without it "
+        "Cloud falls through to priority 5 and reads the root pyproject.toml "
+        "as a Poetry manifest -- it carries only [tool.pytest.ini_options], so "
+        "the build fails. This assertion is paired with the one above so a "
+        "pass here cannot mean 'no dependency file at all', which would "
+        "satisfy the competing-file check trivially."
+    )
