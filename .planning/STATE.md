@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-09-10T23:53:00.394Z"
-last_activity: 2026-09-10
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-09-11T00:18:25.629Z"
+last_activity: 2026-09-11
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 38
+  completed_plans: 39
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 4 of 9
+Plan: 5 of 9
 Status: Ready to execute
-Last activity: 2026-09-10
+Last activity: 2026-09-11
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Progress: [█████████░] 86%
 | Phase 06 P01 | 22min | 2 tasks | 6 files |
 | Phase 06 P02 | 37min | 2 tasks | 8 files |
 | Phase 06 P03 | 32min | 3 tasks | 2 files |
+| Phase 06 P04 | 45min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,9 @@ Recent decisions affecting current work:
 - [Phase 06-03]: The selected= guards were moved above plt.subplots, beside the anchor's, rather than beside their draw site as 06-RESEARCH's verified shape had them -- the researched placement raised after the figure existed and leaked a pyplot figure the caller had no handle to close, and the plan's own acceptance criterion forbade that
 - [Phase 06-03]: The marker test asserts LINESTYLE and MARKER, never colour -- the UI-SPEC's non-colour-channel requirement is the property under test, and a colour assertion would pass on two indistinguishable dashed lines
 - [Phase 06-03]: No committed-PNG checksum test was written; D-06's byte-identity demand is discharged as a regeneration gate (pipeline all, then an empty git status over data/processed and reports/figures), because matplotlib and pyarrow embed run-specific metadata and a byte assertion is wrong in both directions
+- [Phase 06-04]: check_artifacts_agree gained a third cross-artifact check so the ranking control reads its default from manifest.json instead of transcribing the name -- the index lookup would otherwise raise at module scope, outside the load's try/except, and reach a public visitor as a traceback
+- [Phase 06-04]: Criterion 4's figure-closure guarantee is proven twice and neither proof runs through AppTest: a source-level count of display calls against closes, and a direct call of render() from the test thread through an injected sink -- an AppTest fignum assertion is provably vacuous
+- [Phase 06-04]: The app-layer network sweep gets its own file list beside the package sweep, never a widened one: dont_email_everyone/ must contain no Streamlit reference at all, and reports/policy.md section 15 publishes that as the Phase 5 criterion 5 discharge
 
 ### Pending Todos
 
@@ -260,6 +264,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-10T23:53:00.386Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-09-11T00:18:07.232Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None
