@@ -1419,7 +1419,30 @@ def policy_curve_plot(
     drawn_hi = hi * scale
     covers_zero = (lo <= 0.0) & (hi >= 0.0)
 
-    fig, ax = plt.subplots(figsize=(8.0, 5.6))
+    # Wider than this module's other figures, and the width is a
+    # measurement rather than a preference. The legend is anchored OUTSIDE
+    # the axes (see the `bbox_to_anchor` call below), so it needs a column
+    # of its own, and `tight_layout` takes that column out of the canvas.
+    # Leaving the width at 8.0 in would have paid for the legend with the
+    # curve's own room, trading one legibility defect for another.
+    #
+    # Measured through this factory on matplotlib 3.11.1, across both
+    # published rankings and both outcomes. Before the legend moved out,
+    # an 800 px canvas gave the plot 666.5 px; that is the floor the width
+    # has to clear, and the binding cell is uplift_womens_conversion on
+    # visit, whose wider y tick labels leave it ~9 px narrower than the
+    # headline spend cell:
+    #
+    #     canvas in | narrowest plot px | headline spend px
+    #          10.6 |             611.8 |             620.8
+    #          11.0 |             651.2 |             660.2
+    #          11.2 |             670.9 |             679.9
+    #
+    # So 11.2 in, the first width at which EVERY cell the app can draw is
+    # at least as wide as it was before. The legend's own column measures
+    # 309.3 px and does not change with the sixth entry, because the
+    # anchor's three-line entry is the widest either way.
+    fig, ax = plt.subplots(figsize=(11.2, 5.6))
 
     # Pinned, never auto-scaled, the same rule the Love plot's x limits and
     # the calibration plot's follow: the reader's question is whether the
@@ -1429,10 +1452,13 @@ def policy_curve_plot(
     span = max(highs) - min(lows)
     unit_span = span if span > 0.0 else 1.0
     y_lo = min(lows) - 0.10 * unit_span
-    # More headroom above than below, and the asymmetry is not cosmetic: the
-    # legend sits in the upper left and its longest entry is three lines, so
-    # without it the legend box lands on the curve it is describing.
-    y_hi = max(highs) + 0.34 * unit_span
+    # Symmetric with the padding below. The upper padding used to be 0.34 of
+    # the span, and the asymmetry was not cosmetic: it existed so the
+    # in-axes legend -- upper left, longest entry three lines -- would not
+    # land on the curve it was describing. The legend is no longer in the
+    # axes, so that constraint has ceased to exist, and the extra headroom
+    # was left compressing the curve into the lower two-thirds of the panel.
+    y_hi = max(highs) + 0.10 * unit_span
     ax.set_ylim(y_lo, y_hi)
     ax.set_xlim(0.0, 1.0)
 
@@ -1588,15 +1614,46 @@ def policy_curve_plot(
             zorder=7,
         )
 
-    # A sixth legend entry when a selection is passed. 06-RESEARCH rendered
-    # and inspected that case at `selected=0.37` on the spend curve and
-    # found the upper-left box still clears the curve: the
-    # `y_hi = max(highs) + 0.34 * unit_span` headroom above absorbs it,
-    # because the new entry is ONE line where the anchor's is three. That
-    # is an argument, not a verification -- this figure still goes to the
-    # phase's UI legibility checkpoint, because 05-08 found three real
-    # defects by opening PNGs that every automated check had passed.
-    ax.legend(loc="upper left", fontsize=7.5, framealpha=0.92)
+    # The legend sits OUTSIDE the plot area, in its own column to the right.
+    #
+    # It used to sit `loc="upper left"` inside the axes, on the argument
+    # that the headroom above absorbed it. 06-RESEARCH made that argument
+    # from one rendered depth, the 06-07 legibility checkpoint recorded the
+    # overlap as a known cosmetic defect, and on 2026-09-11 the user
+    # reported it from the deployed app: the selection rule crossing the
+    # box and the box covering the curve, at every shallow depth, on both
+    # rankings. The argument was wrong, and it was wrong for a whole phase
+    # because it was an argument -- so the geometry is now MEASURED, by
+    # `test_policy_curve_legend_clears_the_axes_and_fits_the_canvas`, which
+    # asserts the rendered extents rather than the `loc` string.
+    #
+    # A selection adds a sixth entry and makes the box taller. Outside the
+    # axes that height costs the plot nothing, which is the other reason
+    # this placement is the class-level repair and the old headroom was not.
+    #
+    # The call stays BEFORE `_fit_titles`, which runs `tight_layout`:
+    # on matplotlib 3.11.1 (pinned in requirements.txt, so it is also the
+    # serve-time version) `tight_layout` reserves canvas width for an axes
+    # legend anchored outside the axes. That reservation is what keeps the
+    # legend whole in `reports/figures/`, where `pipeline.py` saves with no
+    # crop and the canvas is all there is. Streamlit's own save DOES crop
+    # to the tight bounding box and would hide a clipped legend, so this
+    # placement must not lean on it, and no crop keyword belongs in this
+    # module. (The keyword is spelled nowhere in this file on purpose: the
+    # plan's own acceptance grep requires it absent, and this repo's
+    # standing habit -- 02-03, 03-01, 04-06, 06-05 -- is to rephrase the
+    # caution rather than drop it.)
+    #
+    # None of that removes the human check. 05-08 found three real defects
+    # by opening PNGs every automated check had passed, and this defect was
+    # the fourth.
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+        fontsize=7.5,
+        framealpha=0.92,
+    )
     _fit_titles(fig)
     return fig
 

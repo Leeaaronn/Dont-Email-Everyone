@@ -1583,9 +1583,15 @@ def test_policy_curve_marks_the_selected_point_at_the_artifact_value(
     row = policy_curve_frame.sort_values("k")
     grid = np.asarray(row["k"], dtype=float)
     # Read off the committed grid, never hardcoded past this assertion.
-    # 0.37 is the depth 06-RESEARCH rendered and inspected when it checked
-    # that a six-entry legend still clears the curve, so the case a human
-    # actually looked at is the case pinned here.
+    # 0.37 is kept as the pinned six-entry depth because it is the depth
+    # 06-RESEARCH rendered when it checked whether a six-entry legend still
+    # cleared the curve. That check reached the WRONG answer: it concluded
+    # the in-axes box was absorbed by the headroom above, and the deployed
+    # app falsified that on 2026-09-11 -- the selection rule ran through the
+    # legend and the box covered the curve. The geometry is no longer
+    # assumed from an inspected render; it is asserted by
+    # `test_policy_curve_legend_clears_the_axes_and_fits_the_canvas`, which
+    # measures the rendered extents at this same depth.
     selected = float(grid[37])
     assert np.isclose(selected, 0.37), grid[:5]
     # Without this the test could silently degenerate into a second anchor
