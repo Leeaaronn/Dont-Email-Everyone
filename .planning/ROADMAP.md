@@ -173,7 +173,7 @@ Plans:
   4. The app loads only committed artifacts — no model file, no training, no network call — the serve-time `requirements.txt` excludes scikit-learn, statsmodels, DuckDB and Pandera, and every figure is closed after render.
   5. The app is live on Streamlit Community Cloud, opens successfully from a logged-out browser after 12+ hours of no traffic, and its link is in the README.
 
-**Plans:** 4/9 plans executed
+**Plans:** 5/9 plans executed
 
 Plans:
 **Wave 0** *(blocking gate — streamlit is not installed; nothing else can be written or run until it is)*
@@ -194,7 +194,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 — same file)*
 
-- [ ] 06-05-PLAN.md — The D-07 headline block with three verdict states, the two policy curves, and the adjacency / verdict-versus-hatching tests (wave 4)
+- [x] 06-05-PLAN.md — The D-07 headline block with three verdict states, the two policy curves, and the adjacency / verdict-versus-hatching tests (wave 4)
 
 **Wave 5** *(blocked on Wave 4 — same file)*
 
@@ -249,7 +249,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
 | 5. Business & Policy Layer | 9/9 | Complete   | 2026-09-10 |
-| 6. Streamlit App & Deployment | 4/9 | In Progress|  |
+| 6. Streamlit App & Deployment | 5/9 | In Progress|  |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 
 ---

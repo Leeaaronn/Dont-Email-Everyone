@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-04-PLAN.md
-last_updated: "2026-09-11T00:18:25.629Z"
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-09-11T00:47:40.330Z"
 last_activity: 2026-09-11
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 39
+  completed_plans: 40
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-09-11
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Progress: [█████████░] 89%
 | Phase 06 P02 | 37min | 2 tasks | 8 files |
 | Phase 06 P03 | 32min | 3 tasks | 2 files |
 | Phase 06 P04 | 45min | 3 tasks | 3 files |
+| Phase 06 P05 | 55min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -234,6 +235,10 @@ Recent decisions affecting current work:
 - [Phase 06-04]: check_artifacts_agree gained a third cross-artifact check so the ranking control reads its default from manifest.json instead of transcribing the name -- the index lookup would otherwise raise at module scope, outside the load's try/except, and reach a public visitor as a traceback
 - [Phase 06-04]: Criterion 4's figure-closure guarantee is proven twice and neither proof runs through AppTest: a source-level count of display calls against closes, and a direct call of render() from the test thread through an injected sink -- an AppTest fignum assertion is provably vacuous
 - [Phase 06-04]: The app-layer network sweep gets its own file list beside the package sweep, never a widened one: dont_email_everyone/ must contain no Streamlit reference at all, and reports/policy.md section 15 publishes that as the Phase 5 criterion 5 discharge
+- [Phase 06-05]: the UI-SPEC's dollar format expression `"$" + f"{v:+,.6f}"` contradicts its own worked example `+$0.101593`; the example won, because reports/policy.md section 5 prints it that way and contract statement V14 searches for those strings verbatim
+- [Phase 06-05]: verdict_line's docstring states its agreement with the figure's covers-zero marking WITHOUT spelling the matplotlib keyword for it, because the app's own source scan counts that token - second application of the 06-04 precedent, taken rather than weakening the scan
+- [Phase 06-05]: the curve captions format the pre-registered anchor's percentage from economics.HEADLINE_CAPACITY rather than transcribing "20%"; the rendered string is the contract's string character for character and the module holds no second copy of the depth
+- [Phase 06-05]: the st.metric( source count is bounded 2 <= n <= 3 rather than pinned at 2, with the assertion message telling plan 06-06 to tighten it to exactly 3 when the k* metric lands
 
 ### Pending Todos
 
@@ -264,6 +269,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T00:18:07.232Z
-Stopped at: Completed 06-04-PLAN.md
+Last session: 2026-09-11T00:47:31.740Z
+Stopped at: Completed 06-05-PLAN.md
 Resume file: None
