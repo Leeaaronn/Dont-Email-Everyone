@@ -439,6 +439,38 @@ def display_value(outcome, value):
         return f"{sign}${abs(value):,.6f}"
     return f"{value:+.6f}"
 
+def curve_caption(k, n_targeted):
+    """Return the two-part caption that sits under both policy curves.
+
+    Part one is state-dependent, because at first paint the selected depth
+    IS the pre-registered anchor and the two rules land on the same depth;
+    a caption naming two separately-coloured rules there describes a picture
+    the reviewer is not looking at.
+
+    Part two is constant and is never omitted from either figure.
+
+    The anchor's percentage is FORMATTED FROM `economics.HEADLINE_CAPACITY`
+    rather than typed into the copy. The rendered string is the contract's
+    string character for character, and the module holds no second copy of
+    a number the constant already owns -- so retuning the anchor cannot
+    leave a caption quoting the old depth beside a rule drawn at the new
+    one.
+    """
+    anchor = economics.HEADLINE_CAPACITY
+    if k == anchor:
+        selection = (
+            f"Your selected depth is the pre-registered {anchor:.0%} "
+            "anchor; the solid green and dashed purple rules sit on the "
+            "same depth."
+        )
+    else:
+        selection = (
+            f"Solid green diamond: your selected depth of {k:.0%} "
+            f"({n_targeted:,} emails). Dashed purple: the pre-registered "
+            f"{anchor:.0%} anchor, shown for reference."
+        )
+    return f"{selection} {ZERO_BY_CONSTRUCTION}"
+
 try:
     curve, bands, sweep, manifest = load_artifacts()
     check_artifacts_agree(curve, manifest)
@@ -653,3 +685,70 @@ with st.container(border=True):
         "What targeting buys on site visits, for each customer on the list, "
         "compared with emailing the same number of people picked at random."
     )
+
+st.divider()
+st.subheader("Where the gain is, and is not, detectable")
+
+# Elements 6 through 9: the two policy curves, spend first, matching the
+# order of the two metrics above.
+#
+# THE APP NAMES NO COLOUR AND PASSES NO GEOMETRY. Both factories build at
+# their own committed size with their own committed title padding, and the
+# selected marker's colour is a `plots` module constant. The only global
+# matplotlib setting this module makes is the raster resolution set beside
+# the backend selection at the top of the file, which changes no inch and no
+# point size. A styling keyword passed from here would be a second place the
+# figures' appearance is decided, and the 05-08 legibility checkpoint
+# approved the first one.
+#
+# The anchor NEVER moves: it is the pre-registered depth, passed as the
+# constant on both calls. Only `selected` tracks the control.
+#
+# THE MARKED COVERS-ZERO REGION GETS NO APP-SIDE CALLOUT AT ALL, and this is
+# a decision (D-08) rather than an omission. Its meaning is already written
+# into the figure's own legend entry -- "95% band covers zero: no gain
+# detectable at this depth" -- and a Streamlit restatement beside it would
+# be a second encoding of one finding and a second visual vocabulary for it.
+# A future agent reaching for a coloured callout box here should know that
+# the box is separately forbidden and that the hatched span is already
+# doing the work.
+#
+# `optimism_plot` is not called anywhere in this app: it concerns the
+# per-customer argmax policy Phase 5 D-04 explicitly did not ship, and an
+# unshipped policy on screen contradicts D-01's exclusion of everything
+# unpublished.
+spend_rows = curve.loc[
+    (curve["ranking"] == ranking) & (curve["outcome"] == "spend")
+]
+spend_band_rows = bands.loc[
+    (bands["ranking"] == ranking) & (bands["outcome"] == "spend")
+]
+render(
+    plots.policy_curve_plot(
+        spend_rows,
+        spend_band_rows,
+        contrast=HEADLINE_CONTRAST,
+        unit=config.OUTCOMES["spend"],
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected_k,
+    )
+)
+st.caption(curve_caption(selected_k, n_targeted))
+
+visit_rows = curve.loc[
+    (curve["ranking"] == ranking) & (curve["outcome"] == "visit")
+]
+visit_band_rows = bands.loc[
+    (bands["ranking"] == ranking) & (bands["outcome"] == "visit")
+]
+render(
+    plots.policy_curve_plot(
+        visit_rows,
+        visit_band_rows,
+        contrast=HEADLINE_CONTRAST,
+        unit=config.OUTCOMES["visit"],
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected_k,
+    )
+)
+st.caption(curve_caption(selected_k, n_targeted))
