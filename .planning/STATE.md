@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-09-11T01:29:16.426Z"
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-09-11T06:49:52.090Z"
 last_activity: 2026-09-11
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 41
+  completed_plans: 42
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-09-11
 
-Progress: [█████████░] 93%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -92,6 +92,7 @@ Progress: [█████████░] 93%
 | Phase 06 P04 | 45min | 3 tasks | 3 files |
 | Phase 06 P05 | 55min | 3 tasks | 2 files |
 | Phase 06 P06 | 40min | 3 tasks | 2 files |
+| Phase 06 P07 | 55min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -245,6 +246,12 @@ Recent decisions affecting current work:
 - [Phase 06-06]: economics.optimal_k is called on the full 101-point grid INCLUDING k=0.0 while the capacity control offers 100 depths excluding it -- two grids that must not be unified, since k*=0.00 is a real answer at c/m >= 1.397 and emails_at_capacity raises at k=0
 - [Phase 06-06]: Every first-paint numeric string is pinned to reports/policy.md by substring search, with a two-entry allowlist (6.8%, 139.7%) whose justification the test itself verifies against manifest.json
 - [Phase 06-06]: Eight read-only tests in tests/test_app.py share one guarded first-paint AppTest run -- the fast selection had reached 19.6s against a 20s bar with three figures per run, and is now 10.6s
+- [Phase 06-07]: ROADMAP criteria 1 and 5 amended in place, dated 2026-09-10 with the original wording quoted -- the versus-everyone comparator (0 of 909 band rows exclude zero from above) and the free tier's 12-hour sleep, which does not auto-wake
+- [Phase 06-07]: the checkpoint's LaTeX bug and its unit-inconsistency report are ONE defect -- markdown paired currency dollar signs as TeX math delimiters, and the point estimate's sign was eaten by math mode rather than missing. The remedy is escaping, never re-marking the units
+- [Phase 06-07]: AppTest reads the markdown SOURCE string, so 32 verbatim comparisons against reports/policy.md were green over a string the browser then re-rendered. UI-SPEC V21 is the first assertion in this project written over the RENDERED form
+- [Phase 06-07]: st.expander was NOT introduced for the reviewer's sidebar-prose note; T-06-19's app-wide prohibition stays at full strength and the content was cut instead
+- [Phase 06-07]: both ranking option labels carried their status phrase past the control's truncation point, so D-02 ('status at the point of choice') was not actually being kept -- V8 asserted the string, not the pixels
+- [Phase 06-07]: one divider removed and the headline bold confined to its lead; element count is the only vertical-spacing lever Streamlit offers without the custom markup the contract forbids
 
 ### Pending Todos
 
@@ -275,6 +282,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T01:29:16.415Z
-Stopped at: Completed 06-06-PLAN.md
+Last session: 2026-09-11T06:49:52.078Z
+Stopped at: Completed 06-07-PLAN.md
 Resume file: None
