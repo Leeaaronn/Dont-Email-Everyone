@@ -94,6 +94,17 @@ Exceptions and inherited numeric spacing:
   `cost_sweep_plot` both build at `figsize=(8.0, 5.6)` with `title` padded at `pad=28` (which is a
   multiple of 4, and is the only numeric spacing value in the whole contract). The app passes **no**
   `figsize`, `dpi`, `pad`, `fontsize` or `rcParams` layout override to either factory.
+
+  *(Amended 2026-09-11. The rule stands; one of its two quoted numbers has moved. The original said
+  both factories "build at `figsize=(8.0, 5.6)` with `title` padded at `pad=28`" and spoke of the
+  pair with a single number. That is no longer possible: `policy_curve_plot` now builds at
+  `figsize=(8.6, 7.5)` with `pad=28 x _POLICY_FONT_SCALE`, and `cost_sweep_plot` is untouched and
+  still `(8.0, 5.6)` at `pad=28`. The change was made under an **explicit user decision on
+  2026-09-11** superseding this contract's earlier "do not re-style `plots.py`" position — see the
+  Formal exemption below. The rule itself is unaffected, and was re-verified rather than assumed:
+  the app still passes no `figsize`, `dpi`, `pad`, `fontsize` or `rcParams` override to either
+  factory, asserted by `tests/test_app.py::test_app_passes_no_styling_to_any_factory` (V18), which
+  is green. Only the value this bullet quotes has moved, and only for one of the two factories.)*
 - **One global rcParam is set, and only this one:** `matplotlib.rcParams["figure.dpi"] = 150`,
   immediately after `matplotlib.use("Agg")` and before any pyplot import. 150 is the repo's committed
   figure convention (`pipeline.py` passes `dpi=150` to every `savefig`). It changes raster resolution
@@ -120,6 +131,43 @@ Exactly **two weights** are in play: regular, and bold via markdown `**` / the t
 metric weights. No third weight exists to reach for, which is a property of the stack rather than a
 rule to keep.
 
+*(**Amended 2026-09-11 — the figure point sizes in the table above are `policy_curve_plot`'s no
+longer, and the reason is a fact about how the app displays a figure rather than a style
+preference.** `st.pyplot` renders with `width="stretch"`, so a figure is scaled to the column and
+apparent size in the browser is `points × dpi × (column_px / canvas_px)` — it goes as `1 /
+canvas_width`. Moving the legend out of the plot area needed a bigger canvas, and a bigger canvas
+shrinks every glyph in the same proportion. Item 1 below already puts the 7.5 pt legend near the
+floor at ~9.5 CSS px, and the first attempted geometry (an 11.6 in canvas with the legend in a
+right-hand column) would have rendered it at 69% of that — about 6.5 CSS px, a worse legibility
+defect than the overlap being fixed.*
+
+*Scaling the type back up does **not** by itself rescue it, and the measurement is worth recording
+because the intuition is wrong: once the type scales with the canvas, type and legend grow together
+and the layout becomes **scale-invariant**. Holding apparent type at 1.00×, on the headline spend
+cell:*
+
+| canvas in | font scale | plot px | plot apparent width |
+|-----------|-----------|---------|---------------------|
+| 11.6 | 1.45 | 486.4 | 0.50× |
+| 15.0 | 1.875 | 642.6 | 0.51× |
+
+*A legend in a side column costs about half the plot's on-screen width at **any** canvas width.
+Below the axes it costs HEIGHT instead, which the app does not charge for, because the page scrolls
+and nothing in the apparent-size expression depends on canvas height. `policy_curve_plot` therefore
+draws its legend below the plot in two columns at `figsize=(8.6, 7.5)`, and every point size on that
+one figure is multiplied by `_POLICY_FONT_SCALE = 8.6/8.0`, which puts back exactly what the width
+increase would have taken. Apparent type is held at **1.000×**; the plot area measures 673–696 px
+against its 666.5 px baseline across all four cells the app can draw.*
+
+*The scaling is **local by construction**, which matters because `_TITLE_SIZES` and the rcParams in
+the table above are shared by all nineteen committed figures. `_fit_titles` grew a `sizes` ladder
+parameter; `policy_curve_plot` is the only caller that passes one, and the tuple itself is unchanged.
+`cost_sweep_plot`'s 7.5 pt legend and 7 pt annotations are untouched. That locality was **verified,
+not asserted**: `pipeline all` followed by `git status --short data/processed reports/figures`
+listed exactly the two `policy_curve_womens_visit_*.png` files and nothing else — a third figure
+appearing would have meant something shared had moved. Superseded by an **explicit user decision on
+2026-09-11**; see the Formal exemption below.)*
+
 **Formal exemption — the inherited matplotlib point sizes are out of scope for a "max N type sizes"
 rule.** The stepped `_TITLE_SIZES` tuple above, the 7.5pt legend and the 7pt cost-sweep annotations
 are **not introduced by this contract**. They are inherited unchanged from the `plots.py` factories
@@ -137,6 +185,29 @@ six-entry legend overlapping the curve at centred width and reported after the s
 fixed the legend overlap — keep it." `plots.py` was not touched, no figure was shrunk, no legend
 entry was dropped, and `git status --short reports/figures dont_email_everyone/plots.py` is empty.
 See `## Layout Contract`.)*
+
+*(**Amended 2026-09-11 — the paragraph above rests on a false premise, and that premise is why this
+defect survived a whole phase.** It states that "restyling `plots.py` would alter the four committed
+PNGs, **which D-06 forbids on pain of a byte-identity test failure**." There is no byte-identity
+test, and there never was. `tests/test_plots.py` says so in its own docstring and at
+`test_policy_curve_plot_draws_nothing_new_when_selected_is_none`, and `tests/test_artifacts.py:6-9`
+records the repo-wide policy that figure and Parquet **bytes are never asserted** — because
+matplotlib and pyarrow embed run-specific metadata, so a byte assertion fails on a correct
+regeneration and passes on a stale-but-valid file. D-06's actual demand is discharged as a
+**regeneration gate**: run `pipeline all`, then require `git status --short data/processed
+reports/figures` to print nothing. That gate does not forbid changing a figure. It forbids changing
+a figure and not committing the regenerated output. Plan 05-03 is the in-repo precedent for
+regenerating a closed-phase artifact deliberately.*
+
+*The consequence was not academic. The 06-07 reviewer recorded the legend overlap as a known
+cosmetic defect and **declined to request a fix**, on the stated grounds that no remedy existed short
+of a `plots.py` restyle that D-06 forbade. The overlap then shipped, and the user reported it from
+the deployed app on 2026-09-11. Both of this paragraph's conclusions — that `layout="wide"` is the
+one pre-approved remedy, and that editing `plots.py` "is not" a remedy — are **superseded by an
+explicit user decision on 2026-09-11**. `plots.py` was restyled, the two policy-curve PNGs were
+regenerated and committed alongside the source that produced them, and the D-06 gate then printed
+exactly those two paths and nothing else. The rest of the exemption still holds: these point sizes
+remain unreachable from the app, and V18 is intact.)*
 
 Rules, each checkable:
 
@@ -288,6 +359,15 @@ legend overlap — keep it." `layout="wide"` was the **one pre-approved remedy**
 for exactly this finding — see `## Typography` — and it was applied unchanged. The vertical narrative
 order is unaffected: `st.columns` remains forbidden in the main body, so the wider measure widens the
 single column rather than offering a second one.)*
+
+*(Amended 2026-09-11. `layout="wide"` is **kept** and is still correct — nothing below changes. What
+changes is what it should be recorded as. The note above reads as a fix; it was a **mitigation**. The
+legend overlap it was applied to was reduced by the wider measure and **not removed**: the user found
+it again on the deployed app on 2026-09-11 — "the selection rule crosses through the legend box and
+the box covers part of the curve", at every shallow depth, on both rankings. The real remedy was the
+one the 2026-09-10 note above said not to take, restyling `plots.py`, taken under an **explicit user
+decision on 2026-09-11**. `layout="wide"` stays because a wider measure is right for this app on its
+own merits, not because it fixed this.)*
 
 `initial_sidebar_state="expanded"` so criterion 1's control is visible on first paint on desktop,
 while the headline still reads if the sidebar is collapsed.
@@ -677,6 +757,8 @@ second arm is what accommodates the rounding above without weakening the check t
 | k\* 80% / 54% / 16%; breakpoints 0.068 and 1.397 | `manifest.json → cost_exhibit`; `optimal_k` re-executed | 2026-09-10 |
 | 24 incremental orders on the frame | `reports/policy.md` §5 | 2026-09-10 |
 | figure geometry 8.0×5.6in, `pad=28`, legend 7.5pt, `_TITLE_SIZES` | `dont_email_everyone/plots.py` | 2026-09-10 |
+| *superseded:* `cost_sweep_plot` geometry 8.0×5.6in, `pad=28`, legend 7.5pt, `_TITLE_SIZES` — unchanged | `dont_email_everyone/plots.py` | 2026-09-11 |
+| *superseded:* `policy_curve_plot` geometry **8.6×7.5in**, `pad=28 × _POLICY_FONT_SCALE`, legend **7.5 × _POLICY_FONT_SCALE = 8.06pt**, `_TITLE_SIZES` **scaled by `_POLICY_FONT_SCALE` locally via `_fit_titles(sizes=...)`**; `_POLICY_FONT_SCALE = 8.6/8.0` | `dont_email_everyone/plots.py` | 2026-09-11 |
 | `dpi=150` convention | `dont_email_everyone/pipeline.py` | 2026-09-10 |
 | margin guard `(0, 1]`, cost guard non-negative | `economics._guard_margin`, `_guard_cost` | 2026-09-10 |
 
@@ -726,10 +808,35 @@ instructions, both of which are judgments no test can make:
    stay distinguishable. **Pre-approved remedy if not:** switch `layout` to `"wide"`, which widens
    the column and renders the same figure larger in CSS. Do not shrink the figure, do not drop a
    legend entry, and do not re-style `plots.py`.
+
+   *(Amended 2026-09-11. The final clause — "do not re-style `plots.py`" — is **superseded by an
+   explicit user decision on 2026-09-11**. It rested on the Formal exemption's false byte-identity
+   premise, corrected above. The legend was moved out of the plot area entirely: it now sits BELOW
+   the axes in two columns on an 8.6 × 7.5 in canvas. The other three prohibitions stand and were
+   kept — no figure was shrunk, no legend entry was dropped or reordered, and `layout="wide"`
+   remains.)*
 2. **Coincident rules at first paint.** At `k = 0.20` the selected rule and the pre-registered anchor
    land on the same depth. Confirm the solid-green-diamond and dashed-purple-circle pair is
    distinguishable there, and that the element-7 caption's "sit on the same depth" wording reads as
    intended rather than as a duplicate legend entry.
+
+   *(Amended 2026-09-11. **This item was recorded below as a pass on 2026-09-10, and it was not
+   one.** The pair was not distinguishable: the selection is drawn last and above, so at `k = 0.20`
+   it occluded the anchor COMPLETELY. Measured afterwards on the headline spend cell at dpi 150,
+   pixels carrying the anchor's colour fell from 1,375 with no selection passed to **66** with the
+   selection on the anchor — and those 66 are the legend swatch, with no purple anywhere on the plot
+   — while the legend went on describing a purple dashed rule with its own value and its own 95%
+   interval. A legend entry for an invisible element. `k = 0.20` is the app's **default** depth, so
+   this was the first-paint view. Remedied 2026-09-11 by differential WIDTH applied only where the
+   two coincide: the anchor draws at 4.2pt beneath the selection's 1.4pt, with a 13pt marker beneath
+   the 7pt diamond, so the purple reads as a halo either side of the green and a ring around it —
+   measured back to 2,567 px. Neither rule was moved and neither colour was changed (both encode
+   `k`; an offset would make the figure lie about where the anchor sits, and both colours are
+   referenced outside `plots.py`). V19's linestyle-and-marker contract is untouched. Every
+   non-coinciding depth, and both committed PNGs, are left exactly as they were. Now asserted by
+   `tests/test_plots.py::test_policy_curve_anchor_survives_a_selection_on_top_of_it`, which counts
+   rendered PIXELS rather than artists — the broken figure had both artists present with every
+   property correct.)*
 
 Deployment liveness and the 12-hour cold-start (criterion 5) remain manual-only and unchanged.
 
@@ -743,6 +850,33 @@ see**, only one of which was a legibility matter: a markdown/TeX collision in tw
 sidebar caption made misleading by the widget beneath it, a heading written in the project's internal
 vocabulary, and the option-label truncation above. This is the 05-08 pattern repeating — the
 checkpoint's value is not the item it was written to test.)*
+
+*(**Amended 2026-09-11. Neither item was actually closed on 2026-09-10, and the pattern named in the
+last sentence above has now repeated a third time — this time against this checkpoint's own
+findings.***
+
+*Item 1 was recorded as "failed, then fixed by `layout="wide"`". It was mitigated, not fixed. The
+user reported the same overlap from the **deployed** app on 2026-09-11, after the full suite was
+green and after this checkpoint had passed the figure. Item 2 was recorded as a **pass** — and the
+note above makes a point of saying that "a non-finding is also a finding", which is exactly the
+sentence that made it authoritative. It was wrong: the anchor was not distinguishable from the
+selection at `k = 0.20`, it was invisible. See the amendment on item 2 above for the measurement.*
+
+*Both were found by LOOKING, again. The 2026-09-11 remediation rendered a 24-figure inspection
+matrix — both published rankings × both outcomes × five depths (`None`, 0.01, 0.05, 0.10, 0.20),
+written with `savefig(dpi=150)` and no crop exactly as `pipeline.py` writes the committed PNGs, plus
+both committed cells re-saved through Streamlit's own `bbox_inches="tight"`, `dpi=200` options, plus
+the untitled form the deployed app actually draws. Opening them caught a defect no assertion in this
+repo could have: an outside-axes legend whose every measured extent reported 18.8 px of clearance
+from the canvas, and which saved **clipped** at `pipeline.py`'s dpi=150 — because the layout is
+solved at the figure's dpi and the raster is written at `savefig`'s, and hinted glyph advances do not
+scale linearly between them. Right-hand ink margin of the saved file read 17 / 0 / 0 / 1 px at dpi
+100 / 150 / 200 / 300. It would have shipped a cut-off legend into `reports/figures/`, which Phase 7's
+README embeds — worse than the overlap it was replacing.*
+
+*The standing lesson is therefore sharpened rather than repeated: a figure checkpoint must inspect
+the **artifact as written**, at the dpi it is written at, and a checkpoint's own "pass" is evidence
+about what was looked at, not proof of what is true.)*
 
 ---
 
