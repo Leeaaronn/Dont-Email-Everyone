@@ -1124,13 +1124,35 @@ _POLICY_EVERYONE_COLOUR = "#c65911"
 _POLICY_SELECTED_COLOUR = "#375623"
 
 
-# Inches held clear to the right of the legend, over and above what
-# `tight_layout` reserves. See the comment at the end of
-# `policy_curve_plot` for the measurement this is taken from; it is
-# asserted by
+# Inches held clear below the legend, over and above what `tight_layout`
+# reserves. Defence in depth rather than the load-bearing fix -- see the
+# comment at the end of `policy_curve_plot` for what it defends against and
+# for why the below-axes arrangement is already robust to it. Asserted by
 # `tests/test_plots.py::test_policy_curve_legend_clears_the_axes_and_fits_the_canvas`,
 # which checks the SAVED raster and not only the live figure.
-_POLICY_LEGEND_EDGE_RESERVE_IN = 0.35
+_POLICY_LEGEND_EDGE_RESERVE_IN = 0.10
+
+# The policy curve's canvas width, in inches, and the factor every point
+# size on it is multiplied by.
+#
+# These two are one decision. `st.pyplot` renders with `width="stretch"`,
+# so apparent size in the browser is `points x dpi x (column_px /
+# canvas_px)` -- a wider canvas shrinks every glyph in the same proportion.
+# The width therefore moved as little as the layout allows (8.0 -> 8.6, to
+# keep the plot area above its 666.5 px baseline once the legend block
+# below it is laid out), and the scale puts back exactly what that width
+# increase would otherwise have taken: 8.6/8.0, so apparent type is held.
+#
+# Written as the division of the two figures rather than as 1.075, so the
+# scale cannot silently stop matching the width it compensates for.
+#
+# Deliberately NOT applied by changing `_TITLE_SIZES` or the rcParams: both
+# are shared by all nineteen committed figures, and this is a two-figure
+# change. `_fit_titles` takes a `sizes` ladder for the same reason. Task
+# 3's D-06 drift gate is the check on that -- a third figure appearing in
+# `git status` after `pipeline all` would mean something shared had moved.
+_POLICY_FIGSIZE_IN = 8.6
+_POLICY_FONT_SCALE = _POLICY_FIGSIZE_IN / 8.0
 
 
 def _guard_policy_contrast(contrast):
@@ -1189,12 +1211,20 @@ def _one_value(frame, column, name):
 _TITLE_SIZES = (12.0, 11.0, 10.0, 9.5, 9.0, 8.0, 7.0)
 
 
-def _fit_titles(fig):
+def _fit_titles(fig, sizes=_TITLE_SIZES):
     """Lay `fig` out with every title inside the canvas, or raise.
 
-    Steps each title and figure-level suptitle down through `_TITLE_SIZES`
+    Steps each title and figure-level suptitle down through `sizes`
     until the widest of them fits, re-running `tight_layout` at each size
     because the title's height is part of what the layout solves for.
+
+    `sizes` defaults to `_TITLE_SIZES` and every factory in this module
+    takes that default except `policy_curve_plot`, which draws on a wider
+    canvas and passes the same ladder scaled up so its type holds its
+    APPARENT size in the browser. The parameter exists so that scaling is
+    local to one factory: `_TITLE_SIZES` is shared by all of them, and
+    editing it would move the type on all nineteen committed figures to
+    fix two.
 
     Raises rather than publishing a clipped title. The figure is closed on
     the way out: every other guard in this module fires before `subplots`
@@ -1208,7 +1238,7 @@ def _fit_titles(fig):
     if not artists:
         fig.tight_layout()
         return
-    for size in _TITLE_SIZES:
+    for size in sizes:
         for artist in artists:
             artist.set_fontsize(size)
         fig.tight_layout()
@@ -1223,7 +1253,7 @@ def _fit_titles(fig):
     plt.close(fig)
     raise ValueError(
         "a title is wider than the canvas at every size down to "
-        f"{_TITLE_SIZES[-1]} points and would be published clipped at both "
+        f"{sizes[-1]} points and would be published clipped at both "
         f"ends: {longest!r}. Shorten it, or split it over a second line "
         "with a newline."
     )
@@ -1428,33 +1458,38 @@ def policy_curve_plot(
     drawn_hi = hi * scale
     covers_zero = (lo <= 0.0) & (hi >= 0.0)
 
-    # Wider than this module's other figures, and the width is a
-    # measurement rather than a preference. The legend is anchored OUTSIDE
-    # the axes (see the `bbox_to_anchor` call below), so it needs a column
-    # of its own, and `tight_layout` takes that column out of the canvas.
-    # Leaving the width at 8.0 in would have paid for the legend with the
-    # curve's own room, trading one legibility defect for another.
+    # THE LEGEND GOES BELOW THE PLOT, NOT BESIDE IT, AND THE CANVAS GROWS
+    # IN HEIGHT RATHER THAN IN WIDTH.
     #
-    # Measured through this factory on matplotlib 3.11.1, across both
-    # published rankings and both outcomes. Before the legend moved out,
-    # an 800 px canvas gave the plot 666.5 px; that is the floor the width
-    # has to clear, and the binding cell is uplift_womens_conversion on
-    # visit, whose wider y tick labels leave it ~9 px narrower than the
-    # headline spend cell:
+    # The legend has to leave the plot area: in-axes it crossed the
+    # selection rule and covered the curve (reported from the deployed app,
+    # 2026-09-11). The question is where the room comes from, and the answer
+    # is forced by how the app displays this figure. `st.pyplot` renders
+    # with `width="stretch"`, so the figure is scaled to the COLUMN width
+    # and apparent size on screen is proportional to `1 / canvas_width`.
+    # Nothing depends on canvas HEIGHT, because the page scrolls.
     #
-    #     canvas in | narrowest plot px | headline spend px
-    #          10.6 |             611.8 |             620.8
-    #          11.0 |             651.2 |             660.2
-    #          11.2 |             670.9 |             679.9
-    #          11.6 |             675.2 |             684.2   <- with the
-    #                                       right-hand reserve below applied
+    # Taking the room out of the width was measured and rejected. At
+    # 11.6 in with the legend in a right-hand column the plot is 684 px --
+    # no narrower in drawn pixels -- but every glyph renders at 8.0/11.6 =
+    # 69% of its former apparent size, and 06-UI-SPEC.md:723 already puts
+    # the 7.5 pt legend near the floor at ~9.5 CSS px. Scaling the type back
+    # up does not rescue it: type and legend then grow together with the
+    # canvas and the layout becomes scale-INVARIANT. Measured on the
+    # headline spend cell, holding apparent type at 1.00x:
     #
-    # 11.6 in is the width at which every cell the app can draw is still at
-    # least as wide as it was before, AFTER the reserve taken out of the
-    # right margin further down. The legend's own column measures 309.3 px
-    # and does not change with the sixth entry, because the anchor's
-    # three-line entry is the widest either way.
-    fig, ax = plt.subplots(figsize=(11.6, 5.6))
+    #     canvas in | font scale | plot px | plot apparent
+    #          11.6 |       1.45 |   486.4 |        0.50x
+    #          15.0 |      1.875 |   642.6 |        0.51x
+    #
+    # Widening the canvas buys nothing at all once the type follows it. A
+    # side legend costs half the plot's on-screen width at any width.
+    #
+    # Below the axes it costs height instead, which the app does not charge
+    # for. At 8.6 x 7.5 in the plot keeps 674 px -- above its 666.5 px
+    # baseline -- and apparent type is held exactly, because the canvas
+    # grew only 8.6/8.0 and `_POLICY_FONT_SCALE` puts that back.
+    fig, ax = plt.subplots(figsize=(_POLICY_FIGSIZE_IN, 7.5))
 
     # Pinned, never auto-scaled, the same rule the Love plot's x limits and
     # the calibration plot's follow: the reader's question is whether the
@@ -1538,10 +1573,35 @@ def policy_curve_plot(
         f" to {_policy_value_text(hi[at], unit)})\n"
         "committed before this curve existed; not an optimum"
     )
+    # WHEN THE SELECTION LANDS ON THE ANCHOR, THE ANCHOR IS DRAWN WIDER.
+    #
+    # The two rules encode the same quantity, k, so when the reviewer picks
+    # the pre-registered depth they coincide EXACTLY. The selection is drawn
+    # last and on top (see the comment at its own draw site), so before this
+    # the anchor was perfectly occluded: no purple pixel existed anywhere on
+    # the canvas while the legend went on advertising a purple dashed rule
+    # with its own value and 95% interval. A legend entry for an invisible
+    # element is a worse defect than the legend overlap this figure's
+    # geometry was rebuilt to fix -- and k = 20% is the app's DEFAULT depth,
+    # so that was the FIRST-PAINT view, reported on 2026-09-11.
+    #
+    # The remedy is differential width, not offset and not colour. Neither
+    # line may move: both encode k, and nudging one to expose the other
+    # would make the figure lie about where the anchor sits. Neither colour
+    # may change: `_POLICY_ANCHOR_COLOUR` and `_POLICY_SELECTED_COLOUR` are
+    # referenced outside this module, including by the app's own tests. So
+    # the anchor is drawn WIDER underneath and the selection NARROWER on
+    # top, and the purple reads as a halo on both sides of the green.
+    #
+    # It is applied ONLY when they coincide. Every other depth -- and every
+    # committed PNG, which passes no selection at all -- keeps the 1.4 pt
+    # rule and the 6 pt marker exactly as before, so this remedy cannot
+    # change a figure that did not have the defect.
+    coincides = selected is not None and bool(np.isclose(selected, anchor))
     ax.axvline(
         anchor,
         color=_POLICY_ANCHOR_COLOUR,
-        lw=1.4,
+        lw=4.2 if coincides else 1.4,
         ls="--",
         zorder=4,
         label=anchor_text,
@@ -1550,7 +1610,7 @@ def policy_curve_plot(
         [anchor],
         [drawn[at]],
         marker="o",
-        markersize=6,
+        markersize=13 if coincides else 6,
         linestyle="none",
         color=_POLICY_ANCHOR_COLOUR,
         zorder=5,
@@ -1572,26 +1632,44 @@ def policy_curve_plot(
         ),
     )
 
+    # Every point size below is `_POLICY_FONT_SCALE` times the module
+    # default it replaces, so this figure's type holds its apparent size in
+    # the browser on the wider canvas. The defaults are read from the
+    # rcParams rather than hardcoded, so a future change to the module's
+    # base size still carries here.
+    label_pt = plt.rcParams["font.size"] * _POLICY_FONT_SCALE
+    tick_pt = plt.rcParams["font.size"] * _POLICY_FONT_SCALE
+
     # D-07: the percentage carries the meaning and the count carries the
     # reality, so both are on the canvas and neither is left to a caption.
     ax.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax.set_xlabel(
         f"Targeting depth k (percentage of the {n_frame:,}-customer "
-        "evaluation frame)"
+        "evaluation frame)",
+        fontsize=label_pt,
     )
+    ax.tick_params(axis="both", labelsize=tick_pt)
     counts = ax.secondary_xaxis(
         "top",
         functions=(lambda x: x * n_frame, lambda n: n / n_frame),
     )
-    counts.set_xlabel("Emails sent at that depth (customers)")
+    counts.set_xlabel(
+        "Emails sent at that depth (customers)", fontsize=label_pt
+    )
+    counts.tick_params(axis="both", labelsize=tick_pt)
     counts.xaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}"))
 
     ax.set_ylabel(
         f"Incremental {OUTCOME_NOUN[outcome]} {spec['phrase']}\n"
-        f"({_POLICY_GRAIN_LABEL[(unit, spec['grain'])]})"
+        f"({_POLICY_GRAIN_LABEL[(unit, spec['grain'])]})",
+        fontsize=label_pt,
     )
     if title is not None:
-        ax.set_title(title, pad=28)
+        # `pad` is a gap in points, not a size, and it scales for the
+        # same reason: it exists to clear the secondary axis above, whose
+        # label and ticks just grew by the same factor. Left at 28 the
+        # title would sit on them.
+        ax.set_title(title, pad=28 * _POLICY_FONT_SCALE)
     # The reviewer's current selection, drawn LAST so that its legend
     # entry is the sixth and the anchor's three-line entry keeps the
     # position it holds in every committed figure. Guarded far above,
@@ -1606,6 +1684,19 @@ def policy_curve_plot(
         # zorder 6 and 7 sit above the anchor's 4 and 5 deliberately, so a
         # selection landing exactly on k = 0.20 is drawn ON TOP of the
         # pre-registered anchor rather than vanishing underneath it.
+        #
+        # That ordering is KEPT, and what made it safe changed on
+        # 2026-09-11. It only ever protected the selection, and it did so by
+        # sacrificing the anchor: at k = 20% the anchor was occluded
+        # completely while its legend entry still described a purple rule
+        # that appeared nowhere on the canvas. The guarantee that both are
+        # now readable is no longer the ordering -- it is the differential
+        # WIDTH applied at the anchor's draw site above, which leaves the
+        # wider purple rule showing as a halo either side of this one and
+        # the purple marker showing as a ring around this diamond. The
+        # ordering now decides only which of two visible things is in
+        # front. `test_policy_curve_anchor_survives_a_selection_on_top_of_it`
+        # measures that, at this exact depth.
         #
         # The count is `n_targeted[sat]`, the frame's own realized email
         # count at that depth, never arithmetic on `n_frame`.
@@ -1659,44 +1750,63 @@ def policy_curve_plot(
     # None of that removes the human check. 05-08 found three real defects
     # by opening PNGs every automated check had passed, and this defect was
     # the fourth.
+    # Anchored to the axes' BOTTOM-left and hanging below it. Two columns,
+    # because one would be six stacked rows of which the anchor's is three
+    # lines, and the block would be taller than it is wide.
     ax.legend(
         loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
+        bbox_to_anchor=(0.0, -0.15),
         borderaxespad=0.0,
-        fontsize=7.5,
+        ncol=2,
+        fontsize=7.5 * _POLICY_FONT_SCALE,
         framealpha=0.92,
     )
-    _fit_titles(fig)
+    # The shared title ladder, scaled by the same factor as everything else
+    # on this figure. `_fit_titles` still steps DOWN through it and still
+    # raises rather than publishing a clipped title, so the Phase 4
+    # guarantee is unchanged -- only the rungs moved, and only here.
+    _fit_titles(
+        fig, sizes=tuple(size * _POLICY_FONT_SCALE for size in _TITLE_SIZES)
+    )
 
-    # An explicit right-hand reserve, taken AFTER `_fit_titles` because
+    # A small bottom reserve, taken AFTER `_fit_titles` because
     # `_fit_titles` runs `tight_layout`, which would undo anything set
     # before it.
     #
-    # This exists because `tight_layout`'s own reservation is not enough,
-    # and the reason is a trap worth naming. The layout is solved at the
-    # FIGURE's dpi, and the PNG is rasterized at `savefig`'s -- 100 and 150
-    # here. Glyph advances are hinted to whole pixels, so a 7.5 pt legend
+    # What it defends against is a trap worth naming. The layout is solved
+    # at the FIGURE's dpi and the PNG is rasterized at `savefig`'s -- 100
+    # and 150 here. Glyph advances are hinted to whole pixels, so a legend
     # string is not the same fraction of the canvas at the two dpis, and
-    # the text outgrows the frame that was sized for it. Measured on the
-    # headline spend cell at 11.2 in with no reserve, right-hand ink margin
-    # of the saved PNG:
+    # the text can outgrow the frame that was sized for it. An earlier
+    # version of this figure put the legend in a right-hand COLUMN, where
+    # the legend box ended a few pixels short of the canvas and that growth
+    # had nowhere to go. Right-hand ink margin of the saved file:
     #
     #     save dpi | 100 | 150 | 200 | 300
-    #       margin |  17 |   0 |   0 |   1     <- px, clipped at 150 and 200
+    #       margin |  17 |   0 |   0 |   1   <- px, clipped at 150 and 200
     #
-    # 150 is exactly what `pipeline.py` saves at. The legend looked correct
-    # in every extent measured against the live figure and shipped CLIPPED
-    # into `reports/figures/`, which is worse than the overlap it replaced.
-    # With this reserve the same measurement reads 46 / 65 px at 150 / 200
-    # on the tightest of the four cells.
+    # 150 is exactly what `pipeline.py` saves at, and every extent measured
+    # against the live figure reported 18.8 px of clearance while the file
+    # shipped cut off -- into `reports/figures/`, which Phase 7's README
+    # embeds. A figure is not correct because its artists report the right
+    # numbers; it is correct because the file a reader opens is readable.
     #
-    # The reserve is in INCHES, so it does not itself depend on the
-    # figure's dpi, and the axes is pulled left rather than the legend
-    # being nudged -- the legend is anchored to the axes' right edge, so
-    # moving the axes moves it, and the two cannot drift apart.
+    # Below the axes the same growth is harmless: the legend is anchored
+    # left and spans 626 px of an 860 px canvas, so there are 200-odd px of
+    # slack on the right that hinting cannot consume. Measured at this
+    # geometry with the reserve set to zero, margins hold at 34 / 57 / 96 /
+    # 89 px (right) and 36 / 58 / 78 / 116 px (bottom) across dpi 100 to
+    # 300. The reserve is kept small and deliberate rather than dropped,
+    # because the failure above was invisible to every check that did not
+    # read the raster.
+    #
+    # The axes is pulled UP rather than the legend nudged down: the legend
+    # is anchored to the axes' bottom edge, so moving the axes moves it and
+    # the two cannot drift apart. In INCHES, so it does not itself depend
+    # on the figure's dpi.
     position = ax.get_position()
     fig.subplots_adjust(
-        right=position.x1 - _POLICY_LEGEND_EDGE_RESERVE_IN / fig.get_figwidth()
+        bottom=position.y0 + _POLICY_LEGEND_EDGE_RESERVE_IN / fig.get_figheight()
     )
     return fig
 

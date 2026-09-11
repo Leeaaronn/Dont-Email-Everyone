@@ -47,6 +47,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib.collections import PolyCollection  # noqa: E402
+from matplotlib.colors import to_rgb  # noqa: E402
 
 from dont_email_everyone import (  # noqa: E402
     ate,
@@ -1936,6 +1937,167 @@ def test_policy_curve_legend_clears_the_axes_and_fits_the_canvas(
             )
     finally:
         plt.close(fig)
+    assert plt.get_fignums() == []
+
+
+def _colour_pixel_count(path, colour, tolerance=0.08):
+    """How many pixels of a saved PNG carry (close to) `colour`.
+
+    Counting rendered PIXELS rather than inspecting artists, because the
+    defect this measures is an artist that exists, reports every correct
+    property, and is not visible: an occluded line is still in `ax.lines`
+    with its own colour and its own linewidth.
+    """
+    image = plt.imread(path)[..., :3]
+    target = np.array(to_rgb(colour))
+    return int((np.abs(image - target).max(axis=2) < tolerance).sum())
+
+
+def _vertical_lines_at(ax, x):
+    """Every vertical Line2D drawn at `x`, not merely the first one."""
+    found = []
+    for line in ax.lines:
+        xdata = line.get_xdata()
+        if (
+            len(xdata) == 2
+            and xdata[0] == xdata[1]
+            and np.isclose(float(xdata[0]), x)
+        ):
+            found.append(line)
+    return found
+
+
+def test_policy_curve_anchor_survives_a_selection_on_top_of_it(
+    policy_curve_frame, policy_band_frame, tmp_path
+):
+    """At k = 20% the anchor and the selection coincide. Both must be read.
+
+    The two rules encode the same quantity, so choosing the pre-registered
+    depth puts them at exactly the same x. The selection is drawn last and
+    above, which used to mean the anchor was occluded COMPLETELY: no pixel
+    of `_POLICY_ANCHOR_COLOUR` survived anywhere on the plot, while the
+    legend went on describing a purple dashed rule with its own value and
+    its own 95% interval. A legend entry for an invisible element is a
+    worse defect than the legend overlap this figure was rebuilt to fix.
+
+    It mattered because k = 20% is the app's DEFAULT depth, so the occluded
+    state was the first-paint view -- the first thing a reviewer sees.
+
+    Measured on the headline spend cell at dpi 150, pixels carrying the
+    anchor's colour:
+
+        no selection passed            1375
+        selection at k = 20%, before     66   <- the legend swatch, and
+                                               nothing on the plot at all
+        selection at k = 20%, after    2567
+
+    So the assertion is that the anchor is no LESS visible when something
+    is drawn on top of it than when nothing is. A structural check that
+    both lines exist would pass on the broken figure: both always existed.
+    """
+    plt.close("all")
+    anchor = economics.HEADLINE_CAPACITY
+    shared = dict(
+        contrast="delta_random",
+        unit="$",
+        anchor=anchor,
+        title=(
+            "Targeted top-k against a random send of the same size\n"
+            "Ranking: uplift_womens_visit    Outcome: spend"
+        ),
+    )
+    bare = plots.policy_curve_plot(
+        policy_curve_frame, policy_band_frame, **shared
+    )
+    on_top = plots.policy_curve_plot(
+        policy_curve_frame, policy_band_frame, selected=anchor, **shared
+    )
+    elsewhere = plots.policy_curve_plot(
+        policy_curve_frame, policy_band_frame, selected=0.01, **shared
+    )
+    try:
+        counts = {}
+        for name, fig in (
+            ("bare", bare),
+            ("on_top", on_top),
+            ("elsewhere", elsewhere),
+        ):
+            path = tmp_path / ("anchor_" + name + ".png")
+            fig.savefig(path, dpi=150)
+            counts[name] = _colour_pixel_count(
+                path, plots._POLICY_ANCHOR_COLOUR
+            )
+        assert counts["on_top"] >= counts["bare"], (
+            "the pre-registered anchor loses visibility when the selection "
+            f"lands on it: {counts['on_top']} px of "
+            f"{plots._POLICY_ANCHOR_COLOUR} with the selection at k = "
+            f"{anchor:.0%}, against {counts['bare']} px with no selection "
+            f"passed (and {counts['elsewhere']} px with the selection "
+            "elsewhere). Before the differential width was added this read "
+            "66 -- the legend swatch alone, with no purple on the plot at "
+            "all, under a legend entry still describing the rule. k = 20% "
+            "is the app's DEFAULT depth, so this is the first-paint view."
+        )
+
+        # A remedy for occlusion, not a reversal of which artist is
+        # occluded: the selection has to stay readable too.
+        green_on_top = _colour_pixel_count(
+            tmp_path / "anchor_on_top.png", plots._POLICY_SELECTED_COLOUR
+        )
+        green_elsewhere = _colour_pixel_count(
+            tmp_path / "anchor_elsewhere.png", plots._POLICY_SELECTED_COLOUR
+        )
+        assert green_on_top >= 0.5 * green_elsewhere, (
+            f"the selection is now the occluded one: {green_on_top} px of "
+            f"{plots._POLICY_SELECTED_COLOUR} at the coinciding depth "
+            f"against {green_elsewhere} px where the two do not coincide"
+        )
+
+        # The structural half, which says WHY the pixels came back.
+        at_anchor = _vertical_lines_at(on_top.axes[0], anchor)
+        assert len(at_anchor) == 2, (
+            "expected the anchor rule and the selection rule at k = "
+            f"{anchor:.0%}, found {len(at_anchor)} vertical line(s)"
+        )
+        by_colour = {line.get_color(): line for line in at_anchor}
+        anchor_line = by_colour[plots._POLICY_ANCHOR_COLOUR]
+        selected_line = by_colour[plots._POLICY_SELECTED_COLOUR]
+        assert anchor_line.get_linewidth() > selected_line.get_linewidth(), (
+            "where they coincide the anchor must be the wider rule, so the "
+            "narrower selection reads as a line down its middle: measured "
+            f"anchor {anchor_line.get_linewidth()} pt against selection "
+            f"{selected_line.get_linewidth()} pt"
+        )
+
+        # Neither rule moved. Both encode k, and offsetting one to expose
+        # the other would make the figure lie about where the anchor sits.
+        assert float(anchor_line.get_xdata()[0]) == float(
+            selected_line.get_xdata()[0]
+        ), "one of the two rules was offset to expose the other"
+
+        # And the remedy must not touch a figure that never had the defect.
+        away = _vertical_lines_at(elsewhere.axes[0], anchor)
+        assert len(away) == 1 and away[0].get_linewidth() == 1.4, (
+            "the anchor was widened at a depth where nothing overlaps it; "
+            "the remedy is conditional on coincidence precisely so that "
+            "every other depth -- and every committed PNG, which passes no "
+            "selection at all -- is left exactly as it was"
+        )
+        bare_anchor = _vertical_lines_at(bare.axes[0], anchor)
+        assert len(bare_anchor) == 1
+        assert bare_anchor[0].get_linewidth() == 1.4
+
+        # The legend still names both, and still has six entries.
+        texts = [
+            text.get_text()
+            for text in on_top.axes[0].get_legend().get_texts()
+        ]
+        assert len(texts) == 6, texts
+        assert any("Pre-registered anchor" in text for text in texts), texts
+        assert any("Selected k" in text for text in texts), texts
+    finally:
+        for fig in (bare, on_top, elsewhere):
+            plt.close(fig)
     assert plt.get_fignums() == []
 
 
