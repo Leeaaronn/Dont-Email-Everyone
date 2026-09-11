@@ -48,9 +48,11 @@ of them back into the defect it was chosen to avoid.
     one statement here, so the close survives the raise. `render` is also
     the ONLY place the pyplot element is called in this module, which turns
     "every figure is closed after it is rendered" from a discipline into a
-    count, the same way
-    `tests/test_pipeline.py::test_pipeline_pairs_every_savefig_with_a_close`
-    turned the pipeline's own version of the property into one.
+    count, the same way `tests/test_pipeline.py`'s figure-write pairing
+    test turned the pipeline's own version of the property into one. That
+    test's name is not spelled out here: it contains a token this module's
+    own purity sweep counts, and a docstring naming a counted token is how
+    an equality stops proving what it says.
 
 (e) WHY THE ENTRYPOINT IS AT THE REPOSITORY ROOT. Community Cloud searches
     the entrypoint's own directory before the repository root for a
