@@ -1750,6 +1750,125 @@ def test_policy_curve_plot_draws_nothing_new_when_selected_is_none(
     assert plt.get_fignums() == []
 
 
+# The px floor the plot area may not fall below. Measured on the committed
+# headline spend cell at the geometry this repo shipped before the legend
+# moved outside the axes: an 800 px canvas gave the axes 666.5 px. The fix
+# for the overlap must not be paid for by shrinking the plot, so the floor
+# is the old plot width rather than a fraction of the new canvas.
+_POLICY_AXES_WIDTH_FLOOR_PX = 666.0
+
+
+@pytest.mark.parametrize("selected", [None, 0.37])
+def test_policy_curve_legend_clears_the_axes_and_fits_the_canvas(
+    policy_curve_frame, policy_band_frame, selected
+):
+    """The legend box may touch neither the plot area nor the canvas edge.
+
+    The defect this pins was reported from the DEPLOYED app on 2026-09-11,
+    after the full suite was green and after the phase's own UI legibility
+    checkpoint had already passed the figure: the six-entry legend sat in
+    the upper left INSIDE the axes, the selection rule ran through it and
+    the box covered part of the curve. Nothing mechanical caught it because
+    nothing measured where the legend was drawn.
+
+    So this asserts on the rendered bboxes, never on `loc`. `loc="upper
+    left"` with `bbox_to_anchor` outside the axes and `loc="upper left"`
+    with the box squarely on the curve are the same string; only the
+    extents tell them apart.
+
+    The canvas half is the one that guards the COMMITTED PNG.
+    `pipeline.py` writes these figures with `savefig(path, dpi=150)` and no
+    `bbox_inches`, so the canvas is all there is -- an outside-axes legend
+    that matplotlib has not reserved room for is simply cut off. Streamlit
+    saves the same figure with `bbox_inches="tight"` and would hide exactly
+    that, which is why the assertion is made here and not in the app's
+    render path.
+
+    Both legend sizes are checked: five entries with no selection, six with
+    one, the sixth being the case the user reported.
+    """
+    plt.close("all")
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected,
+        title=(
+            "Targeted top-k against a random send of the same size\n"
+            "Ranking: uplift_womens_visit    Outcome: spend"
+        ),
+    )
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ax = fig.axes[0]
+        legend = ax.get_legend()
+        assert legend is not None, "the policy curve drew no legend at all"
+
+        entries = len(legend.get_texts())
+        expected_entries = 5 if selected is None else 6
+        assert entries == expected_entries, (
+            f"expected {expected_entries} legend entries at "
+            f"selected={selected}, measured {entries}; the geometry below "
+            "is only meaningful for the legend this figure actually draws"
+        )
+
+        box = legend.get_window_extent(renderer)
+        axes_box = ax.get_window_extent(renderer)
+
+        # The overlap itself. Reported as the intersected rectangle, not as
+        # a bare False, so a failure says HOW far onto the plot the legend
+        # has come back.
+        overlap_w = min(box.x1, axes_box.x1) - max(box.x0, axes_box.x0)
+        overlap_h = min(box.y1, axes_box.y1) - max(box.y0, axes_box.y0)
+        assert overlap_w <= 0.0 or overlap_h <= 0.0, (
+            f"the legend overlaps the plot area by {overlap_w:.1f} x "
+            f"{overlap_h:.1f} px at selected={selected}: legend "
+            f"x=({box.x0:.1f}, {box.x1:.1f}) y=({box.y0:.1f}, {box.y1:.1f}), "
+            f"axes x=({axes_box.x0:.1f}, {axes_box.x1:.1f}) "
+            f"y=({axes_box.y0:.1f}, {axes_box.y1:.1f}). This is the "
+            "2026-09-11 defect: the box sits on the curve it describes."
+        )
+
+        # The clipping half. `reports/figures/policy_curve_womens_visit_*.png`
+        # are written with no crop, and Phase 7's README embeds them; a
+        # legend cut off at the right edge there is worse than the overlap
+        # it replaced.
+        canvas = fig.bbox
+        outside = {
+            "left": canvas.x0 - box.x0,
+            "right": box.x1 - canvas.x1,
+            "bottom": canvas.y0 - box.y0,
+            "top": box.y1 - canvas.y1,
+        }
+        over = {
+            edge: round(px, 1) for edge, px in outside.items() if px > 0.5
+        }
+        assert not over, (
+            f"the legend runs off the canvas at selected={selected} by "
+            f"{over} px; canvas is {canvas.width:.1f} x "
+            f"{canvas.height:.1f} px and the legend is "
+            f"x=({box.x0:.1f}, {box.x1:.1f}) y=({box.y0:.1f}, {box.y1:.1f}). "
+            "savefig carries no bbox_inches, so this legend ships clipped."
+        )
+
+        # The plot must not pay for the legend's column. At the pre-change
+        # 8.0 in width, moving the legend outside collapses the axes to
+        # about 421 px, which trades one legibility defect for another.
+        assert axes_box.width >= _POLICY_AXES_WIDTH_FLOOR_PX, (
+            f"the plot area measured {axes_box.width:.1f} px wide at "
+            f"selected={selected}, below the {_POLICY_AXES_WIDTH_FLOOR_PX} "
+            "px this figure had before the legend moved out of the axes. "
+            f"The canvas is {canvas.width:.1f} px; widen it rather than "
+            "letting the legend take the curve's room."
+        )
+    finally:
+        plt.close(fig)
+    assert plt.get_fignums() == []
+
+
 # --------------------------------------------------------------------------
 # cost_sweep_plot
 # --------------------------------------------------------------------------
