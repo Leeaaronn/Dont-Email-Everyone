@@ -77,7 +77,7 @@ All three tasks are done and committed. Two observations the deploy checkpoint a
 |---|---|---|
 | 1 — Deployment readiness gate and the exact parameter set | auto | Done, `d4d8a81` |
 | 2 — Deploy to Community Cloud | `checkpoint:human-action`, `gate="blocking"` | Returned, then cleared by the user. App is live |
-| 3 — Record the live link in the README and put a test behind it | auto | Done, `a96b71c` |
+| 3 — Record the live link in the README and put a test behind it | auto | Done, `ce4357e` |
 
 ## Performance
 
@@ -161,7 +161,7 @@ The two added blocks sit directly under the H1: the labelled live-app line, and 
 
 That sentence is not decoration. Without it a reviewer who lands on a cold app concludes the deployment is broken — which is strictly worse than no link at all, because they now hold evidence *against* the project rather than none for it.
 
-**`test_readme_carries_the_live_app_link`** (commit `a96b71c`, +80 lines with its constants):
+**`test_readme_carries_the_live_app_link`** (commit `ce4357e`, +80 lines with its constants):
 
 - The link is matched by **`re.compile(r"https://[a-z0-9-]+\.streamlit\.app")`**, never by the literal subdomain. The subdomain moved twice during this plan; a literal pin would already have failed, and its obvious repair — editing the constant — teaches the next person to edit the test whenever the deployment moves. Criterion 5 asks for *a* live link, not a particular one.
 - The sleep note is keyed on **two** phrases (`12 hours without traffic`, `get this app back up`) rather than one sentence, so a rewording survives and a deletion does not. The second is Streamlit's own button text, quoted in ROADMAP criterion 5, which ties the README to what the visitor actually sees.
@@ -173,9 +173,17 @@ That sentence is not decoration. Without it a reviewer who lands on a cold app c
 
 1. **Task 1: Deployment readiness gate and the exact parameter set** — `d4d8a81` (test)
 2. **Task 2: Deploy to Community Cloud** — no commit; the deployment is browser state, not repository state, which is the entire reason the tuple above exists
-3. **Task 3: Record the live link in the README and put a test behind it** — `a96b71c` (docs)
+3. **Task 3: Record the live link in the README and put a test behind it** — `ce4357e` (docs)
 
 Interim checkpoint bookkeeping: `dda01a3` (partial summary), `a64960a` (STATE/ROADMAP at the checkpoint).
+
+> **Commit hashes note (2026-09-11):** `ce4357e` and the metadata commit are post-rebase hashes.
+> While this plan was executing, the repository owner pushed `2b52930` ("Added Dev Container Folder",
+> a `.devcontainer/devcontainer.json` from Streamlit's Codespaces template) directly to `origin/main`.
+> The two local commits were rebased onto it rather than force-pushed. The devcontainer sits under
+> `.devcontainer/`, which is **not** in Community Cloud's dependency search path (entrypoint directory,
+> then repository root), so `test_no_competing_dependency_file_exists` is unaffected and was re-run
+> green after the rebase.
 
 ## Files Created/Modified
 
@@ -236,5 +244,5 @@ The deploy is done. Two things remain for a human, both in the Community Cloud d
 
 - `tests/test_app.py` exists and carries both `test_no_competing_dependency_file_exists` and `test_readme_carries_the_live_app_link`
 - `README.md` exists and matches `https://[a-z0-9-]+\.streamlit\.app`
-- Commits `d4d8a81` and `a96b71c` exist in git history
+- Commits `d4d8a81` and `ce4357e` exist in git history
 - `.planning/phases/06-streamlit-app-deployment/06-08-SUMMARY.md` exists
