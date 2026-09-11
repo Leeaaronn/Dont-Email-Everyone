@@ -501,12 +501,12 @@ second option is offered at all. **No expander was introduced and V4 is unchange
 | 3.1 | `**Recommendation: with a budget of {n_targeted:,} sends on this {n_frame:,}-customer list, email the top {k:.0%} ranked by predicted uplift rather than {n_targeted:,} customers chosen at random.**` |
 | 3.2 | `Both numbers below come from the same experiment and each carries its 95% interval. Where the interval includes zero, this data cannot show a gain at that depth.` |
 | 3.3 label | `Extra revenue vs a random send of the same size (dollars per customer on the list)` |
-| 3.3 value | `{value:+,.6f}` prefixed with `$` → `+$0.101593` |
+| 3.3 value | `{value:+,.3f}` prefixed with `$` → `+$0.102` *(Amended 2026-09-11 — was `+,.6f` / `+$0.101593`. See the Numbers Discipline note.)* |
 | 3.4 | `95% interval {lo} to {hi}` |
 | 3.5 | one of the three verdict lines, verbatim |
 | 3.6 | `What targeting buys on revenue, for each customer on the list, compared with emailing the same number of people picked at random.` |
 | 3.7 label | `Extra site visits vs a random send of the same size (per customer on the list)` |
-| 3.7 value | `{value:+.6f}` → `+0.006165` |
+| 3.7 value | `{value:+.3f}` → `+0.006` *(Amended 2026-09-11 — was `+.6f` / `+0.006165`. See the Numbers Discipline note.)* |
 | 3.8 | `95% interval {lo} to {hi}` |
 | 3.9 | one of the three verdict lines, verbatim |
 | 3.10 | `What targeting buys on site visits, for each customer on the list, compared with emailing the same number of people picked at random.` |
@@ -611,25 +611,55 @@ plt.close(fig)` so the pair is one statement even when the render raises.
 
 ## Numbers Discipline
 
+*(Amended 2026-09-11 — the two display formats move from **six decimals to three**. The original
+pinned `"$" + f"{v:+,.6f}"` → `+$0.101593` and `f"{v:+.6f}"` → `+0.006165`, described below as
+"chosen to match `reports/policy.md` §5 digit for digit". The reason for the change: the headline
+figures were printing six decimals on quantities whose 95% intervals span roughly `-$0.03` to
+`+$0.30`. That is precision the data does not support, and it reads as false confidence to exactly
+the reviewer this app is written for. Three decimals is the grain the evidence supports.*
+
+*The scope is **the app only**. `reports/policy.md` §5 keeps its six decimals — it is the checkable
+record and keeps every digit it computed, while the app is the reader-facing surface. The two
+documents therefore print one quantity at two precisions **by design**, and that divergence is the
+decision rather than a defect to reconcile. The consequence for the verbatim test below is set out
+in its own amendment.*
+
+*One note disarming the rest of this file: the six-decimal strings elsewhere in this document — the
+Q1 worked-example table above, the shipped-cell row in the model-results table, and the "Every number
+in this contract" provenance table below — are **artifact values as read**, not display strings.
+They are deliberately left exactly as they were read on 2026-09-10. No number in this document is
+recomputed by this amendment.)*
+
 **The app performs no arithmetic on any displayed number.** Every value is read from an artifact
 column and formatted. Checkable by source scan: no `* 100`, `100 *`, `/ 100`, and no unit conversion
-anywhere in the app module. This is why the visit contrast is displayed as the raw rate `+0.006165`
-exactly as `reports/policy.md` §5 prints it, even though the figure directly beneath it uses
+anywhere in the app module. This is why the visit contrast is displayed as the raw rate `+0.006`
+— the same grain `reports/policy.md` §5 prints, at this app's coarser precision *(Amended
+2026-09-11 — was "the raw rate `+0.006165` exactly as `reports/policy.md` §5 prints it". The
+raw-rate claim survives unchanged and is still enforced; only the "exactly as §5 prints it" clause
+is withdrawn, because the app now rounds and the report does not. Rounding changed the grain of the
+digits, never the unit.)* — even though the figure directly beneath it uses
 percentage points on its y axis — `plots.py` owns that scaling through `_UNIT_SCALE`, and the app
 reproducing it would be a second place the grain could be wrong.
 
-Pinned display formats, chosen to match `reports/policy.md` §5 digit for digit:
+Pinned display formats:
 
 | Unit | Format | Example |
 |---|---|---|
-| `$` | `"$" + f"{v:+,.6f}"` | `+$0.101593` |
-| rate (`pp` column, displayed raw) | `f"{v:+.6f}"` | `+0.006165` |
+| `$` | `"$" + f"{v:+,.3f}"` | `+$0.102` *(Amended 2026-09-11 — was `,.6f` / `+$0.101593`. See the note above.)* |
+| rate (`pp` column, displayed raw) | `f"{v:+.3f}"` | `+0.006` *(Amended 2026-09-11 — was `+.6f` / `+0.006165`. See the note above.)* |
 | capacity | `f"{k:.0%}"` | `20%` |
 | counts | `f"{n:,}"` | `4,269` |
 
 **A test this enables, and it should be written:** at first paint every numeric string the app renders
-appears **verbatim** in `reports/policy.md`. The app cannot contradict the evidence document in its
-most-screenshotted state, and the check is a substring search rather than a tolerance.
+is **either** a string `reports/policy.md` carries verbatim **or** the three-decimal rendering of a
+number `reports/policy.md` carries. The app cannot contradict the evidence document in its
+most-screenshotted state: it may print a quantity at coarser grain than the report, but it may not
+publish a quantity the report does not carry at any precision. **Still not a tolerance** — there is
+no epsilon, and every displayed string is matched against a specific report number, either as its own
+string or as that number re-rendered through the pinned formats. *(Amended 2026-09-11 — the original
+read "appears **verbatim** in `reports/policy.md` … and the check is a substring search rather than a
+tolerance". The verbatim-only rule was correct while the two documents shared one convention; the
+second arm is what accommodates the rounding above without weakening the check to a tolerance.)*
 
 ### Every number in this contract, and where it was read
 
@@ -673,7 +703,7 @@ that map does not yet carry.
 | V11 | `st.pyplot(` appears exactly once, inside `render`; `render(` called 3 times | source count | `test_app_pairs_every_st_pyplot_with_a_close` |
 | V12 | `optimism_plot` appears 0 times | source scan | **new** |
 | V13 | No `* 100`, `100 *`, `/ 100`, no unit conversion | source scan | **new** |
-| V14 | Every first-paint numeric string appears verbatim in `reports/policy.md` | substring search | **new** |
+| V14 | Every first-paint numeric string is either carried verbatim by `reports/policy.md` or is the three-decimal rounding of a number it carries *(Amended 2026-09-11 — was "appears verbatim in `reports/policy.md`" / "substring search". See the Numbers Discipline note.)* | substring search plus report-number rounding | **new** |
 | V15 | The zero-by-construction line is present under both policy curves | AppTest caption substring | `test_every_number_has_a_caption_and_the_footer_is_complete` |
 | V16 | Footer carries the 2008 vintage and the two-week window; contains no `64,000`, no `unproven_`, none of `test_no_network.FORBIDDEN` | AppTest + source scan | same, plus `tests/test_no_network.py` |
 | V17 | `.streamlit/config.toml` sets `gatherUsageStats = false` | file parse | `test_telemetry_is_disabled` |
