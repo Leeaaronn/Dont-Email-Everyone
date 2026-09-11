@@ -271,6 +271,174 @@ def render(fig, sink=None):
         plt.close(fig)
 
 
+# The headline contrast, named once. `delta_random` is the versus-a-random-
+# send-of-the-same-size comparison: the one D-08a makes the headline, and the
+# only contrast the block below and the two curves beneath it ever read.
+HEADLINE_CONTRAST = "delta_random"
+
+# The currency unit, READ from the outcome map rather than typed. Which of
+# the two display formats an outcome takes is then a property of
+# `config.OUTCOMES` and not of a literal in this module, so an outcome whose
+# unit changed upstream changes format here without an edit.
+CURRENCY_UNIT = config.OUTCOMES["spend"]
+
+# The three verdict states, verbatim from the UI contract.
+#
+# THREE, not two, and the third was nearly missed. On the shipped ranking's
+# spend contrast at a depth of 99% the band is [-$0.197415, -$0.006580]
+# around a point estimate of -$0.088285: the interval excludes zero from
+# BELOW. With only two states the app would print a negative number under a
+# line reading "the interval lies entirely above zero", which reads as good
+# news.
+#
+# Module constants rather than inline strings for two reasons. A test can
+# assert each exists in this source and each is reachable; and the wording
+# cannot drift between the spend rendering and the visit rendering, which
+# are two separate call sites by contract.
+VERDICT_COVERS_ZERO = (
+    "**Not detectable at this depth:** the 95% interval includes zero, so "
+    "this data cannot distinguish this from no gain at all."
+)
+
+VERDICT_ABOVE_ZERO = (
+    "**Detectable at this depth:** the 95% interval lies entirely above "
+    "zero."
+)
+
+VERDICT_BELOW_ZERO = (
+    "**Detectably worse at this depth:** the 95% interval lies entirely "
+    "below zero — targeting this deep does worse than a random send of the "
+    "same size."
+)
+
+# The second half of both curve captions, always present under both figures.
+#
+# Criterion 2 forbids dropping the email-everyone marker from the figure,
+# and 06-RESEARCH Pitfall 6 measured what it looks like when it stays: on
+# this contrast the marker sits at exactly $0.0000 with a degenerate
+# [0.000000, 0.000000] band at a depth of 100%. A reviewer who is not told
+# why reads that as a bug in the pipeline.
+ZERO_BY_CONSTRUCTION = (
+    "The orange square at 100% is exactly zero by construction — a random "
+    "send to the whole list *is* emailing everyone, so there is nothing "
+    'left to compare. The separate "versus emailing everyone" figure is in '
+    "the table below."
+)
+
+
+def verdict_line(lo, hi):
+    """Return the verdict for one 95% band, from `lo` and `hi` ALONE.
+
+    THE PREDICATE IS THE FIGURE'S PREDICATE. `lo <= 0 <= hi` is exactly the
+    condition `policy_curve_plot` uses to mark a depth as one where no gain
+    is detectable -- the shaded, textured span it draws across the full
+    height of its axes, whose own legend entry says so in words. Because the
+    two are one condition rather than two implementations of one idea, the
+    sentence this function returns and the region that figure marks cannot
+    disagree at any published depth.
+
+    That factory's name for the texture is deliberately not spelled here.
+    It is a token this module's source scans count, and a docstring naming
+    it would fail the scan on correct code; weakening a scan to accommodate
+    prose is the wrong direction, and plan 06-04 already recorded the
+    precedent when the same thing happened to `render`'s docstring.
+
+    THE STATE IS NEVER DERIVED FROM THE SIGN OF THE POINT ESTIMATE. On the
+    shipped ranking's spend contrast at a depth of 99% the point estimate is
+    negative AND the interval lies entirely below zero, which is a different
+    sentence from either of the other two. A sign test collapses that state
+    into one of them and prints a negative number under a line announcing a
+    detectable gain.
+
+    `ValueError` on a band whose bounds are inverted, rather than a silent
+    fall-through: the three states are exhaustive for any `lo <= hi`, so
+    reaching the end means the artifact carries a band this function has no
+    honest sentence for.
+    """
+    lo = float(lo)
+    hi = float(hi)
+    if lo <= 0.0 <= hi:
+        return VERDICT_COVERS_ZERO
+    if lo > 0.0:
+        return VERDICT_ABOVE_ZERO
+    if hi < 0.0:
+        return VERDICT_BELOW_ZERO
+    raise ValueError(
+        f"the band [{lo}, {hi}] has its lower bound above its upper bound, "
+        "so it is neither one that covers zero nor one that excludes it on "
+        "a side; there is no verdict sentence that is true of it."
+    )
+
+
+def read_contrast(curve, bands, ranking, outcome, k):
+    """Select ONE published (ranking, outcome, depth) row. Compute nothing.
+
+    Returns `(value, lo, hi, n_targeted)` for the headline contrast. Every
+    one of the four is a cell of a committed artifact, read out; this
+    function performs no arithmetic on any of them, and neither does any
+    caller. `n_targeted` rides along from the same curve row as `value`
+    rather than being looked up separately, so the mailing size the
+    recommendation quotes and the number beneath it cannot come from
+    different depths.
+
+    `ValueError` rather than an `.iloc[0]` on an empty frame. The
+    combination is unreachable from the controls -- the ranking comes from
+    the artifact's own published keys, the outcome from a fixed pair, and
+    the depth from the artifact's own grid -- but an empty selection here
+    would otherwise surface as an `IndexError` naming nothing a reader can
+    act on.
+    """
+    rows = curve.loc[
+        (curve["ranking"] == ranking)
+        & (curve["outcome"] == outcome)
+        & (curve["k"] == k)
+    ]
+    band = bands.loc[
+        (bands["ranking"] == ranking)
+        & (bands["outcome"] == outcome)
+        & (bands["contrast"] == HEADLINE_CONTRAST)
+        & (bands["k"] == k)
+    ]
+    if len(rows) != 1 or len(band) != 1:
+        raise ValueError(
+            f"the committed artifacts carry {len(rows)} curve row(s) and "
+            f"{len(band)} band row(s) for ranking {ranking!r}, outcome "
+            f"{outcome!r} and depth {k!r}; exactly one of each is needed to "
+            "show a point estimate beside its own interval."
+        )
+    return (
+        float(rows[HEADLINE_CONTRAST].iloc[0]),
+        float(band["lo"].iloc[0]),
+        float(band["hi"].iloc[0]),
+        int(rows["n_targeted"].iloc[0]),
+    )
+
+
+def display_value(outcome, value):
+    """Format one artifact value the way `reports/policy.md` §5 prints it.
+
+    Two formats, chosen by the outcome's own unit: a currency figure carries
+    its sign before the currency sign, and every other outcome is printed as
+    the RAW RATE at six decimals.
+
+    The raw rate is the point. The figure directly beneath this block puts
+    the visit contrast on a percentage-point axis, and this block prints the
+    same contrast as +0.006165 -- the string the evidence document prints.
+    `plots.py` owns axis scaling through its own unit-scale map, and this
+    module reproducing it would be a second place the grain could be wrong,
+    which is this project's named Pitfall 8.
+
+    The sign branch and `abs` decide WHERE THE SIGN CHARACTER GOES in the
+    string; neither changes the value, and `plots._policy_value_text` uses
+    the same shape for the same reason. The arithmetic this module forbids
+    itself is the grain-changing kind -- scaling a rate, converting a unit,
+    re-expressing a per-customer figure per hundred customers.
+    """
+    if config.OUTCOMES[outcome] == CURRENCY_UNIT:
+        sign = "-" if value < 0 else "+"
+        return f"{sign}${abs(value):,.6f}"
+    return f"{value:+.6f}"
+
 try:
     curve, bands, sweep, manifest = load_artifacts()
     check_artifacts_agree(curve, manifest)
@@ -401,4 +569,87 @@ with st.sidebar:
         "adopted anywhere in this project. These two boxes are your "
         "assumptions, and they only affect the Assumptions, not data "
         "section below."
+    )
+
+# ---------------------------------------------------------------------------
+# Element 3: the headline block. THE ONLY bordered container in this app.
+#
+# The ten-second payload is a DECISION SENTENCE, not a number. A
+# recommendation about an action needs no confidence interval, so it can be
+# read in two seconds without being incomplete; the dollar figure follows
+# immediately and is never permitted to travel without its interval and its
+# verdict.
+#
+# Everything below is one flat sequence of children on purpose. `st.columns`
+# is forbidden in the main body because D-07's adjacency is asserted by INDEX
+# over document order, and a column block interposes a container between a
+# metric and its qualifier. `st.expander` is forbidden for the same family of
+# reason: a collapsed qualifier is a cropped qualifier.
+#
+# NO SEMANTIC COLOUR, IN EITHER DETECTABILITY STATE, AND THIS IS MEASURED
+# RATHER THAN STYLISTIC. At the pre-registered anchor the shipped rule's
+# spend interval covers zero while the sensitivity that was NOT adopted runs
+# +$0.003802 to +$0.323909 and excludes it. A green "significant" badge would
+# therefore reward a reviewer for switching to the rule this project
+# deliberately did not adopt -- the exact winner's-curse selection
+# `reports/policy.md` section 11 measures the cost of. Both states use the
+# same artist at the same weight and differ only in wording.
+#
+# Spend precedes visits because the project's question is about revenue, and
+# because the weaker of the two results must not be reachable only by
+# scrolling.
+#
+# The two captions explain what each number IS. A caption never restates the
+# number in different units: re-expressing a per-customer figure as "about $10
+# per 100 customers" would open a second arithmetic path into the three grains
+# `reports/policy.md` section 4 fixes.
+# ---------------------------------------------------------------------------
+spend_value, spend_lo, spend_hi, n_targeted = read_contrast(
+    curve, bands, ranking, "spend", selected_k
+)
+visit_value, visit_lo, visit_hi, _ = read_contrast(
+    curve, bands, ranking, "visit", selected_k
+)
+
+with st.container(border=True):
+    st.markdown(
+        f"**Recommendation: with a budget of {n_targeted:,} sends on this "
+        f"{n_frame:,}-customer list, email the top {selected_k:.0%} ranked "
+        f"by predicted uplift rather than {n_targeted:,} customers chosen "
+        "at random.**"
+    )
+    st.markdown(
+        "Both numbers below come from the same experiment and each carries "
+        "its 95% interval. Where the interval includes zero, this data "
+        "cannot show a gain at that depth."
+    )
+
+    st.metric(
+        "Extra revenue vs a random send of the same size (dollars per "
+        "customer on the list)",
+        display_value("spend", spend_value),
+    )
+    st.markdown(
+        f"95% interval {display_value('spend', spend_lo)} to "
+        f"{display_value('spend', spend_hi)}"
+    )
+    st.markdown(verdict_line(spend_lo, spend_hi))
+    st.caption(
+        "What targeting buys on revenue, for each customer on the list, "
+        "compared with emailing the same number of people picked at random."
+    )
+
+    st.metric(
+        "Extra site visits vs a random send of the same size (per customer "
+        "on the list)",
+        display_value("visit", visit_value),
+    )
+    st.markdown(
+        f"95% interval {display_value('visit', visit_lo)} to "
+        f"{display_value('visit', visit_hi)}"
+    )
+    st.markdown(verdict_line(visit_lo, visit_hi))
+    st.caption(
+        "What targeting buys on site visits, for each customer on the list, "
+        "compared with emailing the same number of people picked at random."
     )
