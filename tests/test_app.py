@@ -275,7 +275,7 @@ UNESCAPED_DOLLAR = re.compile(r"(?<!\\)\$")
 # and therefore the kinds an unescaped dollar sign can damage. `Metric` is
 # absent from this set and handled separately below, because a metric's
 # LABEL is markdown and its VALUE is not -- the headline figures are the one
-# place in this app where a bare `+$0.101593` is correct.
+# place in this app where a bare `+$0.102` is correct.
 MARKDOWN_RENDERED_KINDS = frozenset(
     {"Markdown", "Caption", "Title", "Header", "Subheader"}
 )
@@ -838,16 +838,31 @@ def _money(value):
     """The contract's dollar format, transcribed here ON PURPOSE.
 
     Calling `streamlit_app.display_value` instead would compare the app
-    against itself and pass on any format the app happened to adopt. The
-    strings below are the ones `reports/policy.md` section 5 prints.
+    against itself and pass on any format the app happened to adopt.
+
+    THREE DECIMALS, AND DELIBERATELY NOT THE REPORT'S CONVENTION. This
+    transcribes the APP's display convention, adopted 2026-09-11: the
+    quantities it formats have 95% intervals spanning roughly -$0.03 to
+    +$0.30, and the six decimals this function used to carry were precision
+    the data does not support. `reports/policy.md` section 5 keeps its six
+    decimals, so the report and the app print one quantity at two
+    precisions BY DESIGN. Do not "restore" this to `,.6f` to make the two
+    agree -- the divergence is the decision.
     """
     sign = "-" if value < 0 else "+"
-    return sign + "$" + format(abs(value), ",.6f")
+    return sign + "$" + format(abs(value), ",.3f")
 
 
 def _rate(value):
-    """The contract's raw-rate format, transcribed for the same reason."""
-    return format(value, "+.6f")
+    """The contract's raw-rate format, transcribed for the same reason.
+
+    Three decimals, the app's convention and not section 5's, for the
+    reason `_money` gives. The RAW RATE half is unchanged: the app displays
+    the visit contrast as a rate rather than in percentage points, which is
+    the Pitfall 8 argument V13 still enforces. Rounding moved the grain of
+    the digits, never the unit.
+    """
+    return format(value, "+.3f")
 
 
 _DISPLAY = {"spend": _money, "visit": _rate}
@@ -1028,8 +1043,8 @@ def test_no_markdown_string_carries_an_unescaped_dollar_sign():
     escaped; a counted exception is how this defect comes back.
 
     A metric's VALUE is deliberately exempt: Streamlit renders it as plain
-    text, and `+$0.101593` there is both correct and the string
-    reports/policy.md prints. Its LABEL is markdown and is not exempt.
+    text, and `+$0.102` there is correct. Its LABEL is markdown and is not
+    exempt.
     """
     at = _first_paint()
 
@@ -1472,9 +1487,10 @@ def test_app_uses_only_the_permitted_element_set():
 def test_app_performs_no_arithmetic_on_a_displayed_number():
     """V13: every number on screen is a cell of an artifact, formatted.
 
-    The visit contrast is displayed as the RAW RATE, exactly as
-    `reports/policy.md` section 5 prints it, even though the figure directly
-    beneath it uses percentage points on its y axis. `plots.py` owns that
+    The visit contrast is displayed as the RAW RATE -- the same grain
+    `reports/policy.md` section 5 prints, at the app's coarser three-decimal
+    precision since 2026-09-11 -- even though the figure directly beneath it
+    uses percentage points on its y axis. `plots.py` owns that
     scaling through its own unit-scale map, and this app reproducing it
     would be a second place the grain could be wrong -- which is this
     project's named Pitfall 8, and the reason three denominators are alive
@@ -1676,6 +1692,15 @@ FOOTER_CLAUSES = (
 # formats to the displayed string, that the report carries the ratio form,
 # and that the two are the same number. An allowlist that grows silently is
 # the failure mode this shape is chosen to prevent.
+#
+# SINCE 2026-09-11 THIS IS NO LONGER THE ONLY NON-VERBATIM ADMISSION PATH.
+# V14 also admits the three-decimal rendering of any number the report
+# carries, through `_report_roundings`, because the app now displays three
+# decimals where the report keeps six. That arm is GENERAL -- parse the
+# report, re-render through the contract's own formats -- so the rounded
+# display strings do NOT belong here as hand-written literals, and adding
+# them would convert a rule into a list. These two entries are unrelated to
+# the rounding change and stay exactly as they are.
 POLICY_REPORT_ALLOWLIST = {
     "6.8%": (
         "first_breakpoint",
@@ -1743,6 +1768,44 @@ def _displayed_numbers(at):
             for match in NUMERIC_STRING.findall(_as_rendered(chunk))
         }
     )
+
+
+def _report_roundings(report):
+    """Every number `reports/policy.md` carries, re-rendered at the app's grain.
+
+    THE PROPERTY THIS PRESERVES: the app never publishes a quantity the
+    evidence document does not carry. It may publish it at COARSER GRAIN.
+    That is the whole of the licence -- a number the report does not carry
+    at any precision is still a failure, because no amount of rounding
+    turns an absent quantity into a present one.
+
+    Built from the CONTRACT's two transcribed formats (`_money` and
+    `_rate`), never from `streamlit_app.display_value`, for the same reason
+    those two are transcribed at all: an arm built from the app would admit
+    whatever the app happened to print.
+
+    Both formats are applied to every parsed number rather than one being
+    chosen by unit, because this helper reads the report's text and has no
+    outcome label to choose with. Admitting both is safe: a rate's digits
+    cannot launder a dollar figure, since the currency sign is part of the
+    string being matched.
+
+    PERCENTAGES ARE SKIPPED. The percentage convention is a different grain
+    and is already handled by `POLICY_REPORT_ALLOWLIST`, which checks the
+    manifest field behind each entry. Parsing `6.8%` to 6.8 here and
+    admitting `+6.800` would let a percentage's digits launder a rate.
+    """
+    admitted = set()
+    for match in NUMERIC_STRING.findall(report):
+        if match.endswith("%"):
+            continue
+        try:
+            value = float(match.replace("$", "").replace(",", ""))
+        except ValueError:
+            continue
+        admitted.add(_money(value))
+        admitted.add(_rate(value))
+    return admitted
 
 
 @pytest.mark.slow
@@ -2025,12 +2088,32 @@ def test_every_number_has_a_caption_and_the_footer_is_complete():
 def test_first_paint_numbers_appear_verbatim_in_the_policy_report():
     """V14: the app cannot contradict the evidence document on first paint.
 
-    A SUBSTRING SEARCH, NOT A TOLERANCE. The most-screenshotted state of
-    this app is its default view, and every number in that view has to be
-    findable, character for character, in reports/policy.md. A tolerance
-    would let the app round where the report does not, and two documents
-    printing the same quantity to different precision is exactly the
-    divergence a reviewer would have to reconcile themselves.
+    The most-screenshotted state of this app is its default view, and every
+    number in that view has to trace to reports/policy.md. TWO ARMS ADMIT A
+    NUMBER, and a number admitted by neither is a failure:
+
+      1. the report carries the string verbatim, character for character;
+      2. the string is the THREE-DECIMAL RENDERING of a number the report
+         carries, through `_report_roundings`.
+
+    STILL NOT A TOLERANCE. There is no epsilon anywhere in this test. Every
+    displayed string is matched against a SPECIFIC number the report
+    carries -- either as its own string or as that number re-rendered
+    through the contract's own formats. Nothing is admitted for being
+    merely close to something: the table cell `-$0.030` passes because the
+    report carries -$0.029911 and `_money` renders THAT NUMBER as
+    `-$0.030`, not because the two are within some bound. A figure the
+    report does not carry still fails however near it lands.
+
+    WHY THE SECOND ARM EXISTS. Since 2026-09-11 the app displays three
+    decimals where the report keeps six. The headline figures were printing
+    +$0.101593 on a quantity whose 95% interval spans roughly -$0.03 to
+    +$0.30; that is precision the data does not support and it reads as
+    false confidence. The report is the checkable record and keeps every
+    digit; the app is the reader-facing surface and prints the digits the
+    evidence supports. The divergence is intended, and this arm is how the
+    contract accommodates it WITHOUT weakening to a tolerance and without
+    growing per-number literals.
     """
     report = (config.ROOT / "reports" / "policy.md").read_text(
         encoding="utf-8"
@@ -2046,24 +2129,24 @@ def test_first_paint_numbers_appear_verbatim_in_the_policy_report():
         "means the collector is broken and every assertion below would pass "
         "for the wrong reason."
     )
-    # Both halves of the D-03 pair, as reports/policy.md section 5 prints
-    # them. This is a precondition AND the strictest case of the check
-    # below: it fires either because the collector stopped reading the
-    # headline block, which would make every assertion after it vacuous, or
-    # because a display format changed and the app no longer prints the
-    # string the evidence document prints. The message names both, because
-    # a control that cuts the dollar format to two decimals arrives here
-    # first and the two causes call for opposite repairs.
-    for headline in ("+$0.101593", "+0.006165"):
+    # Both halves of the D-03 pair, in the app's three-decimal display
+    # convention. This is a precondition AND the strictest case of the
+    # check below: it fires either because the collector stopped reading
+    # the headline block, which would make every assertion after it
+    # vacuous, or because a pinned display format changed. The message
+    # names both, because the two causes call for opposite repairs.
+    for headline in ("+$0.102", "+0.006"):
         assert headline in numbers, (
-            f"{headline!r} -- a headline figure of the default view, and "
-            "the string reports/policy.md section 5 prints -- was not "
+            f"{headline!r} -- a headline figure of the default view, as "
+            "the app's three-decimal convention prints it -- was not "
             f"collected. Collected: {numbers!r}. Either the collector no "
             "longer reads the headline block, in which case every "
             "assertion below is vacuous, or a pinned display format "
-            "changed and the app is now publishing a rounded version of a "
-            "figure the evidence document publishes in full."
+            "changed. Note that the app rounding where reports/policy.md "
+            "does not is the INTENDED state since 2026-09-11, so a repair "
+            "that restores six decimals to the app is the wrong one."
         )
+
 
     for displayed, (key, ratio_text, why) in POLICY_REPORT_ALLOWLIST.items():
         assert displayed in numbers, (
@@ -2088,16 +2171,59 @@ def test_first_paint_numbers_appear_verbatim_in_the_policy_report():
             "the app and the report are not writing one quantity two ways."
         )
 
+    roundings = _report_roundings(report)
+
+    # THE ROUNDING ARM IS ALIVE, asserted rather than assumed. At least one
+    # rendered string must reach the check below THROUGH the rounding arm
+    # and through nothing else. If the report were ever rounded to match the
+    # app, this set would empty, the arm would become dead code and V14
+    # would quietly narrow back to a verbatim-only check -- still green, and
+    # no longer testing the thing it was extended to test. This fails first
+    # and says so.
+    #
+    # A MEASURED SET, NOT A HAND-PICKED LITERAL, and that is the repair of a
+    # wrong premise. Neither headline string can serve as the probe: BOTH
+    # `+$0.102` and `+0.006` are accidental substrings of the report's own
+    # `+$0.102053` and `+0.006165`, so both pass the verbatim arm on their
+    # own and neither demonstrates anything about the second. The five
+    # strings that do carry the arm at the committed artifacts are
+    # '+$0.434', '+$0.526' negated, '-$0.030', '+0.019' and '-0.017' -- all
+    # table cells, none of them a coincidence anybody chose. Asserting the
+    # set is non-empty keeps the check true as the artifacts move.
+    rounded_only = [
+        number
+        for number in numbers
+        if number not in report
+        and number not in POLICY_REPORT_ALLOWLIST
+        and number in roundings
+    ]
+    assert rounded_only, (
+        "no rendered string is admitted by the rounding arm alone: every "
+        "number on the page is already in reports/policy.md verbatim or in "
+        "the allowlist. The arm exists because the app prints three "
+        "decimals where the report prints six; if the report has been "
+        "rounded to match, `_report_roundings` is now dead code and this "
+        "test has silently narrowed to a verbatim-only check. Either "
+        "restore the report's six decimals or delete the arm deliberately "
+        "-- do not leave it here unexercised."
+    )
+
     missing = [
         number
         for number in numbers
-        if number not in report and number not in POLICY_REPORT_ALLOWLIST
+        if number not in report
+        and number not in roundings
+        and number not in POLICY_REPORT_ALLOWLIST
     ]
     assert not missing, (
         f"the app renders {missing!r} at first paint and reports/policy.md "
-        "does not carry the string(s) anywhere. The app and the evidence "
-        "document would then publish different numbers for the same "
-        "quantity in the app's most-screenshotted state. Fix the app or the "
+        "carries the string(s) NEITHER verbatim NOR as a number whose "
+        "three-decimal rendering they are. That is a quantity the app "
+        "publishes and the evidence document does not carry AT ANY "
+        "PRECISION, in the app's most-screenshotted state. 'Round it' is "
+        "not the repair -- the rounding arm already admits every rounding "
+        "of every number the report carries, so reaching here means the "
+        "number itself is absent from the report. Fix the app or the "
         "report; add an allowlist entry only if the report genuinely writes "
         "the same quantity in another convention, and justify it there."
     )
