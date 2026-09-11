@@ -78,7 +78,7 @@ and by AppTest element order rather than by inspecting computed styles.
 | Token | Artist | Usage |
 |-------|--------|-------|
 | `group` | `st.container(border=True)` | The headline block only. Exactly **one** bordered container exists in the app, and it is the D-07 block. A second border would create a competing emphasis. |
-| `section` | `st.divider()` | Between the five main-body sections. Exactly **4** dividers (after the headline block, after the curves, after the contrasts table, after the assumptions section). |
+| `section` | `st.divider()` | Between main-body sections **that have no border between them**. Exactly **3** dividers — after the curves, after the contrasts table, after the assumptions section. *(Amended 2026-09-10 at the 06-07 checkpoint. The original read "Between the five main-body sections. Exactly **4** dividers (after the headline block, after the curves, after the contrasts table, after the assumptions section)." The reviewer asked for the gap between the headline block and the first chart to be tightened; Streamlit exposes no pixel spacing without the custom markup this contract forbids, so element count is the only lever available, and the divider after the headline block is the one element in that gap whose work is already being done — the headline block is the app's only bordered container, and a box edge is a harder boundary than a rule immediately beneath it. The other three separate sections with no border between them, which is both the argument for keeping them and the argument for dropping that one.)* |
 | `heading` | `st.subheader` | Opens each section after the first. Exactly **3** subheaders. |
 | `caption` | `st.caption` | Sits directly under the thing it explains. Never used as a heading. |
 | `sidebar` | `st.sidebar` | All controls. Separates control from argument without a layout primitive. |
@@ -131,6 +131,12 @@ checklist should count the **Streamlit-side** roles in the table above against t
 treat the matplotlib column as a record of what was inherited. `layout="wide"` is the one pre-approved
 remedy if the UI legibility checkpoint finds the legend too small at ~730 CSS px; shrinking the
 figures or editing `plots.py` is not.
+
+*(2026-09-10: **that remedy was invoked and applied.** The 06-07 checkpoint reviewer found the
+six-entry legend overlapping the curve at centred width and reported after the switch: "Wide layout
+fixed the legend overlap — keep it." `plots.py` was not touched, no figure was shrunk, no legend
+entry was dropped, and `git status --short reports/figures dont_email_everyone/plots.py` is empty.
+See `## Layout Contract`.)*
 
 Rules, each checkable:
 
@@ -271,13 +277,20 @@ knows the intended scope.
 
 ## Layout Contract
 
-`st.set_page_config(page_title="Don't Email Everyone", layout="centered",
+`st.set_page_config(page_title="Don't Email Everyone", layout="wide",
 initial_sidebar_state="expanded")`.
 
-`layout="centered"` rather than `"wide"`: a single measure keeps the prose readable and makes the
-vertical narrative order below the only available arrangement. `initial_sidebar_state="expanded"` so
-criterion 1's control is visible on first paint on desktop, while the headline still reads if the
-sidebar is collapsed.
+*(Amended 2026-09-10 at the 06-07 legibility checkpoint. The original fixed `layout="centered"` and
+argued: "a single measure keeps the prose readable and makes the vertical narrative order below the
+only available arrangement." The checkpoint reviewer found the six-entry legend overlapping the curve
+at the ~730 CSS px that centred layout yields, and reported after the switch: "Wide layout fixed the
+legend overlap — keep it." `layout="wide"` was the **one pre-approved remedy** this contract named
+for exactly this finding — see `## Typography` — and it was applied unchanged. The vertical narrative
+order is unaffected: `st.columns` remains forbidden in the main body, so the wider measure widens the
+single column rather than offering a second one.)*
+
+`initial_sidebar_state="expanded"` so criterion 1's control is visible on first paint on desktop,
+while the headline still reads if the sidebar is collapsed.
 
 ### Sidebar — controls only, in this order
 
@@ -328,8 +341,8 @@ preserved).
 | 1 | `st.title` | `Don't Email Everyone` |
 | 2 | `st.markdown` | The question, one line, in business terms. |
 | 3 | `st.container(border=True)` | **The D-07 headline block.** Children 3.1–3.10, in this order: |
-| 3.1 | `st.markdown` (bold) | The recommendation sentence. |
-| 3.2 | `st.markdown` | The read-both-numbers line. |
+| 3.1 | `st.markdown` (bold lead) | The recommendation sentence. *(Amended 2026-09-10 — was "(bold)", the whole sentence. See the hierarchy note below the table.)* |
+| 3.2 | `st.caption` | The read-both-numbers line. *(Amended 2026-09-10 — was `st.markdown`. See the hierarchy note below the table.)* |
 | 3.3 | `st.metric` | Spend contrast. |
 | 3.4 | `st.markdown` | Its 95% interval. |
 | 3.5 | `st.markdown` (bold) | Its verdict line (one of the three states). |
@@ -338,14 +351,14 @@ preserved).
 | 3.8 | `st.markdown` | Its 95% interval. |
 | 3.9 | `st.markdown` (bold) | Its verdict line. |
 | 3.10 | `st.caption` | Its plain-language gloss. |
-| 4 | `st.divider` | |
+| 4 | ~~`st.divider`~~ | **Removed 2026-09-10** at the 06-07 checkpoint's request to tighten the gap between the headline block and the first chart. Streamlit exposes no pixel spacing without the custom markup this contract forbids, so element count is the only lever, and this is the one element in that gap whose work is already done: element 3 is the app's only bordered container, and a box edge is a harder boundary than a rule. The number `4` is retained rather than renumbered so that every reference elsewhere to "element 7" and "element 12" still points at the same thing. |
 | 5 | `st.subheader` | `Where the gain is, and is not, detectable` |
 | 6 | figure | `policy_curve_plot(…, contrast="delta_random", unit="$", anchor=HEADLINE_CAPACITY, selected=k)` — spend. |
 | 7 | `st.caption` | Curve caption: selected-vs-anchor line **and** the zero-by-construction line. |
 | 8 | figure | The same call with `unit="pp"` — visits. |
 | 9 | `st.caption` | Same two-part caption. |
 | 10 | `st.divider` | |
-| 11 | `st.subheader` | `Both published contrasts, at the depth you selected` |
+| 11 | `st.subheader` | `How targeting compares to the alternatives` *(Amended 2026-09-10 at the 06-07 checkpoint. The original read `Both published contrasts, at the depth you selected`, which the reviewer identified as "written for someone who has read the report" — "published contrasts" is this project's internal noun for the three delta columns, and a heading is the last place to spend a reader's attention on vocabulary. The section's contents are unchanged: all three contrasts, at the selected depth.)* |
 | 12 | `st.table` | 2 rows (spend, visits) × 3 contrast columns, every cell `point [lo, hi]`. |
 | 13 | `st.caption` | Unit, grain and the interval convention; the conversion-not-surfaced note. |
 | 14 | `st.markdown` | The §6 sentence and the zero-cost caveat. |
@@ -362,6 +375,24 @@ preserved).
 **Spend precedes visits** at 3.3/3.7 and at 6/8 because the project's question is about revenue, and
 because the weaker of the two results must not be reachable only by scrolling. **The anchor never
 moves:** `anchor=economics.HEADLINE_CAPACITY` on every call; only `selected` tracks the slider.
+
+#### Headline-block hierarchy — *(added 2026-09-10, 06-07 checkpoint)*
+
+The reviewer read 3.3–3.6 as "four undifferentiated text lines": the revenue figure, its interval,
+its verdict and its explanatory caption. Two changes discharge that, and **no word of copy and no
+number moved** — both are changes of artist and of emphasis only.
+
+- **3.1 is bold on its lead alone.** A three-line sentence set entirely in bold was the loudest
+  thing on the first screen and was competing with the two numbers it exists to introduce.
+- **3.2 is a caption.** It is an instruction about how to read what follows, which is what the
+  caption artist is for; demoting it leaves the metric as the only heavy element between the
+  recommendation and the curves.
+
+Six children now carry four weights top to bottom: bold lead, quiet caption, metric, plain interval,
+bold-lead verdict, quiet caption. `st.columns` and `unsafe_allow_html` were **not** available for
+this and that constraint is load-bearing rather than bureaucratic — D-07's adjacency is asserted by
+index over flat document order, so 3.3/3.4/3.5 and 3.7/3.8/3.9 must stay consecutive children. Both
+changes sit outside those two triples and the index walk is untouched.
 
 ### Three figures, and the two answers that took a decision
 
@@ -422,12 +453,12 @@ performs **no arithmetic** on a displayed number (see `## Numbers Discipline`).
 | Element | Copy |
 |---------|------|
 | Ranking label (S2) | `Targeting rule` |
-| Option — shipped | `Rank by predicted uplift in site visits — pre-registered, shipped rule` |
-| Option — sensitivity | `Rank by predicted uplift in orders — sensitivity, not adopted` |
-| Ranking caption (S3) | `The shipped rule was fixed on Phase 4 evidence before either curve below existed. The sensitivity is shown so you can see what changes, not as an alternative to pick — choosing the rule that looks best on these same rows is the selection error this project measures the cost of. Artifact keys: uplift_womens_visit, uplift_womens_conversion.` |
+| Option — shipped | `Site visits — shipped rule` *(Amended 2026-09-10 — see the truncation note below this table.)* |
+| Option — sensitivity | `Orders — not adopted (sensitivity)` *(Amended 2026-09-10 — see the truncation note below this table.)* |
+| Ranking caption (S3) | `The shipped rule was fixed on Phase 4 evidence before either curve below existed. Switching to whichever rule looks best on these same rows is the selection error this project measures the cost of.` *(Amended 2026-09-10 — see the sidebar-prose note below this table.)* |
 | Capacity label (S4) | `Targeting depth — how much of the list you can email` |
 | Capacity option format | `{k:.0%} ({n_targeted:,} emails)` |
-| Capacity caption (S5) | `A depth of 20% was fixed in advance, before any of these curves existed. It is a pre-commitment, not the best point on the curve.` |
+| Capacity caption (S5) | `The pre-registered anchor is {HEADLINE_CAPACITY:.0%}. It was fixed before any of these curves existed — a pre-commitment, not the best point on the curve.` *(Amended 2026-09-10 at the 06-07 checkpoint. The original read `A depth of 20% was fixed in advance, before any of these curves existed. It is a pre-commitment, not the best point on the curve.` The reviewer found it sitting under a slider reading 43% or 93%: "It is true about the anchor and misleading as a caption on the current selection." The anchor is now the sentence's subject. The percentage is also now formatted from `economics.HEADLINE_CAPACITY` rather than typed, matching element 7's caption, so retuning the anchor cannot leave this caption quoting the old depth.)* |
 | Assumptions lead (S6) | `**ASSUMED, not measured**` |
 | Cost label | `ASSUMED cost per email (dollars, not measured)` |
 | Margin label | `ASSUMED gross margin (fraction, not measured)` |
@@ -435,6 +466,33 @@ performs **no arithmetic** on a displayed number (see `## Numbers Discipline`).
 
 D-02 is satisfied **at the point of choice**: the status phrase is inside the option label a reviewer
 reads while selecting, not in a caption below the control.
+
+#### Option-label truncation — *(added 2026-09-10, 06-07 checkpoint)*
+
+The originals were `Rank by predicted uplift in site visits — pre-registered, shipped rule` (70
+characters) and `Rank by predicted uplift in orders — sensitivity, not adopted` (61). The reviewer
+watched the closed control cut the first at **"Rank by predicted uplift in site visi"** and noted
+that "the sensitivity ranking's status phrase will be cut off entirely."
+
+That is not a cosmetic complaint: both status phrases lived at the **end** of the label, past the
+truncation point, so D-02 — a promise about what is readable *while choosing* — was not actually
+being kept by either option. The rewrite leads with the outcome and puts the status immediately after
+the dash, so the two degrade in the right order: a narrower sidebar clips the parenthetical gloss
+first and the status marking last. `sensitivity` is the gloss precisely because `not adopted` is the
+part a reviewer must not be allowed to miss.
+
+#### Sidebar prose — *(added 2026-09-10, 06-07 checkpoint)*
+
+The reviewer read five lines of sidebar prose ending in two raw artifact keys "that mean nothing to a
+reviewer", and asked for the detail to move **behind an expander**.
+
+`st.expander` is forbidden app-wide (threat T-06-19; `## Layout Contract` and V4) because a collapsed
+qualifier is a cropped qualifier, and that mitigation is at full strength for the headline block's
+interval and verdict. Narrowing it to "except in the sidebar" in order to satisfy a prose-length note
+would have traded a structural guarantee for a cosmetic one. The reviewer chose to **trim instead**,
+so the detail was cut rather than collapsed: the artifact keys go (they are in the artifact, and
+nothing on screen needs them) and the selection-error warning stays, because it is the reason the
+second option is offered at all. **No expander was introduced and V4 is unchanged.**
 
 ### Headline block
 
@@ -608,7 +666,8 @@ that map does not yet carry.
 | V5 | The verdict state equals the figure's hatched state at every published (ranking, outcome, k) row the app can display — 404 rows as measured 2026-09-10, swept from the artifact rather than hard-coded | sweep `lo <= 0 <= hi` against the three verdict strings | **new** |
 | V6 | All three verdict strings exist in the source and each is reachable — including `Detectably worse`, reachable at shipped/spend/k=0.99 | source scan + AppTest at `k=0.99` | **new** |
 | V7 | The capacity slider offers 100 options; `0.0` is absent | AppTest widget options | `test_capacity_control_uses_the_committed_grid` |
-| V8 | Option labels carry `pre-registered, shipped rule` and `sensitivity, not adopted`; ranking keys are read off the artifact by prefix filter | AppTest + source scan | `test_ranking_status_travels_with_the_control`, `test_only_published_rankings_are_offered` |
+| V8 | Option labels carry `shipped rule` and `not adopted` *(amended 2026-09-10 — see the option-label truncation note; the originals were `pre-registered, shipped rule` and `sensitivity, not adopted`, which the closed control truncated away)*; ranking keys are read off the artifact by prefix filter | AppTest + source scan | `test_ranking_status_travels_with_the_control`, `test_only_published_rankings_are_offered` |
+| V21 | No markdown-rendered string on the page carries an **unescaped** `$` *(added 2026-09-10 — the 06-07 checkpoint found `$…$` pairs being typeset as TeX math in the contrasts table and the headline interval; every prior check compared the markdown SOURCE, which is the string the browser had not finished with)* | AppTest over main + sidebar, `Markdown`/`Caption`/heading values, `Metric` **labels** and every table cell, read through the rendered form | `test_no_markdown_string_carries_an_unescaped_dollar_sign` |
 | V9 | `k*`'s cost and margin are inside the metric **label** | AppTest label substring | `test_optimal_depth_is_never_quoted_without_its_price` |
 | V10 | `ASSUMED_COST_PER_EMAIL` / `ASSUMED_GROSS_MARGIN` equal `manifest.cost_exhibit.illustrative_pairs[0]` | artifact comparison | `test_cost_and_margin_are_labelled_assumptions` |
 | V11 | `st.pyplot(` appears exactly once, inside `render`; `render(` called 3 times | source count | `test_app_pairs_every_st_pyplot_with_a_close` |
@@ -643,6 +702,17 @@ instructions, both of which are judgments no test can make:
    intended rather than as a duplicate legend entry.
 
 Deployment liveness and the 12-hour cold-start (criterion 5) remain manual-only and unchanged.
+
+*(Outcome, recorded 2026-09-10. Both items were exercised at first paint and at four further depths
+on both published rankings. Item 1 failed: the legend overlapped the curve at centred width, and the
+pre-approved `layout="wide"` remedy fixed it and was kept. Item 2 passed — the reviewer raised no
+observation about the coincident pair or about element 7's "sit on the same depth" wording, which is
+recorded here as a pass rather than as silence, because the whole point of a judgment checkpoint is
+that a non-finding is also a finding. Looking then produced **four defects no automated check could
+see**, only one of which was a legibility matter: a markdown/TeX collision in two places (see V21), a
+sidebar caption made misleading by the widget beneath it, a heading written in the project's internal
+vocabulary, and the option-label truncation above. This is the 05-08 pattern repeating — the
+checkpoint's value is not the item it was written to test.)*
 
 ---
 
