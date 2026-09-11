@@ -49,6 +49,7 @@ either — a marker is a pytest facility, not a package.
 
 import inspect
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -62,7 +63,7 @@ import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 import streamlit_app  # noqa: E402
-from dont_email_everyone import config, economics  # noqa: E402
+from dont_email_everyone import config, economics, plots  # noqa: E402
 
 # The four packages that must never appear in the serve-time file. They are
 # the analysis stack: Community Cloud would install them happily, the app
@@ -673,4 +674,707 @@ def test_cost_and_margin_are_labelled_assumptions():
     assert len(checked) == 4, (
         f"only {checked} were checked for a defaulted economic assumption. "
         "A signature test that inspects nothing passes for the wrong reason."
+    )
+
+
+# --------------------------------------------------------------------------
+# Plan 06-05: the headline block, the two curves, and the three verdicts
+# --------------------------------------------------------------------------
+
+# The substring that identifies a headline metric, so these tests keep
+# working when plan 06-06 adds the third metric (`k*`), whose label carries
+# a cost and a margin and whose neighbours are not an interval and a
+# verdict. Matching on the contrast phrase rather than on position is what
+# keeps the adjacency walk pointed at the D-07 pair specifically.
+HEADLINE_METRIC_MARKER = "vs a random send of the same size"
+SPEND_METRIC_MARKER = "Extra revenue vs a random send of the same size"
+VISIT_METRIC_MARKER = "Extra site visits vs a random send of the same size"
+
+INTERVAL_MARKER = "95% interval"
+
+ZERO_BY_CONSTRUCTION_MARKER = "zero by construction"
+SELECTED_MARKER_PHRASE = "Solid green diamond"
+
+DISPLAYED_OUTCOMES = ("spend", "visit")
+
+# The four depths `test_headline_tracks_the_committed_curve` drives, and the
+# reason each is in the list. Not four arbitrary points:
+#
+#   0.20  the pre-registered anchor and the first-paint position, where the
+#         shipped ranking's spend band covers zero
+#   0.37  a depth away from the anchor, so the selection line in the curve
+#         captions and the moving marker are exercised in their other state
+#   0.99  the ONLY depth in the committed artifact at which the third
+#         verdict state is reachable (shipped ranking, spend contrast)
+#   1.00  the email-everyone endpoint, where the headline contrast is
+#         exactly zero with a degenerate band, by construction
+SWEPT_DEPTHS = (0.20, 0.37, 0.99, 1.00)
+
+
+def _committed_bands():
+    return pd.read_parquet(config.PROCESSED / "policy_bands.parquet")
+
+
+def _money(value):
+    """The contract's dollar format, transcribed here ON PURPOSE.
+
+    Calling `streamlit_app.display_value` instead would compare the app
+    against itself and pass on any format the app happened to adopt. The
+    strings below are the ones `reports/policy.md` section 5 prints.
+    """
+    sign = "-" if value < 0 else "+"
+    return sign + "$" + format(abs(value), ",.6f")
+
+
+def _rate(value):
+    """The contract's raw-rate format, transcribed for the same reason."""
+    return format(value, "+.6f")
+
+
+_DISPLAY = {"spend": _money, "visit": _rate}
+
+
+def _main_elements(at):
+    return list(at.main)
+
+
+def _element_kind(element):
+    return type(element).__name__
+
+
+def _headline_triples(at):
+    """`[(label, value, interval, verdict)]` for each headline metric.
+
+    Relies on the adjacency that
+    `test_headline_cannot_be_read_without_its_qualifier` proves by index.
+    That test does its own walk inline rather than calling this helper, so
+    the property is established before anything depends on it.
+    """
+    elements = _main_elements(at)
+    triples = []
+    for index, element in enumerate(elements):
+        if _element_kind(element) != "Metric":
+            continue
+        if HEADLINE_METRIC_MARKER not in (element.label or ""):
+            continue
+        triples.append(
+            (
+                element.label,
+                element.value,
+                elements[index + 1].value,
+                elements[index + 2].value,
+            )
+        )
+    return triples
+
+
+def _curve_captions(at):
+    """The caption sitting immediately after each `Image`, in order."""
+    elements = _main_elements(at)
+    return [
+        elements[index + 1].value
+        for index, element in enumerate(elements)
+        if _element_kind(element) == "Image"
+        and index + 1 < len(elements)
+        and _element_kind(elements[index + 1]) == "Caption"
+    ]
+
+
+def test_headline_cannot_be_read_without_its_qualifier():
+    """D-07, asserted by INDEX over flat document order.
+
+    A metric whose qualifier is not the very next element can be cropped out
+    of a screenshot, and a screenshot of a point estimate with no interval
+    beside it is exactly the artefact this project spent Phase 5 refusing to
+    produce. The crop boundary is the real trust boundary here, which is why
+    this is an adjacency assertion and not a somewhere-on-the-page
+    assertion.
+
+    This is the app-side analogue of `reports/policy.md` section 5's
+    adjacency test, which asserts the same property over a character window
+    in the rendered document.
+    """
+    elements = _main_elements(_run_app())
+    verdicts = {
+        streamlit_app.VERDICT_COVERS_ZERO,
+        streamlit_app.VERDICT_ABOVE_ZERO,
+        streamlit_app.VERDICT_BELOW_ZERO,
+    }
+
+    found = 0
+    for index, element in enumerate(elements):
+        if _element_kind(element) != "Metric":
+            continue
+        if HEADLINE_METRIC_MARKER not in (element.label or ""):
+            continue
+        found += 1
+
+        assert index + 2 < len(elements), (
+            f"the headline metric {element.label!r} is one of the last two "
+            "elements on the page, so its 95% interval and its verdict line "
+            "are not there at all. The number is quotable and nothing "
+            "beside it says what it cannot distinguish."
+        )
+        following = elements[index + 1]
+        assert str(following.value or "").startswith(INTERVAL_MARKER), (
+            f"the element after the metric {element.label!r} is a "
+            f"{_element_kind(following)} reading "
+            f"{str(following.value)[:80]!r}, not its 95% interval. Anything "
+            "between the estimate and its interval is a place a screenshot "
+            "can be cropped, which is the failure D-07 exists to prevent."
+        )
+        # Asserted separately, and it is not redundant: all three verdict
+        # lines contain the phrase "95% interval" themselves, so a check
+        # that merely looked for the phrase would pass on a page where the
+        # verdict and the interval had been swapped -- which is one of the
+        # two orderings this test exists to distinguish between.
+        assert following.value not in verdicts, (
+            f"the element after the metric {element.label!r} is a VERDICT "
+            "line, not the interval. The verdict says whether the interval "
+            "crosses zero; a reader who meets it first has been told the "
+            "conclusion before the evidence, and the interval itself is now "
+            "the element furthest from the number it qualifies."
+        )
+        verdict = elements[index + 2]
+        assert verdict.value in verdicts, (
+            f"the second element after the metric {element.label!r} reads "
+            f"{str(verdict.value)[:80]!r}, which is not one of the three "
+            "verdict lines. The interval says how wide the uncertainty is; "
+            "the verdict says whether it crosses zero, and a reader who "
+            "stops after the interval must not be left to work that out."
+        )
+
+    assert found == 2, (
+        f"{found} headline metric/interval/verdict triples were found, not "
+        "2. The D-03 pair -- revenue and visits -- is the argument, and a "
+        "page carrying one of them carries half of it."
+    )
+
+
+@pytest.mark.slow
+def test_headline_tracks_the_committed_curve():
+    """Criterion 1: the control moves the answer, and the answer is the file.
+
+    MARKED SLOW BECAUSE OF ITS SIZE, NOT ITS CONTENT. Four depths on two
+    rankings is ten `AppTest` runs, which at the ~1.2 s per rerun
+    06-RESEARCH measured would spend the whole 20-second per-task bar
+    `06-VALIDATION.md` sets. It meets this file's arithmetic rule for the
+    marker -- more than two reruns -- and it is the second of the three
+    tests that rule names. It is deselected from the per-task path and runs
+    on every full-suite invocation, which carries no `-m`.
+
+    Nothing about it is reduced: every depth, both rankings, both outcomes,
+    the point estimate, both interval bounds, and the requirement that the
+    number actually CHANGES -- so that an app which ignores the control
+    cannot pass by rendering the anchor's value everywhere.
+    """
+    curve = _committed_curve()
+    bands = _committed_bands()
+    published = sorted(
+        str(name)
+        for name in curve["ranking"].unique()
+        if not name.startswith(UNPROVEN_PREFIX)
+    )
+    assert len(published) == 2, published
+
+    seen = {outcome: set() for outcome in DISPLAYED_OUTCOMES}
+    swept = []
+
+    for ranking in published:
+        at = AppTest.from_file(
+            str(config.ROOT / "streamlit_app.py"), default_timeout=60
+        ).run()
+        at.selectbox[0].set_value(ranking)
+
+        for depth in SWEPT_DEPTHS:
+            at.select_slider[0].set_value(depth)
+            at.run()
+            swept.append((ranking, depth))
+
+            rendered = {SPEND_METRIC_MARKER: None, VISIT_METRIC_MARKER: None}
+            for label, value, interval, _verdict in _headline_triples(at):
+                for marker in rendered:
+                    if label.startswith(marker):
+                        rendered[marker] = (value, interval)
+
+            markers = (SPEND_METRIC_MARKER, VISIT_METRIC_MARKER)
+            for outcome, marker in zip(DISPLAYED_OUTCOMES, markers):
+                assert rendered[marker] is not None, (
+                    f"no metric labelled {marker!r} is on the page at "
+                    f"ranking {ranking} and depth {depth}."
+                )
+                value, interval = rendered[marker]
+                row = curve.loc[
+                    (curve["ranking"] == ranking)
+                    & (curve["outcome"] == outcome)
+                    & (curve["k"] == depth)
+                ]
+                band = bands.loc[
+                    (bands["ranking"] == ranking)
+                    & (bands["outcome"] == outcome)
+                    & (bands["contrast"] == streamlit_app.HEADLINE_CONTRAST)
+                    & (bands["k"] == depth)
+                ]
+                assert len(row) == 1 and len(band) == 1, (
+                    "the committed artifacts do not carry exactly one row "
+                    f"for {ranking}/{outcome}/{depth}; this test is "
+                    "comparing the app against nothing."
+                )
+
+                form = _DISPLAY[outcome]
+                column = streamlit_app.HEADLINE_CONTRAST
+                expected = form(float(row[column].iloc[0]))
+                assert value == expected, (
+                    f"at ranking {ranking}, depth {depth}, outcome "
+                    f"{outcome} the app renders {value!r} where "
+                    f"policy_curve.parquet carries {expected!r}. A headline "
+                    "number that is not the committed number makes this app "
+                    "and reports/policy.md two different answers to one "
+                    "question."
+                )
+                seen[outcome].add(value)
+
+                for bound in ("lo", "hi"):
+                    text = form(float(band[bound].iloc[0]))
+                    assert text in interval, (
+                        f"the interval line at {ranking}/{outcome}/{depth} "
+                        f"reads {interval!r} and does not carry the "
+                        f"committed {bound} bound {text!r}. An interval that "
+                        "is not the bootstrap's own interval understates or "
+                        "overstates the uncertainty of the number above it."
+                    )
+
+    for outcome in DISPLAYED_OUTCOMES:
+        assert len(seen[outcome]) > 1, (
+            f"every {outcome} value the app rendered across "
+            f"{len(SWEPT_DEPTHS)} depths and 2 rankings was the same string "
+            f"{seen[outcome]!r}. The capacity control is not reaching the "
+            "headline at all, and criterion 1 -- a control a reviewer can "
+            "move that changes the answer -- is unsatisfied."
+        )
+
+    print(
+        "test_headline_tracks_the_committed_curve swept "
+        f"{len(swept)} (ranking, depth) configurations: "
+        + ", ".join(f"{ranking}@{depth:.2f}" for ranking, depth in swept)
+    )
+
+
+def test_verdict_state_matches_the_figure_hatching():
+    """The app's words and the figure's shaded region are ONE predicate.
+
+    `verdict_line` branches on `lo <= 0 <= hi`, which is exactly the mask
+    `policy_curve_plot` draws its covers-zero region from. This sweeps every
+    published row the app can display and asserts the two agree at each. The
+    failure mode it catches is a verdict derived from the SIGN OF THE POINT
+    ESTIMATE, which agrees with the figure almost everywhere and disagrees
+    precisely where the finding is delicate.
+
+    The rows are read from the artifact rather than counted from a literal,
+    so a regenerated grid changes the sweep instead of failing it.
+    """
+    bands = _committed_bands()
+    published = sorted(
+        str(name)
+        for name in bands["ranking"].unique()
+        if not name.startswith(UNPROVEN_PREFIX)
+    )
+    swept = bands.loc[
+        (bands["contrast"] == streamlit_app.HEADLINE_CONTRAST)
+        & (bands["ranking"].isin(published))
+        & (bands["outcome"].isin(DISPLAYED_OUTCOMES))
+    ]
+
+    covers = (swept["lo"] <= 0.0) & (swept["hi"] >= 0.0)
+    assert covers.any() and (~covers).any(), (
+        f"the {len(swept)} swept rows are all of one kind "
+        f"({int(covers.sum())} cover zero, {int((~covers).sum())} do not), "
+        "so this test would pass against an app that returned one verdict "
+        "unconditionally."
+    )
+
+    for row, covered in zip(swept.itertuples(), covers):
+        line = streamlit_app.verdict_line(row.lo, row.hi)
+        is_covers_line = line == streamlit_app.VERDICT_COVERS_ZERO
+        if covered:
+            assert is_covers_line, (
+                f"at {row.ranking}/{row.outcome}/k={row.k} the committed "
+                f"band [{row.lo}, {row.hi}] covers zero and the figure "
+                f"shades that depth, but the app says {line[:60]!r}. The "
+                "words would claim a detectable result over a region the "
+                "picture beneath them marks as not detectable. Swept "
+                f"{len(swept)} rows."
+            )
+        else:
+            assert not is_covers_line, (
+                f"at {row.ranking}/{row.outcome}/k={row.k} the committed "
+                f"band [{row.lo}, {row.hi}] EXCLUDES zero and the figure "
+                "leaves that depth unshaded, but the app says it is not "
+                "detectable. Understating a result this project did earn is "
+                "as much a disagreement with the figure as overstating one. "
+                f"Swept {len(swept)} rows."
+            )
+
+    below = swept.loc[swept["hi"] < 0.0]
+    assert len(below) > 0, (
+        "no swept row has an interval lying entirely below zero, so the "
+        "third verdict state was never exercised by this sweep. Check the "
+        "artifact before trusting a pass here."
+    )
+    for row in below.itertuples():
+        assert (
+            streamlit_app.verdict_line(row.lo, row.hi)
+            == streamlit_app.VERDICT_BELOW_ZERO
+        ), (
+            f"at {row.ranking}/{row.outcome}/k={row.k} the band "
+            f"[{row.lo}, {row.hi}] lies entirely below zero and the app does "
+            "not say so. A negative number under a line reading 'the "
+            "interval lies entirely above zero' reads as good news."
+        )
+
+
+def test_all_three_verdict_states_are_reachable():
+    """Three states, three OBSERVATIONS. None proven by a source scan alone.
+
+    The third state was nearly missed in design and exists at exactly one
+    (ranking, outcome, depth) in the committed artifact, so a test that only
+    checked the string was present in the source would pass against an app
+    in which the branch returning it is unreachable.
+    """
+    body = _app_body()
+    for name, line in (
+        ("VERDICT_COVERS_ZERO", streamlit_app.VERDICT_COVERS_ZERO),
+        ("VERDICT_ABOVE_ZERO", streamlit_app.VERDICT_ABOVE_ZERO),
+        ("VERDICT_BELOW_ZERO", streamlit_app.VERDICT_BELOW_ZERO),
+    ):
+        assert line.split("**")[1] in body, (
+            f"{name} is not in streamlit_app.py's non-comment body. A "
+            "verdict state the source does not carry is a state the app "
+            "cannot report, and there are three."
+        )
+
+    at = AppTest.from_file(
+        str(config.ROOT / "streamlit_app.py"), default_timeout=60
+    ).run()
+    first_paint = {
+        label: verdict for label, _v, _i, verdict in _headline_triples(at)
+    }
+    spend_label = next(
+        label for label in first_paint if label.startswith(SPEND_METRIC_MARKER)
+    )
+    visit_label = next(
+        label for label in first_paint if label.startswith(VISIT_METRIC_MARKER)
+    )
+
+    assert first_paint[spend_label] == streamlit_app.VERDICT_COVERS_ZERO, (
+        "at first paint the shipped ranking's spend band covers zero and "
+        f"the app says {first_paint[spend_label][:60]!r}. The default view "
+        "showing a positive number the data cannot distinguish from zero, "
+        "and saying so, is the whole design problem of this phase."
+    )
+    assert first_paint[visit_label] == streamlit_app.VERDICT_ABOVE_ZERO, (
+        "at first paint the visit band excludes zero above and the app says "
+        f"{first_paint[visit_label][:60]!r}. The result this project did "
+        "earn must not be reported as undetectable."
+    )
+
+    at.select_slider[0].set_value(0.99)
+    at.run()
+    deep = {label: verdict for label, _v, _i, verdict in _headline_triples(at)}
+    assert deep[spend_label] == streamlit_app.VERDICT_BELOW_ZERO, (
+        "at a depth of 99% the shipped ranking's spend band lies entirely "
+        f"below zero and the app says {deep[spend_label][:60]!r}. Without "
+        "the third state the app prints a negative number under a line "
+        "reading 'the interval lies entirely above zero', which reads as "
+        "good news."
+    )
+
+
+def test_zero_by_construction_line_is_under_both_curves():
+    """V15, in BOTH selection states, and adjacent to the figure it explains.
+
+    The email-everyone marker sits at exactly zero with a degenerate band on
+    the headline contrast, by construction, and criterion 2 forbids dropping
+    it. A reviewer who is not told why reads it as a defect in the pipeline.
+    The line is asserted immediately after each `Image` so it cannot drift
+    away from the figure it explains.
+    """
+    at = AppTest.from_file(
+        str(config.ROOT / "streamlit_app.py"), default_timeout=60
+    ).run()
+
+    images = [
+        element
+        for element in _main_elements(at)
+        if _element_kind(element) == "Image"
+    ]
+    assert len(images) == 2, (
+        f"{len(images)} figures are on the page, not 2. The spend curve and "
+        "the visit curve are the D-03 pair in picture form, and a page "
+        "carrying one of them carries half the argument."
+    )
+
+    captions = _curve_captions(at)
+    assert len(captions) == 2, (
+        f"{len(captions)} of the 2 figures are immediately followed by a "
+        "caption. A caption that is not adjacent to its figure is a caption "
+        "a reader attaches to the wrong picture."
+    )
+    for caption in captions:
+        assert ZERO_BY_CONSTRUCTION_MARKER in caption, (
+            f"a curve caption reads {caption[:90]!r} and does not explain "
+            "the marker sitting at exactly zero at a depth of 100%. "
+            "Unexplained, it reads as a defect in the pipeline rather than "
+            "as the identity it is."
+        )
+        assert SELECTED_MARKER_PHRASE not in caption, (
+            f"at first paint the caption reads {caption[:90]!r}, describing "
+            "two separately-drawn rules at a depth where the selection and "
+            "the pre-registered anchor are the same depth and the two rules "
+            "sit on top of each other."
+        )
+
+    at.select_slider[0].set_value(0.37)
+    at.run()
+    moved = _curve_captions(at)
+    assert len(moved) == 2
+    for caption in moved:
+        assert SELECTED_MARKER_PHRASE in caption, (
+            f"away from the anchor the caption reads {caption[:90]!r} and "
+            "does not name the marker showing the selected depth, leaving a "
+            "reviewer to guess which of two rules moved."
+        )
+        assert ZERO_BY_CONSTRUCTION_MARKER in caption, (
+            f"the caption reads {caption[:90]!r}: the zero-by-construction "
+            "line is present at the anchor and absent away from it, so it "
+            "is conditional on a state it has nothing to do with."
+        )
+
+
+def test_app_uses_only_the_permitted_element_set():
+    """V2, V3, V4 and V12: four groups, four separate consequences.
+
+    Every token is assembled by concatenation, matching
+    `test_app_fits_nothing`, so this file does not trip a sweep of its own
+    tokens if one is ever widened to cover `tests/`.
+    """
+    body = _app_body()
+
+    # --- V2: the emphasis artist, and the three keywords it may not take ---
+    metrics = body.count("st.met" + "ric(")
+    assert 2 <= metrics <= 3, (
+        f"streamlit_app.py calls the metric element {metrics} times. The UI "
+        "contract reserves it for exactly three numbers -- the two halves "
+        "of the D-03 pair and k* -- because a fourth number in the app's "
+        "heaviest artist is a fourth number claiming headline weight. Two "
+        "exist at the end of plan 06-05 and the third arrives with the cost "
+        "exhibit in 06-06, which should tighten this bound to exactly 3."
+    )
+    assert "del" + "ta=" not in body, (
+        "a metric carries a delta. Streamlit renders it as a green-or-red "
+        "arrow, and an arrow asserts a direction the default view's spend "
+        "interval -- which runs from below zero to above it -- does not "
+        "support."
+    )
+    assert "he" + "lp=" not in body, (
+        "a metric carries a help tooltip. A tooltip is invisible in a "
+        "screenshot, which is precisely the failure D-07 exists to prevent: "
+        "the qualifier has to be in the picture, not behind a hover."
+    )
+    bordered = [
+        line for line in body.splitlines() if "bor" + "der=True" in line
+    ]
+    assert len(bordered) == 1 and "st.container(" in bordered[0], (
+        f"{len(bordered)} elements are bordered: {bordered!r}. Exactly one "
+        "border exists in this app and it is the headline container. Two "
+        "bordered metrics would split the pair that IS the argument into "
+        "two boxes, and a second border anywhere would compete with the "
+        "one emphasis the first screen is allowed."
+    )
+
+    # --- V3: no semantic colour signals detectability, in either state ---
+    for token in (
+        "st.suc" + "cess(",
+        "st.war" + "ning(",
+        "st.in" + "fo(",
+        "st.bad" + "ge(",
+    ):
+        assert token not in body, (
+            f"`{token}` appears in streamlit_app.py. A coloured box signals "
+            "detectability by colour, and at the pre-registered anchor the "
+            "shipped rule's spend interval covers zero while the "
+            "sensitivity that was NOT adopted excludes it -- so a green "
+            "badge rewards a reviewer for switching to the rule this "
+            "project deliberately did not adopt."
+        )
+
+    # --- V4: nothing may interpose itself in the main body's flat order ---
+    assert "unsafe_allow_" + "html" not in body, (
+        "custom markup is untestable, and every hierarchy this app needs is "
+        "already met by the title, the subheader, the metric, markdown bold "
+        "and the caption."
+    )
+    assert body.count("st.col" + "umns(") == 0, (
+        "st.columns appears in the main body. D-07's adjacency is asserted "
+        "by index over flat document order, and a column block interposes a "
+        "container between a metric and its qualifier -- which is the same "
+        "thing as letting the qualifier be cropped away."
+    )
+    columns = [line for line in body.splitlines() if ".col" + "umns(" in line]
+    assert len(columns) == 1 and "st.sidebar." in columns[0], (
+        f"{len(columns)} column blocks exist: {columns!r}. Exactly one is "
+        "permitted and it is the sidebar's cost/margin pair, which sits "
+        "outside the document order the adjacency walk asserts over."
+    )
+    assert "st.expan" + "der(" not in body, (
+        "an expander appears in the app. A collapsed qualifier is a cropped "
+        "qualifier: the interval and the verdict must be on the first "
+        "screen, not one click away from it."
+    )
+
+    # --- V12: the unshipped policy is not on screen --------------------
+    assert "optimism_" + "plot" not in body, (
+        "the optimism exhibit is rendered. It concerns the per-customer "
+        "argmax policy Phase 5 D-04 explicitly did not ship, and an "
+        "unshipped policy on screen contradicts D-01's exclusion of "
+        "everything unpublished."
+    )
+
+
+def test_app_performs_no_arithmetic_on_a_displayed_number():
+    """V13: every number on screen is a cell of an artifact, formatted.
+
+    The visit contrast is displayed as the RAW RATE, exactly as
+    `reports/policy.md` section 5 prints it, even though the figure directly
+    beneath it uses percentage points on its y axis. `plots.py` owns that
+    scaling through its own unit-scale map, and this app reproducing it
+    would be a second place the grain could be wrong -- which is this
+    project's named Pitfall 8, and the reason three denominators are alive
+    at once in this phase.
+    """
+    body = _app_body()
+
+    for token in ("* 100", "100 *", "/ 100", "*100", "100*", "/100"):
+        assert token not in body, (
+            f"`{token}` appears in streamlit_app.py's non-comment body. "
+            "Scaling a displayed number in the app layer opens a second "
+            "arithmetic path into the three grains reports/policy.md "
+            "section 4 fixes, and the two paths are then free to disagree."
+        )
+    assert "_UNIT_" + "SCALE" not in body, (
+        "the app reaches for plots.py's unit-scale map. That map is how the "
+        "FIGURE scales its axis; an app that scales a number with it is "
+        "converting a unit, and the pinned display formats exist so that it "
+        "never has to."
+    )
+
+
+def test_app_passes_no_styling_to_any_factory():
+    """V18 and V20: figure appearance is decided in exactly one place.
+
+    The 05-08 legibility checkpoint approved the figures as `plots.py`
+    builds them. A styling keyword passed from the app would be a second
+    place that appearance is decided, and the committed PNGs and the
+    browser's figures would stop being the same picture.
+    """
+    body = _app_body()
+
+    for token in ("figsize", "dpi=", "fontsize", "pad="):
+        assert token not in body, (
+            f"`{token}` is passed from the app. Both factories build at "
+            "their own committed geometry, and the one global raster "
+            "setting this module makes changes no inch and no point size."
+        )
+    assert "col" + "or=" not in body, (
+        "the app names a colour. The figure's colour vocabulary is "
+        "plots.py's, including the selected-depth marker, and a colour "
+        "chosen here is a colour no greyscale or print check ever saw."
+    )
+    hexes = re.findall(r"#[0-9a-fA-F]{6}", body)
+    assert hexes == [], (
+        f"the app carries the colour literal(s) {hexes!r}. A hex literal in "
+        "the app layer is a second copy of a figure constant, free to drift "
+        "from the one plots.py draws with."
+    )
+
+    selected_colour = plots._POLICY_SELECTED_COLOUR
+    assert isinstance(selected_colour, str) and selected_colour.startswith(
+        "#"
+    ), (
+        "plots._POLICY_SELECTED_COLOUR is "
+        f"{selected_colour!r}, not a colour constant on the plots module. "
+        "The selected-depth marker's colour entered the project's figure "
+        "vocabulary in this phase and it belongs beside the other five, "
+        "where the greyscale and marker-shape discipline is enforced."
+    )
+    assert selected_colour not in body, (
+        "the app carries a copy of the selected-marker colour rather than "
+        "leaving plots.py to own it."
+    )
+
+    call_sites = body.count("policy_curve_plot(")
+    anchored = body.count("anchor=economics.HEADLINE_CAPACITY")
+    assert call_sites >= 2 and anchored == call_sites, (
+        f"{call_sites} policy-curve call site(s) and {anchored} passing the "
+        "pre-registered anchor as the constant. The anchor NEVER moves -- "
+        "only the selection tracks the control -- and a call site that "
+        "passes something else draws a pre-commitment at a depth that was "
+        "not pre-committed."
+    )
+    assert "0.2" + "0" not in body, (
+        "the literal depth 0.20 appears in the app. D-13 fixed the anchor "
+        "as economics.HEADLINE_CAPACITY so that retuning it is a one-line "
+        "change; a transcribed copy is a second place it has to be changed "
+        "and a place it can be missed."
+    )
+
+
+def test_app_adds_no_second_covers_zero_encoding():
+    """D-08: the approved encoding has exactly one implementation.
+
+    The covers-zero region is drawn by `policy_curve_plot` and explained by
+    that figure's own legend entry. A Streamlit restatement beside it would
+    be a second encoding of one finding and a second visual vocabulary for
+    it, and two encodings of one thing are two things that can disagree.
+
+    The scan reads the non-comment body, which is what lets the app CARRY a
+    comment quoting the legend entry beside the caption -- the explanation
+    of why there is no callout there is exactly the thing a future agent
+    needs to read before adding one.
+    """
+    body = _app_body()
+
+    for token in ("hat" + "ch", "axv" + "span", "fill_" + "between"):
+        assert token not in body, (
+            f"`{token}` appears in streamlit_app.py's non-comment body. The "
+            "app is drawing its own covers-zero marking on top of the one "
+            "the figure already draws, and the 05-08 checkpoint approved "
+            "exactly one."
+        )
+    assert "95% band covers zero" not in body, (
+        "the app restates the figure's own legend wording. A restatement is "
+        "a second place the sentence can be edited, and the legend is the "
+        "place a reader is already looking when the question arises."
+    )
+
+    for token in (
+        "st.line_" + "chart(",
+        "st.area_" + "chart(",
+        "st.bar_" + "chart(",
+        "st.altair_" + "chart(",
+        "st.vega_lite_" + "chart(",
+        "st.plotly_" + "chart(",
+    ):
+        assert token not in body, (
+            f"`{token}` appears in the app. A second chart path is a second "
+            "implementation of an approved encoding (D-04), drawn by a "
+            "library whose output no legibility checkpoint has ever seen."
+        )
+
+    factories = set(re.findall(r"plots\.([A-Za-z_]+)\(", body))
+    approved = {"policy_curve_plot", "cost_sweep_plot"}
+    assert factories and factories <= approved, (
+        f"the app calls {sorted(factories)!r} on the plots module. The only "
+        "figures this contract puts on screen are the two policy curves and "
+        "the cost exhibit; anything else is a picture no plan approved."
     )
