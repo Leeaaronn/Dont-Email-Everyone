@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-09-11T00:47:40.330Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-09-11T01:29:16.426Z"
 last_activity: 2026-09-11
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 40
+  completed_plans: 41
   percent: 71
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
 Last activity: 2026-09-11
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -91,6 +91,7 @@ Progress: [█████████░] 91%
 | Phase 06 P03 | 32min | 3 tasks | 2 files |
 | Phase 06 P04 | 45min | 3 tasks | 3 files |
 | Phase 06 P05 | 55min | 3 tasks | 2 files |
+| Phase 06 P06 | 40min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -239,6 +240,11 @@ Recent decisions affecting current work:
 - [Phase 06-05]: verdict_line's docstring states its agreement with the figure's covers-zero marking WITHOUT spelling the matplotlib keyword for it, because the app's own source scan counts that token - second application of the 06-04 precedent, taken rather than weakening the scan
 - [Phase 06-05]: the curve captions format the pre-registered anchor's percentage from economics.HEADLINE_CAPACITY rather than transcribing "20%"; the rendered string is the contract's string character for character and the module holds no second copy of the depth
 - [Phase 06-05]: the st.metric( source count is bounded 2 <= n <= 3 rather than pinned at 2, with the assertion message telling plan 06-06 to tighten it to exactly 3 when the k* metric lands
+- [Phase 06-06]: The versus-emailing-everyone contrast is confined to an st.table cell and barred from headline weight STRUCTURALLY -- a table cell is not an st.metric, and st.metric is source-capped at exactly 3, all three spent
+- [Phase 06-06]: Cost and margin live inside the k* metric's LABEL rather than in an adjacent caption, so no crop separates the recommended depth from the price that produced it (Pitfall 5, closed structurally)
+- [Phase 06-06]: economics.optimal_k is called on the full 101-point grid INCLUDING k=0.0 while the capacity control offers 100 depths excluding it -- two grids that must not be unified, since k*=0.00 is a real answer at c/m >= 1.397 and emails_at_capacity raises at k=0
+- [Phase 06-06]: Every first-paint numeric string is pinned to reports/policy.md by substring search, with a two-entry allowlist (6.8%, 139.7%) whose justification the test itself verifies against manifest.json
+- [Phase 06-06]: Eight read-only tests in tests/test_app.py share one guarded first-paint AppTest run -- the fast selection had reached 19.6s against a 20s bar with three figures per run, and is now 10.6s
 
 ### Pending Todos
 
@@ -269,6 +275,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T00:47:31.740Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-09-11T01:29:16.415Z
+Stopped at: Completed 06-06-PLAN.md
 Resume file: None
