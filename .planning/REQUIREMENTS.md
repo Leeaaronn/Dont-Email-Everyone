@@ -27,7 +27,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Streamlit App
 
 - [ ] **APP-01**: Streamlit app where the user sets a targeting threshold (e.g. top-k% by predicted uplift) and sees projected incremental revenue for that targeted campaign vs. emailing the full list, per treatment arm
-- [ ] **APP-02**: Streamlit app deployed to Streamlit Community Cloud with a live link in the README
+- [x] **APP-02**: Streamlit app deployed to Streamlit Community Cloud with a live link in the README
 
 ### Documentation
 
@@ -62,7 +62,7 @@ Roadmap note: Phase 5 (Business & Policy Layer) is the phase where these quality
 | UPLIFT-02 | Phase 3 — Uplift Evaluation Metric | Complete |
 | UPLIFT-01 | Phase 4 — Uplift Modeling | Complete |
 | APP-01 | Phase 6 — Streamlit App & Deployment | Pending |
-| APP-02 | Phase 6 — Streamlit App & Deployment | Pending |
+| APP-02 | Phase 6 — Streamlit App & Deployment | Complete |
 | DOC-01 | Phase 7 — Documentation & Delivery | Pending |
 
 **Coverage:**

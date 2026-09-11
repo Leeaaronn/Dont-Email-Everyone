@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "06-08-PLAN.md Task 2 -- BLOCKING human-action checkpoint (Streamlit Community Cloud deploy)"
-last_updated: "2026-09-11T20:01:24.559Z"
-last_activity: "2026-09-11 - Plan 06-08 Task 1 done (readiness gate green, 633 tests, competing-dependency-file test added); stopped at the Task 2 deploy checkpoint"
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-09-11T21:16:53.143Z"
+last_activity: 2026-09-11
 progress:
   total_phases: 7
   completed_phases: 5
@@ -26,18 +26,33 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 8 of 9 — PARTIAL (Task 1 of 3 done; Tasks 2 and 3 outstanding)
-Status: BLOCKED at 06-08 Task 2 — `checkpoint:human-action`, `gate="blocking"`. The Streamlit
-Community Cloud deploy is a browser flow at share.streamlit.io with no CLI and no public API.
-Resume needs: the live URL, the Python version actually selected, the subdomain actually used,
-and whether scikit-learn / statsmodels / duckdb / pandera appeared in the build log.
-Last activity: 2026-09-11 - Plan 06-08 Task 1 committed (d4d8a81); readiness gate green and pushed
+Plan: 9 of 9
+Status: Ready to execute — 06-08 is COMPLETE and the app is LIVE at
+https://dont-email-everyone-hillstrom.streamlit.app/
+
+06-09 inherits three unfinished verifications. None of them may be assumed:
+
+  1. The 12-hour cold-start check. Last known traffic 2026-09-11T21:04Z, so the earliest
+     valid run is 2026-09-12T09:04Z. Any visit to the app before then resets the clock.
+  2. The build-log check for scikit-learn / statsmodels / duckdb / pandera (threat T-06-31).
+     NOT performed at deploy time. The failure mode is silent by construction, so an
+     unperformed check is NOT a pass. Log: Community Cloud -> Manage app -> terminal pane.
+  3. The deployed Python version, readable from the Community Cloud app settings pane.
+     Not captured at deploy time; low consequence (all pins have cp311/cp312/cp313 wheels),
+     recorded for reproducibility.
+
+Also outstanding: a human incognito VISUAL check. Reachability was proven by unauthenticated
+curl reaching HTTP 200 on the app shell; the rendered page itself was never observed, because
+content arrives over a websocket into an SPA.
+
+Last activity: 2026-09-11 - Completed 06-08: readiness gate, deploy, README link + test
 
 Progress: [██████████] 98%
 
-> Note: the bar counts 06-08 as complete because its SUMMARY exists on disk. It is PARTIAL —
-> Tasks 2 and 3 are outstanding, and no execution metric was recorded for it for the same reason.
-> APP-02 and C-5 are NOT met: the app is not yet deployed.
+> Note: APP-02 is met — the app is deployed and the README carries the live link behind a test.
+> ROADMAP Phase 6 criterion 5 is HALF met: its README clause is satisfied and guarded, its
+> recorded-human-check-at-least-12-hours-after-last-traffic clause is 06-09's and is outstanding.
+> Phase 6 is NOT closeable until the three items above are discharged.
 
 ## Performance Metrics
 
@@ -100,6 +115,7 @@ Progress: [██████████] 98%
 | Phase 06 P05 | 55min | 3 tasks | 2 files |
 | Phase 06 P06 | 40min | 3 tasks | 2 files |
 | Phase 06 P07 | 55min | 3 tasks | 4 files |
+| Phase 06 P08 | 95min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -262,6 +278,10 @@ Recent decisions affecting current work:
 - [Phase 06-08]: The deployment tuple is Leeaaronn/Dont-Email-Everyone, branch main, entrypoint streamlit_app.py at the repo root, Python 3.11 (3.12 accepted with no pin change), proposed subdomain dont-email-everyone -- the project's only state that does not live in git, recorded so the deployment is reproducible
 - [Phase 06-08]: test_no_competing_dependency_file_exists derives its searched directories from streamlit_app.py's own location and asserts requirements.txt's presence alongside the competing files' absence -- Cloud installs the first dependency file it finds and stops, so every criterion-4 assertion in the suite was conditional on something nothing was checking
 - [Phase 06-08]: Repo visibility taken from project memory (public), not from gh -- gh is unauthenticated in this environment and would wrongly report private; deployment works either way, a private repo just needs admin rights for the Deploy Key
+- [Phase 06-08]: The deployment tuple as actually deployed -- Leeaaronn/Dont-Email-Everyone, branch main, entrypoint streamlit_app.py at the repo root, subdomain dont-email-everyone-hillstrom, live at https://dont-email-everyone-hillstrom.streamlit.app/. The plan's proposed plain subdomain was taken by another app; the documented fallback was used. This is the project's only state that does not live in git
+- [Phase 06-08]: The deployed Python version and the build-log check for the four banned packages were NOT captured at deploy time and are recorded as UNVERIFIED, not as passes. T-06-31's failure mode is silent by construction, so an unperformed check must never be summarised as a clean one. Both are handed to plan 06-09
+- [Phase 06-08]: test_readme_carries_the_live_app_link matches the URL by SHAPE, never by the literal subdomain -- the subdomain moved twice in one session, and a literal pin teaches the next person to edit the test whenever the deployment moves
+- [Phase 06-08]: Live-app reachability was proven by unauthenticated curl reaching HTTP 200 on the app shell; the RENDERED page was not observed, because content arrives over a websocket into an SPA. A human incognito visual check remains outstanding
 
 ### Pending Todos
 
@@ -301,6 +321,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T20:00:37.121Z
+Last session: 2026-09-11T21:16:52.859Z
 Stopped at: Completed 06-07-PLAN.md
 Resume file: None
