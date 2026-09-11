@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 Phase: 06 (streamlit-app-deployment) — EXECUTING
 Plan: 8 of 9
 Status: Ready to execute
-Last activity: 2026-09-11
+Last activity: 2026-09-11 - Completed quick task 260911-gch: Round the Streamlit app's displayed contrast figures from six decimals to three
 
 Progress: [██████████] 95%
 
@@ -265,6 +265,14 @@ None yet.
 - ~~[Phase 4/5] Multi-arm channel-choice tie-break rule is undecided; T-learner scores across arms share a correlated control group and are only loosely comparable. Needs a documented decision.~~ **CLOSED by D-19, documented in 04-09.** The decision is that Phase 4 delivers a **documented assumption and a measurement, not a rule**: both arms are fitted against the same **21,306** control customers, so their Qini coefficients may not be numerically compared, and an argmax over the two arms' scores is a **winner's-curse estimator** over two correlated noisy estimates. The incomparability is quantified rather than asserted — between-arm correlation **0.422742** on visit with **4.4964%** sign disagreement, from `data/processed/model.json` — and handed to Phase 5, which owns the rule and the shared-control bootstrap that makes it honest. Stated above the results table in `reports/model.md` and pinned by `tests/test_reports.py::test_model_report_states_the_shared_control_assumption`.
 - ~~[Phase 4/5] Whether a genuine negative-uplift segment survives holdout validation on the Mens arm is unknown. Settle empirically; do not assume either answer.~~ **CLOSED by 04-05.** Settled empirically on the visit cell at the committed split: on the Mens arm **no** — the minimum predicted uplift on the shared control holdout is **+0.046469** with a zero negative fraction. On the Womens arm **yes** — the minimum is **-0.070802** with **4.50%** of shared rows below zero. The phenomenon appears on the opposite arm from the one the blocker names. Pinned by `tests/test_models.py::test_cross_arm_metrics_settle_the_negative_uplift_question`; 04-09 writes it up and notes the arm swap.
 - [Phase 6] Streamlit Community Cloud resource limits are sourced from a Feb-2024 forum FAQ (MEDIUM confidence). Re-check at planning time.
+- [Phase 6] **Recorded, not scheduled (2026-09-11 review).** The six-entry legend sits inside the plot area on both policy curves and overlaps the curve and the hatched covers-zero region. The reviewer declined to request a fix because no remedy exists that does not restyle `dont_email_everyone/plots.py`, which would move the committed PNGs and fail 06-03's D-06 regeneration gate. Carried as a known cosmetic defect.
+- ~~[Phase 6] `Assumptions, not data` reported clipped at the top in one scroll position.~~ **CLOSED 2026-09-11, not a defect.** Streamlit 1.63 renders a fixed `stHeader` bar and scrolls page content beneath it, so any element resting at that scroll offset loses its top few pixels. The app contributes nothing: no custom CSS, no `unsafe_allow_html`, `set_page_config` sets only title, layout and sidebar state, and `.streamlit/config.toml` sets only `toolbarMode`, `base` and `primaryColor`. The only remedy is custom CSS, which this app forbids by contract.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260911-gch | Round the Streamlit app's displayed contrast figures from six decimals to three | 2026-09-11 | 0a14015 | [260911-gch-round-the-app-s-displayed-contrast-figur](./quick/260911-gch-round-the-app-s-displayed-contrast-figur/) |
 
 ## Deferred Items
 
