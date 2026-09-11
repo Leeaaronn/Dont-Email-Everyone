@@ -299,6 +299,91 @@ def _run_app():
     ).run()
 
 
+def _element_strings(element, *, include_options):
+    """Every readable string ONE element carries.
+
+    A table's `value` is a pandas frame rather than a string, so its cells
+    -- the most number-dense text on the page -- are invisible to a
+    collector that only looks for `str`. Its column titles and row labels
+    are read out too: they are the three contrast names and the two outcome
+    names, and a reviewer reads a cell through them.
+    """
+    for attribute in ("value", "label", "body"):
+        text = getattr(element, attribute, None)
+        if isinstance(text, str):
+            yield text
+        elif isinstance(text, pd.DataFrame):
+            yield from (str(column) for column in text.columns)
+            yield from (str(index) for index in text.index)
+            yield from (str(cell) for cell in text.to_numpy().ravel())
+    if include_options:
+        options = getattr(element, "options", None)
+        if options:
+            yield from (str(option) for option in options)
+
+
+# The one first-paint run the read-only tests share. A list rather than a
+# module-level `None` so the cache is a single object this file owns and
+# nothing reassigns.
+_FIRST_PAINT = []
+
+
+def _first_paint():
+    """ONE shared default-position run, for tests that only READ the page.
+
+    Measured, because this is a latency fix and not a preference: at the end
+    of plan 06-06 the app renders THREE figures per run rather than two, and
+    the `-m "not slow"` selection this file is driven by came to 19.6 s with
+    one `AppTest` run per test against the 20-second bar `06-VALIDATION.md`
+    fixes. That is not headroom; it is a bar about to be crossed by whatever
+    test plan 06-07 adds. Eight read-only tests sharing one run puts it back
+    under half the budget, and no assertion in any of them is weakened --
+    they read exactly the page they read before.
+
+    ANY TEST THAT MOVES A WIDGET MUST CALL `_run_app()` AND GET ITS OWN.
+    The guard below makes that a named failure instead of a silent
+    contamination: every handout re-checks that the four controls are still
+    at their opening positions, so a leaked `set_value` reports itself to
+    the next test that asks for the page rather than surfacing as an
+    unrelated assertion failing for an unrelated-looking reason.
+    """
+    if not _FIRST_PAINT:
+        _FIRST_PAINT.append(_run_app())
+    at = _FIRST_PAINT[0]
+
+    for actual, opening, control in (
+        (
+            at.selectbox[0].value,
+            _committed_manifest()["frame"]["ranking"],
+            "the targeting rule",
+        ),
+        (
+            at.select_slider[0].value,
+            economics.HEADLINE_CAPACITY,
+            "the targeting depth",
+        ),
+        (
+            at.number_input[0].value,
+            streamlit_app.ASSUMED_COST_PER_EMAIL,
+            "the assumed cost per email",
+        ),
+        (
+            at.number_input[1].value,
+            streamlit_app.ASSUMED_GROSS_MARGIN,
+            "the assumed gross margin",
+        ),
+    ):
+        assert actual == opening, (
+            f"the shared first-paint run has {control} at {actual!r} rather "
+            f"than its opening position {opening!r}, so an earlier test in "
+            "this file moved a control on the shared object. Every test "
+            "after it would then be asserting against a page nobody asked "
+            "for. A test that moves a widget must call _run_app() and own "
+            "its AppTest."
+        )
+    return at
+
+
 def _rendered_text(at):
     """Every string a reviewer could read, main body and sidebar alike.
 
@@ -309,13 +394,7 @@ def _rendered_text(at):
     chunks = []
     for block in (at.main, at.sidebar):
         for element in block:
-            for attribute in ("value", "label", "body"):
-                text = getattr(element, attribute, None)
-                if isinstance(text, str):
-                    chunks.append(text)
-            options = getattr(element, "options", None)
-            if options:
-                chunks.extend(str(option) for option in options)
+            chunks.extend(_element_strings(element, include_options=True))
     return "\n".join(chunks)
 
 
@@ -530,7 +609,7 @@ def test_capacity_control_uses_the_committed_grid():
     )
     assert len(expected_depths) == len(committed) - 1
 
-    control = _run_app().select_slider[0]
+    control = _first_paint().select_slider[0]
     disagreement = next(
         (
             f"{offered!r} where the artifact gives {wanted!r}"
@@ -590,7 +669,7 @@ def test_only_published_rankings_are_offered():
         "artifact before trusting a pass here."
     )
 
-    at = _run_app()
+    at = _first_paint()
     control = at.selectbox[0]
 
     assert control.options == [
@@ -620,7 +699,7 @@ def test_ranking_status_travels_with_the_control():
     all, which is why this test looks at the option strings specifically
     rather than at the page as a whole.
     """
-    options = _run_app().selectbox[0].options
+    options = _first_paint().selectbox[0].options
 
     for status in (SHIPPED_STATUS, SENSITIVITY_STATUS):
         assert any(status in option for option in options), (
@@ -643,7 +722,7 @@ def test_cost_and_margin_are_labelled_assumptions():
     assert streamlit_app.ASSUMED_COST_PER_EMAIL == pair["cost_per_email"]
     assert streamlit_app.ASSUMED_GROSS_MARGIN == pair["gross_margin"]
 
-    labels = [widget.label for widget in _run_app().number_input]
+    labels = [widget.label for widget in _first_paint().number_input]
     assert len(labels) == 2
     for label in labels:
         assert "ASSUMED" in label and "not measured" in label, (
@@ -823,7 +902,7 @@ def test_headline_cannot_be_read_without_its_qualifier():
     adjacency test, which asserts the same property over a character window
     in the rendered document.
     """
-    elements = _main_elements(_run_app())
+    elements = _main_elements(_first_paint())
     verdicts = {
         streamlit_app.VERDICT_COVERS_ZERO,
         streamlit_app.VERDICT_ABOVE_ZERO,
@@ -1190,13 +1269,15 @@ def test_app_uses_only_the_permitted_element_set():
 
     # --- V2: the emphasis artist, and the three keywords it may not take ---
     metrics = body.count("st.met" + "ric(")
-    assert 2 <= metrics <= 3, (
+    assert metrics == 3, (
         f"streamlit_app.py calls the metric element {metrics} times. The UI "
         "contract reserves it for exactly three numbers -- the two halves "
         "of the D-03 pair and k* -- because a fourth number in the app's "
-        "heaviest artist is a fourth number claiming headline weight. Two "
-        "exist at the end of plan 06-05 and the third arrives with the cost "
-        "exhibit in 06-06, which should tighten this bound to exactly 3."
+        "heaviest artist is a fourth number claiming headline weight, and "
+        "the versus-emailing-everyone contrast is confined to a table cell "
+        "BY THIS CAP rather than by anyone's discipline. The bound read "
+        "2 <= n <= 3 while the app was half built; the cost exhibit landed "
+        "in plan 06-06 and closed it."
     )
     assert "del" + "ta=" not in body, (
         "a metric carries a delta. Streamlit renders it as a green-or-red "
@@ -1405,4 +1486,488 @@ def test_app_adds_no_second_covers_zero_encoding():
         f"the app calls {sorted(factories)!r} on the plots module. The only "
         "figures this contract puts on screen are the two policy curves and "
         "the cost exhibit; anything else is a picture no plan approved."
+    )
+
+
+# --------------------------------------------------------------------------
+# Plan 06-06: the contrasts table, the cost exhibit and the footer
+# --------------------------------------------------------------------------
+
+# The substring that identifies the cost exhibit's metric, so the tests
+# below point at it specifically and the headline walk above keeps pointing
+# at the D-03 pair. The two selectors are disjoint by construction: this one
+# names a price, that one names a contrast.
+OPTIMAL_DEPTH_MARKER = "Cost-optimal depth"
+
+ASSUMPTIONS_SECTION = "Assumptions, not data"
+
+# Every numeric string the pinned display formats can produce: an optional
+# sign, an optional currency sign, thousands separators, an optional decimal
+# tail and an optional percent sign. Deliberately greedy about what counts
+# as a number -- a sweep that only recognised six-decimal dollars would let
+# a reworded percentage or a rounded count through unchecked.
+NUMERIC_STRING = re.compile(r"[-+]?\$?\d[\d,]*(?:\.\d+)?%?")
+
+# The element kinds that END the block a metric's caption may live in. A
+# caption found past one of these belongs to something else, and D-09 asks
+# for a caption under the number rather than somewhere on the page.
+CAPTION_BLOCK_BOUNDARIES = frozenset(
+    {"Metric", "Image", "Table", "Divider", "Subheader", "Title"}
+)
+
+# The four clauses D-09 and D-11 require of the footer, each with what its
+# absence would cost. Asserted one at a time so a failure names the missing
+# clause rather than printing the whole paragraph.
+FOOTER_CLAUSES = (
+    (
+        "2008",
+        "the data vintage. Email response rates, list hygiene and spam "
+        "filtering have all moved since, and a reviewer who does not know "
+        "the year reads these numbers as current",
+    ),
+    (
+        "two weeks",
+        "the outcome window. Every figure above is a two-week effect, and "
+        "an unstated window invites a reader to annualise it",
+    ),
+    (
+        "nothing here is scaled up to a larger list",
+        "the no-extrapolation statement (D-11). A per-customer figure with "
+        "no such statement beside it is an invitation to multiply it by a "
+        "list nobody measured",
+    ),
+    (
+        "reads only files committed to this repository",
+        "the provenance statement. It is also the APPROVED WORDING: the "
+        "network sweep in tests/test_no_network.py is blind to comments and "
+        "string literals, so a footer phrased around any of the tokens it "
+        "forbids would fail that test on correct code",
+    ),
+)
+
+# V14's allowlist: strings the app renders that reports/policy.md does not
+# carry verbatim. TWO ENTRIES, AND BOTH ARE THE REPORT'S OWN NUMBER WRITTEN
+# IN THE OTHER OF THE TWO CONVENTIONS THIS PROJECT USES FOR A RATIO. The
+# report's section 10 writes the cost-to-margin breakpoints as dimensionless
+# ratios; the app's contract copy writes them as percentages OF GROSS
+# MARGIN, naming the denominator in the same sentence.
+#
+# Each entry is (manifest key, the ratio as the report writes it, why). The
+# test does not take the reason on trust: it asserts the manifest value
+# formats to the displayed string, that the report carries the ratio form,
+# and that the two are the same number. An allowlist that grows silently is
+# the failure mode this shape is chosen to prevent.
+POLICY_REPORT_ALLOWLIST = {
+    "6.8%": (
+        "first_breakpoint",
+        "0.068",
+        "section 10 writes the first breakpoint as c/m = 0.068; the app "
+        "writes the same quantity as a percentage of gross margin and "
+        "formats it from the manifest rather than transcribing it",
+    ),
+    "139.7%": (
+        "first_ratio_with_k_star_zero",
+        "1.397",
+        "section 10 writes the ratio at which the optimal depth first "
+        "reaches zero as 1.397; the app writes the same quantity as a "
+        "percentage of gross margin, from the same manifest field",
+    ),
+}
+
+
+def _optimal_depth_metric(at):
+    """The one metric carrying the cost-optimal depth, or a named failure."""
+    metrics = [
+        element
+        for element in _main_elements(at)
+        if _element_kind(element) == "Metric"
+        and OPTIMAL_DEPTH_MARKER in (element.label or "")
+    ]
+    assert len(metrics) == 1, (
+        f"{len(metrics)} metrics on the page carry "
+        f"{OPTIMAL_DEPTH_MARKER!r}. The cost exhibit publishes exactly one "
+        "optimal depth, and two of them would be two answers to the same "
+        "question at the same price."
+    )
+    return metrics[0]
+
+
+def _displayed_numbers(at):
+    """Every numeric string the app RENDERS, main body and sidebar.
+
+    The control MENUS are excluded, and that is a scoping decision rather
+    than a loophole. A menu is the list of positions a control could take,
+    not a result the page displays; only the selected one is on screen, and
+    the selected depth reaches the page in its own right, because the
+    recommendation sentence names both the depth and the mailing size it
+    buys. Nothing a reviewer can actually read escapes this collection.
+
+    Table cells are included, through `_element_strings`. They are the most
+    number-dense text on the page and the only place the versus-everyone
+    contrast appears at all.
+    """
+    chunks = []
+    for block in (at.main, at.sidebar):
+        for element in block:
+            chunks.extend(_element_strings(element, include_options=False))
+    return sorted(
+        {match for chunk in chunks for match in NUMERIC_STRING.findall(chunk)}
+    )
+
+
+@pytest.mark.slow
+def test_optimal_depth_moves_with_cost():
+    """Criterion 3: the recommended depth MOVES as cost and margin change.
+
+    MARKED SLOW BY THIS FILE'S ARITHMETIC RULE, NOT BY JUDGEMENT. It drives
+    three `AppTest` rerun settings, which is more than two. It is the third
+    and last of the three tests the module docstring names, and with it the
+    phase's slow set is closed; it runs by explicit `-m slow` selection and
+    on every full-suite invocation, which carries no `-m`.
+
+    Nothing about it is reduced by the marker. All three committed
+    illustrative pairs are driven, each expected value is READ OUT OF
+    `manifest.json` rather than transcribed here, and the three rendered
+    values are asserted pairwise distinct -- which is the literal claim
+    criterion 3 makes and is exactly what a test asserting a single value
+    would not prove.
+    """
+    pairs = _committed_manifest()["cost_exhibit"]["illustrative_pairs"]
+    assert len(pairs) == 3, (
+        f"manifest.json publishes {len(pairs)} illustrative (cost, margin) "
+        "pairs, not 3. This test drives the committed exhibit rather than "
+        "three settings of its own, so a changed exhibit changes the sweep."
+    )
+    expected = [f"{pair['k_star']:.0%}" for pair in pairs]
+    assert len(set(expected)) == 3, (
+        f"the committed pairs give optimal depths {expected!r}, which are "
+        "not three distinct values. The distinctness assertion below would "
+        "then be testing the artifact's degeneracy rather than the app, so "
+        "re-derive the exhibit before weakening it."
+    )
+
+    at = AppTest.from_file(
+        str(config.ROOT / "streamlit_app.py"), default_timeout=60
+    ).run()
+    rendered = []
+    for pair, want in zip(pairs, expected):
+        cost = float(pair["cost_per_email"])
+        margin = float(pair["gross_margin"])
+        at.number_input[0].set_value(cost)
+        at.number_input[1].set_value(margin)
+        at.run()
+
+        metric = _optimal_depth_metric(at)
+        assert metric.value == want, (
+            f"at an assumed ${cost:.3f} per email and a {margin:.0%} margin "
+            f"the app renders an optimal depth of {metric.value!r} where "
+            f"manifest.json -> cost_exhibit.illustrative_pairs records "
+            f"{want!r}. The app and the committed cost figure would then "
+            "publish different optima for the same published assumption."
+        )
+        rendered.append(metric.value)
+
+    assert len(set(rendered)) == 3, (
+        f"the app rendered {rendered!r} across the three committed "
+        "(cost, margin) pairs. ROADMAP criterion 3 asks that the "
+        "recommended depth VISIBLY MOVE as those inputs change; a depth "
+        "that is right at one setting and frozen across the other two "
+        "satisfies an equality and not the criterion."
+    )
+
+
+def test_optimal_depth_is_never_quoted_without_its_price():
+    """V9: the depth and the price it came from are ONE element.
+
+    `economics.optimal_k`'s own docstring makes this a rule rather than a
+    preference -- an optimum with no cost attached reads as a
+    recommendation about the list rather than a statement about a price,
+    which is 06-RESEARCH's Pitfall 5. It is closed STRUCTURALLY here: the
+    cost and the margin are inside the metric's label, and a label is the
+    same element as its value, so no crop of this page separates them. A
+    caption underneath would have been an adjacency, which is the weaker
+    claim D-07 already had to defend with an index walk.
+
+    Two settings, because a label carrying a fixed string would satisfy one.
+    """
+    pairs = _committed_manifest()["cost_exhibit"]["illustrative_pairs"]
+    first, last = pairs[0], pairs[-1]
+    assert first["cost_per_email"] != last["cost_per_email"], first
+    assert first["gross_margin"] != last["gross_margin"], (
+        "the two driven pairs share a gross margin, so a label that tracked "
+        "the cost and ignored the margin would pass this test."
+    )
+
+    at = _run_app()
+    for pair in (first, last):
+        cost = float(pair["cost_per_email"])
+        margin = float(pair["gross_margin"])
+        if pair is last:
+            at.number_input[0].set_value(cost)
+            at.number_input[1].set_value(margin)
+            at.run()
+
+        label = _optimal_depth_metric(at).label
+        for shown, what in (
+            (f"{cost:.3f}", "the assumed cost per email"),
+            (f"{margin:.0%}", "the assumed gross margin"),
+        ):
+            assert shown in label, (
+                f"the optimal-depth metric is labelled {label!r}, which "
+                f"does not carry {what} ({shown}). Pitfall 5: a depth with "
+                "no price attached reads as a recommendation about the "
+                "list rather than as a statement about a price, and the "
+                "label is where that cannot be cropped away from the value."
+            )
+
+
+def test_app_renders_exactly_three_figures_each_closed():
+    """V11: three figures, one display call site, one close.
+
+    The arithmetic, from its parts: two policy curves under `Where the gain
+    is, and is not, detectable` plus one cost exhibit under
+    `Assumptions, not data` is THREE render call sites, and the helper's own
+    definition makes the token appear FOUR times in the non-comment body.
+    `st.pyplot(` and `plt.close(` stay at ONE each however many figures are
+    drawn, because the helper is the only call site -- which is the whole
+    point of criterion 4's equality being about call sites rather than
+    renders.
+
+    The source count and the rendered count are asserted TOGETHER. The
+    source count proves every figure goes through the closing helper; the
+    rendered count proves three figures actually reach the page. Either one
+    alone passes against a defect the other catches.
+    """
+    body = _app_body()
+
+    assert body.count("def render(") == 1, (
+        f"{body.count('def render(')} render helpers are defined. The count "
+        "below is one definition plus three call sites; a second definition "
+        "makes that arithmetic meaningless and a second helper is a second "
+        "place the close can be forgotten."
+    )
+    assert body.count("render(") == 4, (
+        f"the render token appears {body.count('render(')} times in "
+        "streamlit_app.py's non-comment body, not 4. Four is one definition "
+        "plus the three call sites the layout contract fixes: the spend "
+        "curve, the visit curve and the cost exhibit. A fifth occurrence is "
+        "a fourth figure that no plan approved."
+    )
+    assert body.count("st.pyplot(") == body.count("plt.close(") == 1, (
+        f"{body.count('st.pyplot(')} display call(s) and "
+        f"{body.count('plt.close(')} close(s). Adding a third figure must "
+        "not add either: the helper is the one call site, and that is what "
+        "makes 'every figure is closed after it is rendered' a count rather "
+        "than a habit."
+    )
+
+    images = [
+        element
+        for element in _main_elements(_first_paint())
+        if _element_kind(element) == "Image"
+    ]
+    assert len(images) == 3, (
+        f"{len(images)} figures render at first paint, not 3. The layout "
+        "contract fixes two policy curves above the fold and the cost "
+        "exhibit below a divider; a figure that is in the source but not on "
+        "the page is a figure a reviewer never sees, and a fourth on the "
+        "page escaped the helper the source count above trusts."
+    )
+
+
+def test_every_number_has_a_caption_and_the_footer_is_complete():
+    """D-09 and V16: a plain-language line under every number, and a footer.
+
+    D-09 read literally: every displayed number carries a one-line
+    plain-language caption. The walk below is in document order and stops at
+    the next block boundary, because a caption two numbers further down the
+    page explains the wrong number.
+    """
+    at = _first_paint()
+    elements = _main_elements(at)
+
+    captioned = 0
+    for index, element in enumerate(elements):
+        if _element_kind(element) != "Metric":
+            continue
+        window = []
+        for following in elements[index + 1:]:
+            if _element_kind(following) in CAPTION_BLOCK_BOUNDARIES:
+                break
+            window.append(following)
+        assert any(_element_kind(item) == "Caption" for item in window), (
+            f"the metric {element.label!r} has no caption before the next "
+            "block begins. D-09 asks for a plain-language line under every "
+            "displayed number; a number with none is a number whose grain, "
+            "denominator and comparator the reader has to infer."
+        )
+        captioned += 1
+    assert captioned == 3, (
+        f"{captioned} metrics were walked, not 3. The contract puts exactly "
+        "three numbers in the app's heaviest artist, and a walk that missed "
+        "one proved nothing about it."
+    )
+
+    images = [
+        index
+        for index, element in enumerate(elements)
+        if _element_kind(element) == "Image"
+    ]
+    assert len(images) == 3, len(images)
+    for index in images:
+        assert _element_kind(elements[index + 1]) == "Caption", (
+            f"the figure at position {index} is followed by a "
+            f"{_element_kind(elements[index + 1])} rather than a caption. A "
+            "figure whose gloss is not adjacent to it is a figure a reader "
+            "attaches to the wrong caption."
+        )
+
+    tables = [
+        index
+        for index, element in enumerate(elements)
+        if _element_kind(element) == "Table"
+    ]
+    assert len(tables) == 1, (
+        f"{len(tables)} tables are on the page, not 1. The contrasts table "
+        "is the only one, and it is where the versus-emailing-everyone "
+        "figure is confined."
+    )
+    assert _element_kind(elements[tables[0] + 1]) == "Caption", (
+        "the contrasts table is not followed by a caption. One caption "
+        "discharges D-09 for all six of its cells by naming the unit, the "
+        "grain and the interval convention; without it the table publishes "
+        "six numbers with no denominator attached to any of them."
+    )
+
+    footer = elements[-1]
+    assert _element_kind(footer) == "Caption", (
+        f"the last element on the page is a {_element_kind(footer)}, not "
+        "the footer caption. The footer is where the vintage, the outcome "
+        "window and the no-extrapolation statement live, and a page that "
+        "ends on something else has lost all three."
+    )
+    for clause, consequence in FOOTER_CLAUSES:
+        assert clause in footer.value, (
+            f"the footer does not carry {clause!r}: {consequence}."
+        )
+
+    rendered = _rendered_text(at)
+    assert "64,000" not in rendered, (
+        "the full Hillstrom sample size is on screen. D-11: every figure in "
+        "this app is measured on the evaluation holdout as it stands, and a "
+        "list size beside a per-customer figure is an invitation to "
+        "multiply the two -- which is the extrapolation reports/policy.md "
+        "section 4 declines to perform and tests/test_reports.py enforces a "
+        "250-character exclusion zone around."
+    )
+    for name in _committed_curve()["ranking"].unique():
+        if str(name).startswith(UNPROVEN_PREFIX):
+            assert str(name) not in rendered, (
+                f"{name} is named somewhere a reviewer can read it, now "
+                "including a table cell. An unproven cell on screen is a "
+                "result this project has not earned the right to show."
+            )
+
+    # Assembled by concatenation so this file does not trip the sweep it is
+    # checking, the same discipline test_app_fits_nothing uses. Eight
+    # tokens, not the six the UI contract's prose says: the regex in
+    # tests/test_no_network.py carries eight alternatives, and sweeping all
+    # of them is strictly stronger than sweeping the prose's count.
+    for token in (
+        "req" + "uests",
+        "url" + "lib",
+        "ht" + "tpx",
+        "aio" + "http",
+        "urlret" + "rieve",
+        "soc" + "ket",
+        "ftp" + "lib",
+        "http." + "client",
+    ):
+        assert token not in rendered, (
+            f"the rendered page carries {token!r}. That sweep is blind to "
+            "comments and string literals by design, so the copy is phrased "
+            "around it -- 'reads only files committed to this repository' "
+            "is the approved wording, and a footer that named the token "
+            "would fail a test on correct code."
+        )
+
+
+def test_first_paint_numbers_appear_verbatim_in_the_policy_report():
+    """V14: the app cannot contradict the evidence document on first paint.
+
+    A SUBSTRING SEARCH, NOT A TOLERANCE. The most-screenshotted state of
+    this app is its default view, and every number in that view has to be
+    findable, character for character, in reports/policy.md. A tolerance
+    would let the app round where the report does not, and two documents
+    printing the same quantity to different precision is exactly the
+    divergence a reviewer would have to reconcile themselves.
+    """
+    report = (config.ROOT / "reports" / "policy.md").read_text(
+        encoding="utf-8"
+    )
+    exhibit = _committed_manifest()["cost_exhibit"]
+    numbers = _displayed_numbers(_first_paint())
+
+    assert len(numbers) >= 20, (
+        f"only {len(numbers)} distinct numeric strings were collected from "
+        f"the first paint: {numbers!r}. The default view carries two "
+        "headline figures, six table cells with two bounds each, a mailing "
+        "size, a frame size and a cost exhibit, so a collection this small "
+        "means the collector is broken and every assertion below would pass "
+        "for the wrong reason."
+    )
+    # Both halves of the D-03 pair, as reports/policy.md section 5 prints
+    # them. This is a precondition AND the strictest case of the check
+    # below: it fires either because the collector stopped reading the
+    # headline block, which would make every assertion after it vacuous, or
+    # because a display format changed and the app no longer prints the
+    # string the evidence document prints. The message names both, because
+    # a control that cuts the dollar format to two decimals arrives here
+    # first and the two causes call for opposite repairs.
+    for headline in ("+$0.101593", "+0.006165"):
+        assert headline in numbers, (
+            f"{headline!r} -- a headline figure of the default view, and "
+            "the string reports/policy.md section 5 prints -- was not "
+            f"collected. Collected: {numbers!r}. Either the collector no "
+            "longer reads the headline block, in which case every "
+            "assertion below is vacuous, or a pinned display format "
+            "changed and the app is now publishing a rounded version of a "
+            "figure the evidence document publishes in full."
+        )
+
+    for displayed, (key, ratio_text, why) in POLICY_REPORT_ALLOWLIST.items():
+        assert displayed in numbers, (
+            f"the allowlist excuses {displayed!r} from the verbatim check, "
+            "and the app no longer renders it. An allowlist entry that "
+            "outlives the string it excuses is how an allowlist grows into "
+            "a hole; delete the entry."
+        )
+        assert format(exhibit[key], ".1%") == displayed, (
+            f"the allowlist claims {displayed!r} is manifest.json -> "
+            f"cost_exhibit.{key} written as a percentage, and that field "
+            f"now reads {exhibit[key]!r}. The exception was justified by "
+            "the two being the same number."
+        )
+        assert ratio_text in report, (
+            f"reports/policy.md no longer carries {ratio_text!r}, the ratio "
+            f"form of {displayed!r}. The exception rests on the report "
+            f"publishing the same quantity in the other convention: {why}."
+        )
+        assert float(ratio_text) == exhibit[key], (
+            f"{ratio_text!r} and {exhibit[key]!r} are different numbers, so "
+            "the app and the report are not writing one quantity two ways."
+        )
+
+    missing = [
+        number
+        for number in numbers
+        if number not in report and number not in POLICY_REPORT_ALLOWLIST
+    ]
+    assert not missing, (
+        f"the app renders {missing!r} at first paint and reports/policy.md "
+        "does not carry the string(s) anywhere. The app and the evidence "
+        "document would then publish different numbers for the same "
+        "quantity in the app's most-screenshotted state. Fix the app or the "
+        "report; add an allowlist entry only if the report genuinely writes "
+        "the same quantity in another convention, and justify it there."
     )
