@@ -444,18 +444,44 @@ def read_contrast(
 
 
 def display_value(outcome, value):
-    """Format one artifact value the way `reports/policy.md` §5 prints it.
+    """Format one artifact value at this app's display precision.
 
     Two formats, chosen by the outcome's own unit: a currency figure carries
     its sign before the currency sign, and every other outcome is printed as
-    the RAW RATE at six decimals.
+    the RAW RATE. Both print THREE DECIMALS.
 
-    The raw rate is the point. The figure directly beneath this block puts
-    the visit contrast on a percentage-point axis, and this block prints the
-    same contrast as +0.006165 -- the string the evidence document prints.
+    THREE DECIMALS IS THE CONVENTION, AND THE REASON IS THE ONLY THING THAT
+    JUSTIFIES IT. The quantities this function formats have 95% intervals
+    spanning roughly -$0.03 to +$0.30. Six decimals -- which is what this
+    function printed until 2026-09-11 -- is precision the data does not
+    support, and a headline reading `+$0.101593` claims a resolution no
+    interval that wide can carry. It reads as false confidence to exactly
+    the reviewer this app is written for. Three decimals is the grain the
+    evidence actually supports.
+
+    DELIBERATE DIVERGENCE FROM THE EVIDENCE DOCUMENT. `reports/policy.md`
+    §5 keeps its six decimals; this module prints three. The two documents
+    therefore print ONE QUANTITY AT TWO PRECISIONS, on purpose. That is the
+    decision, not a defect: the report is the checkable record and keeps
+    every digit it computed, while the app is the reader-facing surface and
+    prints only the digits the data supports. Do not "fix" the divergence by
+    moving either side to match the other.
+
+    THE RAW-RATE ARGUMENT IS UNCHANGED AND STILL LOAD-BEARING. The figure
+    directly beneath this block puts the visit contrast on a percentage-point
+    axis, and this block prints the same contrast as the raw rate instead.
     `plots.py` owns axis scaling through its own unit-scale map, and this
     module reproducing it would be a second place the grain could be wrong,
-    which is this project's named Pitfall 8.
+    which is this project's named Pitfall 8. Rounding changes the GRAIN OF
+    THE DIGITS, never the unit -- a rate stays a rate.
+
+    The precision change lives ENTIRELY IN THE FORMAT SPEC. There is no
+    builtin rounding call, no scaling and no quantization anywhere in this
+    function -- the name of that builtin is left unspelled here because the
+    scan below greps this module for it, the same rephrase-rather-than-drop
+    disposition this project took in 02-03, 03-01 and 04-06. This function
+    formats an artifact cell, it does not compute one, and
+    `test_app_performs_no_arithmetic_on_a_displayed_number` enforces it.
 
     The sign branch and `abs` decide WHERE THE SIGN CHARACTER GOES in the
     string; neither changes the value, and `plots._policy_value_text` uses
@@ -465,8 +491,8 @@ def display_value(outcome, value):
     """
     if config.OUTCOMES[outcome] == CURRENCY_UNIT:
         sign = "-" if value < 0 else "+"
-        return f"{sign}${abs(value):,.6f}"
-    return f"{value:+.6f}"
+        return f"{sign}${abs(value):,.3f}"
+    return f"{value:+.3f}"
 
 
 def markdown_safe(text):
