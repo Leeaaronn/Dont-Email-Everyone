@@ -246,10 +246,50 @@ BANNED_FROM_THE_IMPORT_CLOSURE = (
 # The two status phrases D-02 requires a reviewer to read while choosing,
 # not afterwards. Quoted here as the contract, so a reworded option label
 # fails a test rather than quietly dropping the qualifier.
-SHIPPED_STATUS = "pre-registered, shipped rule"
-SENSITIVITY_STATUS = "sensitivity, not adopted"
+#
+# SHORTENED 2026-09-10 AT THE 06-07 LEGIBILITY CHECKPOINT, and the shortening
+# is what keeps D-02 true rather than what weakens it. The reviewer watched
+# the closed control truncate the first option at "Rank by predicted uplift
+# in site visi" -- so the old phrases, which lived at the END of a 70- and a
+# 61-character label, were not readable at the point of choice at all. They
+# were `pre-registered, shipped rule` and `sensitivity, not adopted`. The
+# labels now lead with the outcome and put the status immediately after the
+# dash, where a narrower sidebar clips the gloss before it clips the status.
+SHIPPED_STATUS = "shipped rule"
+SENSITIVITY_STATUS = "not adopted"
 
 UNPROVEN_PREFIX = "unproven_"
+
+
+# A backslash-escaped dollar sign in a markdown SOURCE string is a plain
+# dollar sign on SCREEN. Every unescaped one is a TeX math delimiter looking
+# for a partner.
+MARKDOWN_DOLLAR_ESCAPE = "\\$"
+
+# Matches a dollar sign that is NOT preceded by a backslash -- the thing the
+# 06-07 checkpoint found typesetting the contrasts table and the headline
+# interval as mathematics.
+UNESCAPED_DOLLAR = re.compile(r"(?<!\\)\$")
+
+# The element kinds a Streamlit page renders THROUGH ITS MARKDOWN RENDERER,
+# and therefore the kinds an unescaped dollar sign can damage. `Metric` is
+# absent from this set and handled separately below, because a metric's
+# LABEL is markdown and its VALUE is not -- the headline figures are the one
+# place in this app where a bare `+$0.101593` is correct.
+MARKDOWN_RENDERED_KINDS = frozenset(
+    {"Markdown", "Caption", "Title", "Header", "Subheader"}
+)
+
+
+def _as_rendered(text):
+    """The markdown SOURCE string as a reader actually sees it.
+
+    `AppTest` hands a test the source, which is exactly how the 06-07
+    checkpoint's LaTeX defect passed 32 green verbatim comparisons against
+    `reports/policy.md`. Every comparison in this file that asks what a
+    REVIEWER reads goes through here.
+    """
+    return text.replace(MARKDOWN_DOLLAR_ESCAPE, "$")
 
 
 class _SinkFailure(RuntimeError):
@@ -395,7 +435,7 @@ def _rendered_text(at):
     for block in (at.main, at.sidebar):
         for element in block:
             chunks.extend(_element_strings(element, include_options=True))
-    return "\n".join(chunks)
+    return _as_rendered("\n".join(chunks))
 
 
 # 1 = this module has exactly one render helper, and the display call is
@@ -959,6 +999,80 @@ def test_headline_cannot_be_read_without_its_qualifier():
     )
 
 
+def test_no_markdown_string_carries_an_unescaped_dollar_sign():
+    """The 06-07 render defect, made non-recurring.
+
+    WHAT WAS WRONG. The contrasts table printed
+    `+0.388832[+0.040390, +$0.757914]` and the headline interval printed the
+    same shape. Three dollar signs on one spend line: markdown paired the
+    first two as TeX math delimiters, typeset `0.388832[+` as mathematics --
+    which also stripped the bracket's spacing, so the interval jammed
+    against the number -- and left the third standing as a literal. The
+    clinching evidence was the reviewer's `-0.136525` arriving as U+2212
+    MINUS SIGN, the glyph KaTeX emits for a hyphen inside math mode and one
+    no plain-text renderer produces.
+
+    WHY EVERY EXISTING TEST PASSED IT, which is the reason this test is
+    written over the RENDERED form. `AppTest` exposes the markdown SOURCE
+    string, so all 32 verbatim comparisons against `reports/policy.md`
+    compared a string the browser then re-rendered. That is the same class
+    of blindness as 05-08's wrong-outcome axis label: green over an input
+    the reader never sees. An assertion about the source can only ever catch
+    a source defect.
+
+    THE INVARIANT IS UNIFORM AND NOT ARITHMETIC. A single dollar sign in one
+    element cannot open and close a math span by itself, so a rule of the
+    form "escape where there are two or more" would be correct today and
+    would break the first time a currency figure joined a caption that
+    already had one. Every dollar sign in every markdown-rendered string is
+    escaped; a counted exception is how this defect comes back.
+
+    A metric's VALUE is deliberately exempt: Streamlit renders it as plain
+    text, and `+$0.101593` there is both correct and the string
+    reports/policy.md prints. Its LABEL is markdown and is not exempt.
+    """
+    at = _first_paint()
+
+    offenders = []
+    escaped_seen = 0
+    for block, where in ((at.main, "main"), (at.sidebar, "sidebar")):
+        for element in block:
+            kind = _element_kind(element)
+            texts = []
+            if kind in MARKDOWN_RENDERED_KINDS:
+                texts.append(str(element.value or ""))
+            elif kind == "Metric":
+                texts.append(str(element.label or ""))
+            elif kind == "Table":
+                frame = element.value
+                texts.extend(str(column) for column in frame.columns)
+                texts.extend(str(index) for index in frame.index)
+                texts.extend(str(cell) for cell in frame.to_numpy().ravel())
+            for text in texts:
+                escaped_seen += text.count(MARKDOWN_DOLLAR_ESCAPE)
+                if UNESCAPED_DOLLAR.search(text):
+                    offenders.append((where, kind, text[:120]))
+
+    assert not offenders, (
+        f"{len(offenders)} markdown-rendered string(s) carry an unescaped "
+        f"dollar sign: {offenders!r}. Two of them on one line is a complete "
+        "pair of TeX math delimiters, and markdown will typeset everything "
+        "between them -- which is how the 06-07 checkpoint came to read "
+        "'+0.388832[+0.040390, +$0.757914]' off the contrasts table. Route "
+        "the string through streamlit_app.markdown_safe; do NOT add a "
+        "second dollar sign to a figure that looks like it lost one, "
+        "because it did not lose it, the math mode ate it."
+    )
+    assert escaped_seen >= 8, (
+        f"only {escaped_seen} escaped dollar sign(s) were found on the whole "
+        "first-paint page. The default view carries a spend headline "
+        "interval with two bounds and three spend table cells with three "
+        "figures each, so a count this low means the currency strings are "
+        "no longer reaching a markdown element at all and the assertion "
+        "above passed for the wrong reason."
+    )
+
+
 @pytest.mark.slow
 def test_headline_tracks_the_committed_curve():
     """Criterion 1: the control moves the answer, and the answer is the file.
@@ -1044,6 +1158,11 @@ def test_headline_tracks_the_committed_curve():
 
                 for bound in ("lo", "hi"):
                     text = form(float(band[bound].iloc[0]))
+                    # The interval line is markdown and its dollar signs are
+                    # escaped at source, so the comparison is made against
+                    # the string the browser shows rather than the string
+                    # the script wrote.
+                    interval = _as_rendered(str(interval))
                     assert text in interval, (
                         f"the interval line at {ranking}/{outcome}/{depth} "
                         f"reads {interval!r} and does not carry the "
@@ -1611,7 +1730,18 @@ def _displayed_numbers(at):
         for element in block:
             chunks.extend(_element_strings(element, include_options=False))
     return sorted(
-        {match for chunk in chunks for match in NUMERIC_STRING.findall(chunk)}
+        {
+            match
+            for chunk in chunks
+            # THROUGH `_as_rendered` FIRST, and this is the repair the 06-07
+            # checkpoint forced. `NUMERIC_STRING` reads `+\$0.040390` as
+            # `$0.040390` -- it loses the sign at the backslash -- so a
+            # collector run over the raw source would report the app
+            # publishing strings reports/policy.md does not carry, for a
+            # page on which every displayed number is right. This walk is
+            # about what a reviewer reads, so it reads the rendered form.
+            for match in NUMERIC_STRING.findall(_as_rendered(chunk))
+        }
     )
 
 

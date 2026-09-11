@@ -92,9 +92,20 @@ import streamlit as st  # noqa: E402
 
 from dont_email_everyone import config, economics, plots  # noqa: E402
 
+# `layout="wide"` IS THE 06-07 LEGIBILITY CHECKPOINT'S PRE-APPROVED REMEDY,
+# applied at the reviewer's request. Their words: "Wide layout fixed the
+# legend overlap — keep it."
+#
+# The contract named exactly one remedy for a legend that does not read at
+# the app's rendered width, and named the three that are not remedies:
+# shrinking the figure, dropping a legend entry, and restyling `plots.py` --
+# the last of which would move the committed PNGs and fail 06-03's D-06
+# regeneration gate. This widens the column, so the SAME figure renders
+# larger in CSS and every legend entry keeps its committed point size.
+# 06-UI-SPEC.md's Layout Contract carries the matching dated amendment.
 st.set_page_config(
     page_title="Don't Email Everyone",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -126,14 +137,22 @@ ARTIFACT_FILES = (
 # rather than rendering, which is deliberate -- a new rule reaching a
 # reviewer with no status label beside it is the failure D-02 exists to
 # prevent, and a loud break is the only thing that stops it silently.
+#
+# SHORTENED AT THE 06-07 CHECKPOINT, AND THE SHAPE IS THE POINT. The
+# reviewer saw the closed control truncate the first option at "Rank by
+# predicted uplift in site visi" -- which cut the shipped rule's status
+# phrase off entirely, and would have cut the sensitivity's off too. D-02 is
+# a promise about what is READABLE at the point of choice, so a label that
+# carries the status past the truncation point does not keep it.
+#
+# The outcome now leads and the status follows immediately after the dash,
+# so the two degrade in the right order: a narrower sidebar clips the
+# parenthetical gloss first and the status marking last. `sensitivity` is
+# the gloss precisely because `not adopted` is the part a reviewer must not
+# be allowed to miss.
 RANKING_LABELS = {
-    "uplift_womens_visit": (
-        "Rank by predicted uplift in site visits — pre-registered, shipped "
-        "rule"
-    ),
-    "uplift_womens_conversion": (
-        "Rank by predicted uplift in orders — sensitivity, not adopted"
-    ),
+    "uplift_womens_visit": "Site visits — shipped rule",
+    "uplift_womens_conversion": "Orders — not adopted (sensitivity)",
 }
 
 MISSING_ARTIFACT_MESSAGE = (
@@ -449,6 +468,41 @@ def display_value(outcome, value):
         return f"{sign}${abs(value):,.6f}"
     return f"{value:+.6f}"
 
+
+def markdown_safe(text):
+    """Escape every currency sign so markdown cannot read it as math.
+
+    THIS IS A RENDER BUG THIS PROJECT SHIPPED, not a defensive habit. The
+    06-07 legibility checkpoint found the contrasts table printing
+    `+0.388832[+0.040390, +$0.757914]` and the headline interval printing
+    the same shape. Every one of those strings left `display_value` with its
+    dollar sign attached and correct; the markdown renderer then read the
+    FIRST TWO of the three dollar signs on the line as a pair of TeX math
+    delimiters, typeset `0.388832[+` as mathematics -- which is also why the
+    bracket lost its spacing and jammed against the number -- and left the
+    third dollar sign standing as a literal.
+
+    The diagnosis is not inferred. The reviewer's report carried
+    `−0.136525` with U+2212 MINUS SIGN, which is the glyph KaTeX emits for
+    a hyphen inside math mode and which no plain-text renderer produces.
+
+    WHY EVERY AUTOMATED CHECK PASSED IT. `AppTest` hands a test the markdown
+    SOURCE string, so all 32 verbatim comparisons against `reports/policy.md`
+    compared a string the browser had not finished with. The same shape as
+    05-08's wrong-outcome axis label: green tests over an input the reader
+    never sees. The check that closes the class is in `tests/test_app.py`
+    under the name that begins `test_no_markdown_string`, and it reads the
+    RENDERED form rather than the source.
+
+    The remedy is escaping and NOT re-marking the units. Every currency
+    string in this module already carries exactly one dollar sign per number
+    -- point estimate and both interval bounds alike -- so a reviewer's
+    report of a point estimate "missing" its dollar sign is the math mode
+    having eaten it, and adding a second one would double-mark the source to
+    hide a renderer bug.
+    """
+    return text.replace("$", "\\$")
+
 def curve_caption(k, n_targeted):
     """Return the two-part caption that sits under both policy curves.
 
@@ -572,7 +626,12 @@ def contrasts_table(curve, bands, ranking, k):
             value, lo, hi, _ = read_contrast(
                 curve, bands, ranking, outcome, k, contrast=column
             )
-            cells[title] = (
+            # `markdown_safe` because a table CELL is markdown too. Three
+            # dollar signs on one spend line is what the 06-07 checkpoint
+            # saw typeset as mathematics; the escape is applied to the
+            # whole assembled cell so a cell can never carry one escaped
+            # and one bare.
+            cells[title] = markdown_safe(
                 f"{display_value(outcome, value)} "
                 f"[{display_value(outcome, lo)}, "
                 f"{display_value(outcome, hi)}]"
@@ -625,13 +684,23 @@ with st.sidebar:
         index=published_rankings.index(manifest["frame"]["ranking"]),
         format_func=lambda key: RANKING_LABELS[key],
     )
+    # TRIMMED AT THE 06-07 CHECKPOINT, AND THE TRIM IS A DECISION ABOUT
+    # WHERE THE DETAIL GOES, NOT WHETHER IT SURVIVES. The reviewer read five
+    # lines of sidebar prose ending in two raw artifact keys that mean
+    # nothing to them, and asked for the detail to move behind an expander.
+    #
+    # `st.expander` is forbidden app-wide -- a collapsed qualifier is a
+    # cropped qualifier, and that mitigation is at full strength for the
+    # headline block's interval and verdict. Narrowing it to "except in the
+    # sidebar" to satisfy a prose-length note would have traded a structural
+    # guarantee for a cosmetic one, so the detail was CUT instead: the
+    # artifact keys go (they are in the artifact, and nothing on screen
+    # needs them), and the selection-error warning stays, because it is the
+    # reason the second option is shown at all.
     st.caption(
         "The shipped rule was fixed on Phase 4 evidence before either curve "
-        "below existed. The sensitivity is shown so you can see what "
-        "changes, not as an alternative to pick — choosing the rule that "
-        "looks best on these same rows is the selection error this project "
-        "measures the cost of. Artifact keys: uplift_womens_visit, "
-        "uplift_womens_conversion."
+        "below existed. Switching to whichever rule looks best on these "
+        "same rows is the selection error this project measures the cost of."
     )
 
     # The depths the artifact itself carries, MINUS the zero depth.
@@ -672,9 +741,20 @@ with st.sidebar:
             f"({economics.emails_at_capacity(n_frame, depth):,} emails)"
         ),
     )
+    # THE ANCHOR IS THE SUBJECT OF THIS SENTENCE, and that is the 06-07
+    # checkpoint's correction rather than a rephrasing. The original opened
+    # "A depth of 20% was fixed in advance", which a reviewer reads as a
+    # statement about the slider they are looking at -- and the slider says
+    # 43%, or 93%, or whatever they last dragged it to. True about the
+    # anchor, misleading as a caption on the current selection.
+    #
+    # The percentage is formatted from `economics.HEADLINE_CAPACITY` rather
+    # than typed, for the reason `curve_caption` gives: retuning the anchor
+    # must not leave a caption quoting the old depth.
     st.caption(
-        "A depth of 20% was fixed in advance, before any of these curves "
-        "existed. It is a pre-commitment, not the best point on the curve."
+        f"The pre-registered anchor is {economics.HEADLINE_CAPACITY:.0%}. It "
+        "was fixed before any of these curves existed — a pre-commitment, "
+        "not the best point on the curve."
     )
 
     st.sidebar.markdown("**ASSUMED, not measured**")
@@ -754,13 +834,36 @@ visit_value, visit_lo, visit_hi, _ = read_contrast(
 )
 
 with st.container(border=True):
+    # THE HIERARCHY PASS THE 06-07 CHECKPOINT ASKED FOR, BUILT FROM THE
+    # PERMITTED ARTISTS AND NOTHING ELSE. The reviewer read the revenue
+    # figure, its interval, its verdict and its caption as "four
+    # undifferentiated text lines". Two changes, and NOT ONE WORD OF COPY
+    # AND NOT ONE NUMBER MOVED:
+    #
+    # (1) The bold on the recommendation is confined to its lead. A
+    #     three-line sentence set entirely in bold is the loudest thing on
+    #     the first screen, and it was competing with the two numbers it
+    #     exists to introduce. Every word is the contract's word still.
+    # (2) The read-both-numbers line is a caption rather than body text. It
+    #     is an instruction about how to read what follows, which is what
+    #     the caption artist is for, and demoting it leaves the metric as
+    #     the only heavy element between the recommendation and the curves.
+    #
+    # Four weights now run top to bottom: bold lead, quiet caption, metric,
+    # plain interval, bold-lead verdict, quiet caption.
+    #
+    # `st.columns` and `unsafe_allow_html` were NOT available for this and
+    # the constraint is load-bearing, not bureaucratic: D-07's adjacency is
+    # asserted by INDEX over flat document order, so the metric, its
+    # interval and its verdict must stay consecutive children. Both changes
+    # above sit outside that triple and the index walk is untouched.
     st.markdown(
-        f"**Recommendation: with a budget of {n_targeted:,} sends on this "
+        f"**Recommendation:** with a budget of {n_targeted:,} sends on this "
         f"{n_frame:,}-customer list, email the top {selected_k:.0%} ranked "
         f"by predicted uplift rather than {n_targeted:,} customers chosen "
-        "at random.**"
+        "at random."
     )
-    st.markdown(
+    st.caption(
         "Both numbers below come from the same experiment and each carries "
         "its 95% interval. Where the interval includes zero, this data "
         "cannot show a gain at that depth."
@@ -771,9 +874,14 @@ with st.container(border=True):
         "customer on the list)",
         display_value("spend", spend_value),
     )
+    # `markdown_safe` and NOT a re-marking of the units. Two dollar signs on
+    # one markdown line is a complete pair of TeX math delimiters, which is
+    # what typeset this interval as mathematics at the 06-07 checkpoint.
     st.markdown(
-        f"95% interval {display_value('spend', spend_lo)} to "
-        f"{display_value('spend', spend_hi)}"
+        markdown_safe(
+            f"95% interval {display_value('spend', spend_lo)} to "
+            f"{display_value('spend', spend_hi)}"
+        )
     )
     st.markdown(verdict_line(spend_lo, spend_hi))
     st.caption(
@@ -786,9 +894,15 @@ with st.container(border=True):
         "on the list)",
         display_value("visit", visit_value),
     )
+    # Escaped too, though the rate format carries no currency sign today.
+    # The escape is applied by outcome-blind rule rather than by knowing
+    # which outcomes are money: `config.OUTCOMES` decides that, and a unit
+    # changing upstream must not be able to reintroduce the render bug here.
     st.markdown(
-        f"95% interval {display_value('visit', visit_lo)} to "
-        f"{display_value('visit', visit_hi)}"
+        markdown_safe(
+            f"95% interval {display_value('visit', visit_lo)} to "
+            f"{display_value('visit', visit_hi)}"
+        )
     )
     st.markdown(verdict_line(visit_lo, visit_hi))
     st.caption(
@@ -796,7 +910,19 @@ with st.container(border=True):
         "compared with emailing the same number of people picked at random."
     )
 
-st.divider()
+# NO DIVIDER HERE, AND THE OMISSION IS THE 06-07 CHECKPOINT'S SPACING FIX.
+# The reviewer asked for the gap between the headline block and the first
+# chart to be tightened. Streamlit exposes no pixel spacing without custom
+# markup and custom markup is forbidden, so element count is the only lever
+# the stack offers -- and this is the one element in that gap whose work is
+# already being done by something stronger. The headline block is the app's
+# only bordered container; a box edge is a harder boundary than a rule, and
+# a rule immediately under one is a second separator for one seam.
+#
+# The other three dividers stay. They separate sections that have no border
+# between them, which is the whole of the argument for keeping them and the
+# whole of the argument for dropping this one. 06-UI-SPEC.md's Spacing Scale
+# and Layout Contract carry the matching dated amendment.
 st.subheader("Where the gain is, and is not, detectable")
 
 # Elements 6 through 9: the two policy curves, spend first, matching the
@@ -864,7 +990,13 @@ render(
 st.caption(curve_caption(selected_k, n_targeted))
 
 st.divider()
-st.subheader("Both published contrasts, at the depth you selected")
+# REWRITTEN AT THE 06-07 CHECKPOINT. The original read "Both published
+# contrasts, at the depth you selected", which the reviewer identified as
+# copy written for someone who has already read the report: "published
+# contrasts" is this project's internal noun for the three delta columns,
+# and a heading is the last place to spend a reader's attention on
+# vocabulary. The section still shows exactly what it showed.
+st.subheader("How targeting compares to the alternatives")
 
 # Element 12: the ONLY place the versus-emailing-everyone contrast appears,
 # and its confinement is structural rather than editorial.
@@ -907,9 +1039,11 @@ st.subheader("Assumptions, not data")
 # recommendation. ROADMAP criterion 3 asks that the depth MOVE as cost and
 # margin change, not that it be seen first.
 st.markdown(
-    f"**ASSUMED, not measured:** ${cost_per_email:.3f} per email, "
-    f"{gross_margin:.0%} gross margin. Hillstrom carries no cost data; "
-    "these are your numbers, not the experiment's."
+    markdown_safe(
+        f"**ASSUMED, not measured:** ${cost_per_email:.3f} per email, "
+        f"{gross_margin:.0%} gross margin. Hillstrom carries no cost data; "
+        "these are your numbers, not the experiment's."
+    )
 )
 
 # THE FULL 101-POINT GRID, ZERO INCLUDED, AND IT IS NOT THE CAPACITY
@@ -954,9 +1088,18 @@ k_star, _profit_at_k_star = economics.optimal_k(
 #
 # This is the third and final metric. The contract caps them at three: two
 # halves of the D-03 pair and this one.
+#
+# A metric LABEL is markdown and a metric VALUE is not, which is why the
+# escape is on one of the two arguments below and not on both. One lone
+# dollar sign cannot open and close a math span by itself, so this label was
+# never wrong on screen; it is escaped anyway so that the rule a reader
+# infers from this module is "every markdown string is escaped" rather than
+# "escaped where someone counted the dollar signs".
 st.metric(
-    f"Cost-optimal depth at ASSUMED ${cost_per_email:.3f} per email and "
-    f"{gross_margin:.0%} margin",
+    markdown_safe(
+        f"Cost-optimal depth at ASSUMED ${cost_per_email:.3f} per email and "
+        f"{gross_margin:.0%} margin"
+    ),
     f"{k_star:.0%}",
 )
 st.caption(
