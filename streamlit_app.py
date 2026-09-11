@@ -370,16 +370,25 @@ def verdict_line(lo, hi):
     )
 
 
-def read_contrast(curve, bands, ranking, outcome, k):
-    """Select ONE published (ranking, outcome, depth) row. Compute nothing.
+def read_contrast(
+    curve, bands, ranking, outcome, k, *, contrast=HEADLINE_CONTRAST
+):
+    """Select ONE published (ranking, outcome, contrast, depth) row.
 
-    Returns `(value, lo, hi, n_targeted)` for the headline contrast. Every
-    one of the four is a cell of a committed artifact, read out; this
-    function performs no arithmetic on any of them, and neither does any
-    caller. `n_targeted` rides along from the same curve row as `value`
-    rather than being looked up separately, so the mailing size the
-    recommendation quotes and the number beneath it cannot come from
-    different depths.
+    Computes nothing. Returns `(value, lo, hi, n_targeted)` for the
+    requested contrast, which defaults to the headline one. Every one of the
+    four is a cell of a committed artifact, read out; this function performs
+    no arithmetic on any of them, and neither does any caller. `n_targeted`
+    rides along from the same curve row as `value` rather than being looked
+    up separately, so the mailing size the recommendation quotes and the
+    number beneath it cannot come from different depths.
+
+    The contrast is a PARAMETER rather than a second selection function.
+    The table further down the page displays all three published contrasts
+    and the headline block displays one of them; two functions selecting a
+    row would be two places the (ranking, outcome, depth) filter could come
+    to mean different things, and the versus-everyone cell is exactly the
+    one that must not be read off a different depth from the headline.
 
     `ValueError` rather than an `.iloc[0]` on an empty frame. The
     combination is unreachable from the controls -- the ranking comes from
@@ -396,18 +405,19 @@ def read_contrast(curve, bands, ranking, outcome, k):
     band = bands.loc[
         (bands["ranking"] == ranking)
         & (bands["outcome"] == outcome)
-        & (bands["contrast"] == HEADLINE_CONTRAST)
+        & (bands["contrast"] == contrast)
         & (bands["k"] == k)
     ]
     if len(rows) != 1 or len(band) != 1:
         raise ValueError(
             f"the committed artifacts carry {len(rows)} curve row(s) and "
             f"{len(band)} band row(s) for ranking {ranking!r}, outcome "
-            f"{outcome!r} and depth {k!r}; exactly one of each is needed to "
-            "show a point estimate beside its own interval."
+            f"{outcome!r}, contrast {contrast!r} and depth {k!r}; exactly "
+            "one of each is needed to show a point estimate beside its own "
+            "interval."
         )
     return (
-        float(rows[HEADLINE_CONTRAST].iloc[0]),
+        float(rows[contrast].iloc[0]),
         float(band["lo"].iloc[0]),
         float(band["hi"].iloc[0]),
         int(rows["n_targeted"].iloc[0]),
@@ -470,6 +480,78 @@ def curve_caption(k, n_targeted):
             f"{anchor:.0%} anchor, shown for reference."
         )
     return f"{selection} {ZERO_BY_CONSTRUCTION}"
+
+
+# The three published contrasts, in the order the table prints them, each
+# paired with the column title a reviewer reads. Artifact column first,
+# title second, so the title cannot drift onto the wrong column: the pair is
+# declared once and both halves are used from the same tuple.
+#
+# The order is deliberate and runs from the easiest claim to the one the
+# project actually turns on. `reports/policy.md` section 6 makes the same
+# ordering argument in prose.
+CONTRAST_COLUMNS = (
+    ("delta_none", "vs emailing nobody"),
+    ("delta_all", "vs emailing everyone"),
+    ("delta_random", "vs a random send of the same size (headline)"),
+)
+
+# The two displayed outcomes and the row label each takes. Conversion is
+# absent by decision, not by omission -- see the comment at the table's own
+# call site.
+TABLE_ROWS = (("spend", "spend"), ("visit", "visits"))
+
+TABLE_CAPTION = (
+    "Every cell reads point estimate [95% interval]. The first two columns "
+    "and the third are all per customer on the {n_frame:,}-customer "
+    "evaluation holdout. Orders are published in reports/policy.md §5 "
+    "and are not surfaced here: the frame carries 24 incremental orders, "
+    "too few to headline."
+)
+
+# The section 6 sentence and the zero-cost caveat, verbatim. This is the
+# paragraph that says why the column beside it is not the headline, and it
+# sits under the table rather than anywhere else because that is the only
+# place it is read by someone who has just read the number.
+VERSUS_EVERYONE_SENTENCE = (
+    "There is no capacity at which this data shows a gain against emailing "
+    "everyone. Beating a blanket send at zero marginal cost requires that "
+    "the customers you decline to email are ones the email measurably "
+    "harms, and this experiment does not contain enough of them. With "
+    "genuinely free email the correct action is to email everyone — this "
+    "result is about spending a fixed budget of sends well, which is why "
+    "the headline comparison is against a random send of the same size."
+)
+
+
+def contrasts_table(curve, bands, ranking, k):
+    """Build the two-by-three table of published contrasts at one depth.
+
+    Every cell is `point [lo, hi]` in the two pinned display formats, and
+    every one of its six values is a committed artifact cell selected by
+    `read_contrast`. Nothing here computes, converts or rescales: the table
+    is the same read the headline block makes, run across the other two
+    contrasts.
+
+    A frame rather than a list of strings because the display element takes
+    one, and building it here keeps the row labels and the column titles
+    beside the keys they are read with.
+    """
+    rows = {}
+    for outcome, row_label in TABLE_ROWS:
+        cells = {}
+        for column, title in CONTRAST_COLUMNS:
+            value, lo, hi, _ = read_contrast(
+                curve, bands, ranking, outcome, k, contrast=column
+            )
+            cells[title] = (
+                f"{display_value(outcome, value)} "
+                f"[{display_value(outcome, lo)}, "
+                f"{display_value(outcome, hi)}]"
+            )
+        rows[row_label] = cells
+    return pd.DataFrame.from_dict(rows, orient="index")
+
 
 try:
     curve, bands, sweep, manifest = load_artifacts()
@@ -752,3 +834,35 @@ render(
     )
 )
 st.caption(curve_caption(selected_k, n_targeted))
+
+st.divider()
+st.subheader("Both published contrasts, at the depth you selected")
+
+# Element 12: the ONLY place the versus-emailing-everyone contrast appears,
+# and its confinement is structural rather than editorial.
+#
+# A table cell is not this app's emphasis artist. The emphasis artist is
+# capped at three occurrences by a source scan, and all three are already
+# spent -- the two halves of the D-03 pair and the cost exhibit's optimal
+# depth -- so the versus-everyone figure cannot acquire headline weight by a
+# later editor's discipline failing. There is no fourth slot for it to move
+# into.
+#
+# WHY IT MUST NOT BE THE HEADLINE, measured rather than asserted: across all
+# 909 published band rows the versus-everyone interval excludes zero from
+# above at 0 of them, and at the pre-registered anchor it reads -$0.236284
+# with an interval running from -$0.525647 to +$0.102053. An app headlining
+# that contrast would print a negative figure as its result. APP-01 and
+# ROADMAP criterion 1 ask for the contrast to be DISPLAYED, with its
+# interval, at the selected depth -- which this table does at every one of
+# the 100 depths the control offers. D-08a asks that it not be the headline,
+# which the cap does.
+#
+# CONVERSION IS NOT A ROW. reports/policy.md section 5 records 24
+# incremental orders on the whole evaluation frame. Three rows would put a
+# count that small beside two outcomes carrying far more evidence, at equal
+# visual weight, and the orders figure is published where it can be read
+# with the interval that goes round it.
+st.table(contrasts_table(curve, bands, ranking, selected_k))
+st.caption(TABLE_CAPTION.format(n_frame=n_frame))
+st.markdown(VERSUS_EVERYONE_SENTENCE)
