@@ -117,6 +117,23 @@ ARTIFACT_FILES = (
     "manifest.json",
 )
 
+# Artifact key -> the option a reviewer reads while choosing. The status
+# phrase lives INSIDE the label, not in a caption under the control: D-02 is
+# satisfied at the point of choice or it is not satisfied. A published
+# ranking appearing in the artifact without an entry here raises `KeyError`
+# rather than rendering, which is deliberate -- a new rule reaching a
+# reviewer with no status label beside it is the failure D-02 exists to
+# prevent, and a loud break is the only thing that stops it silently.
+RANKING_LABELS = {
+    "uplift_womens_visit": (
+        "Rank by predicted uplift in site visits — pre-registered, shipped "
+        "rule"
+    ),
+    "uplift_womens_conversion": (
+        "Rank by predicted uplift in orders — sensitivity, not adopted"
+    ),
+}
+
 MISSING_ARTIFACT_MESSAGE = (
     "This app could not read a committed result file: {name}. The app only "
     "displays files stored in this repository, so there is nothing to "
@@ -203,6 +220,20 @@ def check_artifacts_agree(curve, manifest):
             "headline cannot be read off the curve"
         )
 
+    # The third check exists so the ranking control can take its default
+    # FROM the manifest instead of carrying a second copy of the name. A
+    # manifest naming a ranking the curve does not publish is exactly the
+    # cross-artifact disagreement this function is for, and catching it
+    # here is what keeps it out of the control as an uncaught lookup
+    # failure at module scope, where it would reach the browser as a
+    # traceback rather than as a sentence.
+    headline_ranking = frame["ranking"]
+    if headline_ranking not in set(curve["ranking"]):
+        raise ValueError(
+            f"manifest.json names {headline_ranking} as the headline "
+            "ranking, and policy_curve.parquet carries no rows for it"
+        )
+
 
 def render(fig, sink=None):
     """Display a figure, then close it -- the pair is one statement.
@@ -257,3 +288,115 @@ st.markdown(
     "targeting them produce than sending the same number of emails to "
     "customers picked at random?"
 )
+
+# ---------------------------------------------------------------------------
+# Sidebar: controls only. No figure, no metric, and no number that is a
+# result -- a result in the control column is a number a reviewer reads
+# without the qualifier the main body keeps beside it.
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.sidebar.subheader("Controls")
+
+    # Read off the artifact by prefix, never a hand-kept list: the project's
+    # convention is that an unproven cell announces itself in its own key,
+    # so the set of publishable rankings is a property of the file rather
+    # than of this module. The committed artifact carries three rankings and
+    # this filter yields the two D-01 names.
+    published_rankings = sorted(
+        name
+        for name in curve["ranking"].unique()
+        if not name.startswith("unproven_")
+    )
+    ranking = st.selectbox(
+        "Targeting rule",
+        options=published_rankings,
+        index=published_rankings.index(manifest["frame"]["ranking"]),
+        format_func=lambda key: RANKING_LABELS[key],
+    )
+    st.caption(
+        "The shipped rule was fixed on Phase 4 evidence before either curve "
+        "below existed. The sensitivity is shown so you can see what "
+        "changes, not as an alternative to pick — choosing the rule that "
+        "looks best on these same rows is the selection error this project "
+        "measures the cost of. Artifact keys: uplift_womens_visit, "
+        "uplift_womens_conversion."
+    )
+
+    # The depths the artifact itself carries, MINUS the zero depth.
+    #
+    # Dropping it is a defect averted, not a tidiness preference:
+    # `economics.emails_at_capacity(21347, 0.0)` raises `ValueError` ("`k` is
+    # 0.0; the targeting capacity must satisfy 0 < k <= 1", verified by
+    # execution 2026-09-10), so a control offering all 101 committed points
+    # crashes this app at its leftmost position. 100 options remain, 0.01
+    # through 1.00.
+    #
+    # TWO GRIDS COEXIST HERE AND MUST NOT BE UNIFIED. This control uses the
+    # 100-point grid. The cost exhibit further down the page passes the full
+    # 101-point grid, zero included, to `economics.optimal_k`, which accepts
+    # it and needs it: a cost-optimal depth of 0.00 is a real answer once
+    # cost reaches 139.7% of gross margin, and removing the point would
+    # replace that answer with the next one up.
+    #
+    # Read off the file rather than from `evaluation.BAND_GRID_POINTS`, so
+    # this control cannot disagree with the curve it drives if a later phase
+    # changes the grid.
+    ranking_rows = curve.loc[curve["ranking"] == ranking]
+    depths = sorted(
+        {float(value) for value in ranking_rows["k"] if float(value) > 0.0}
+    )
+    n_frame = int(ranking_rows["n_frame"].iloc[0])
+    selected_k = st.select_slider(
+        "Targeting depth — how much of the list you can email",
+        options=depths,
+        value=economics.HEADLINE_CAPACITY,
+        # The percentage carries the meaning and the count carries the
+        # reality (D-07). The count is the guarded truncation the policy
+        # write-up fixes as the per-email denominator, never an inline
+        # multiplication done here: two places computing a mailing size is
+        # how two documents come to quote different counts for one capacity.
+        format_func=lambda depth: (
+            f"{depth:.0%} "
+            f"({economics.emails_at_capacity(n_frame, depth):,} emails)"
+        ),
+    )
+    st.caption(
+        "A depth of 20% was fixed in advance, before any of these curves "
+        "existed. It is a pre-commitment, not the best point on the curve."
+    )
+
+    st.sidebar.markdown("**ASSUMED, not measured**")
+
+    # `st.columns` is permitted in the sidebar and forbidden in the main
+    # body: the main body's flat document order is what D-07's adjacency
+    # test asserts by index, and a column splits that order in two.
+    #
+    # The bounds below are `economics._guard_cost` and `_guard_margin`
+    # restated in widget form, so that no position a reviewer can reach
+    # raises. The library guards stay where they are as the second line --
+    # this is a narrowing of the input, not a replacement for validating it.
+    # The margin's ceiling of one also blocks the unit error that guard's
+    # own docstring names: 40 typed where 0.40 belongs, which multiplies
+    # every dollar figure by a hundred while raising nothing.
+    cost_column, margin_column = st.sidebar.columns(2)
+    cost_per_email = cost_column.number_input(
+        "ASSUMED cost per email (dollars, not measured)",
+        value=ASSUMED_COST_PER_EMAIL,
+        min_value=0.0,
+        step=0.001,
+        format="%.3f",
+    )
+    gross_margin = margin_column.number_input(
+        "ASSUMED gross margin (fraction, not measured)",
+        value=ASSUMED_GROSS_MARGIN,
+        min_value=0.01,
+        max_value=1.00,
+        step=0.01,
+        format="%.2f",
+    )
+    st.caption(
+        "Hillstrom carries no cost data, so no cost and no margin is "
+        "adopted anywhere in this project. These two boxes are your "
+        "assumptions, and they only affect the Assumptions, not data "
+        "section below."
+    )
