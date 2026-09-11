@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-09-11T06:49:52.090Z"
-last_activity: 2026-09-11
+stopped_at: "06-08-PLAN.md Task 2 -- BLOCKING human-action checkpoint (Streamlit Community Cloud deploy)"
+last_updated: "2026-09-11T20:01:24.559Z"
+last_activity: "2026-09-11 - Plan 06-08 Task 1 done (readiness gate green, 633 tests, competing-dependency-file test added); stopped at the Task 2 deploy checkpoint"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 44
-  completed_plans: 42
+  completed_plans: 43
   percent: 71
 ---
 
@@ -26,11 +26,18 @@ See: .planning/PROJECT.md (updated 2026-08-31)
 ## Current Position
 
 Phase: 06 (streamlit-app-deployment) — EXECUTING
-Plan: 8 of 9
-Status: Ready to execute
-Last activity: 2026-09-11 - Completed quick task 260911-gch: Round the Streamlit app's displayed contrast figures from six decimals to three
+Plan: 8 of 9 — PARTIAL (Task 1 of 3 done; Tasks 2 and 3 outstanding)
+Status: BLOCKED at 06-08 Task 2 — `checkpoint:human-action`, `gate="blocking"`. The Streamlit
+Community Cloud deploy is a browser flow at share.streamlit.io with no CLI and no public API.
+Resume needs: the live URL, the Python version actually selected, the subdomain actually used,
+and whether scikit-learn / statsmodels / duckdb / pandera appeared in the build log.
+Last activity: 2026-09-11 - Plan 06-08 Task 1 committed (d4d8a81); readiness gate green and pushed
 
-Progress: [██████████] 95%
+Progress: [██████████] 98%
+
+> Note: the bar counts 06-08 as complete because its SUMMARY exists on disk. It is PARTIAL —
+> Tasks 2 and 3 are outstanding, and no execution metric was recorded for it for the same reason.
+> APP-02 and C-5 are NOT met: the app is not yet deployed.
 
 ## Performance Metrics
 
@@ -252,6 +259,9 @@ Recent decisions affecting current work:
 - [Phase 06-07]: st.expander was NOT introduced for the reviewer's sidebar-prose note; T-06-19's app-wide prohibition stays at full strength and the content was cut instead
 - [Phase 06-07]: both ranking option labels carried their status phrase past the control's truncation point, so D-02 ('status at the point of choice') was not actually being kept -- V8 asserted the string, not the pixels
 - [Phase 06-07]: one divider removed and the headline bold confined to its lead; element count is the only vertical-spacing lever Streamlit offers without the custom markup the contract forbids
+- [Phase 06-08]: The deployment tuple is Leeaaronn/Dont-Email-Everyone, branch main, entrypoint streamlit_app.py at the repo root, Python 3.11 (3.12 accepted with no pin change), proposed subdomain dont-email-everyone -- the project's only state that does not live in git, recorded so the deployment is reproducible
+- [Phase 06-08]: test_no_competing_dependency_file_exists derives its searched directories from streamlit_app.py's own location and asserts requirements.txt's presence alongside the competing files' absence -- Cloud installs the first dependency file it finds and stops, so every criterion-4 assertion in the suite was conditional on something nothing was checking
+- [Phase 06-08]: Repo visibility taken from project memory (public), not from gh -- gh is unauthenticated in this environment and would wrongly report private; deployment works either way, a private repo just needs admin rights for the Deploy Key
 
 ### Pending Todos
 
@@ -267,6 +277,7 @@ None yet.
 - [Phase 6] Streamlit Community Cloud resource limits are sourced from a Feb-2024 forum FAQ (MEDIUM confidence). Re-check at planning time.
 - [Phase 6] **Recorded, not scheduled (2026-09-11 review).** The six-entry legend sits inside the plot area on both policy curves and overlaps the curve and the hatched covers-zero region. The reviewer declined to request a fix because no remedy exists that does not restyle `dont_email_everyone/plots.py`, which would move the committed PNGs and fail 06-03's D-06 regeneration gate. Carried as a known cosmetic defect.
 - ~~[Phase 6] `Assumptions, not data` reported clipped at the top in one scroll position.~~ **CLOSED 2026-09-11, not a defect.** Streamlit 1.63 renders a fixed `stHeader` bar and scrolls page content beneath it, so any element resting at that scroll offset loses its top few pixels. The app contributes nothing: no custom CSS, no `unsafe_allow_html`, `set_page_config` sets only title, layout and sidebar state, and `.streamlit/config.toml` sets only `toolbarMode`, `base` and `primaryColor`. The only remedy is custom CSS, which this app forbids by contract.
+- Plan 06-08 is PARTIAL: Task 2 (Community Cloud deploy) is a blocking human action -- no CLI, no public API. Task 3 (README live link + test_readme_carries_the_live_app_link) and plan 06-09 are blocked until the reviewer reports the live URL, the Python version selected, the subdomain used and the build-log inspection result.
 
 ### Quick Tasks Completed
 
@@ -290,6 +301,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-09-11T06:49:52.078Z
+Last session: 2026-09-11T20:00:37.121Z
 Stopped at: Completed 06-07-PLAN.md
 Resume file: None

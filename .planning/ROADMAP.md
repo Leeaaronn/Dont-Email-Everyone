@@ -173,7 +173,7 @@ Plans:
   4. The app loads only committed artifacts — no model file, no training, no network call — the serve-time `requirements.txt` excludes scikit-learn, statsmodels, DuckDB and Pandera, and every figure is closed after render.
   5. The app is live on Streamlit Community Cloud and opens successfully from a logged-out browser with no Streamlit account; Community Cloud sleeps apps after 12 hours without traffic and does not auto-wake them, so the verified property is that a logged-out visitor can wake a sleeping app in one click and it then loads without error, confirmed by a recorded human check at least 12 hours after the last traffic; and its link is in the README. *(Amended 2026-09-10, same treatment as criterion 1. The original said the app "is live on Streamlit Community Cloud, opens successfully from a logged-out browser after 12+ hours of no traffic, and its link is in the README". Community Cloud's official documentation states that all apps without traffic for 12 hours go to sleep, and that waking one requires a visitor to click through a sleep page ("Yes, get this app back up!") — an action anyone with view access can take, not only the developer [docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app]. As originally written the criterion therefore describes behaviour the free tier does not offer, and a plan treating it as automatable would produce a test that either never runs or lies. What is true and verifiable is the one-click wake, so the criterion now says so. Phase 7 criterion 4's embedded static screenshot is the standing mitigation for a reviewer who lands on a cold app, and is deliberately not duplicated here.)*
 
-**Plans:** 7/9 plans executed
+**Plans:** 7/9 plans executed, plus 06-08 PARTIAL (Task 1 of 3 done; blocked at its Task 2 deploy checkpoint)
 
 Plans:
 **Wave 0** *(blocking gate — streamlit is not installed; nothing else can be written or run until it is)*
@@ -206,7 +206,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6)*
 
-- [ ] 06-08-PLAN.md — Deployment readiness gate, the Community Cloud deploy checkpoint, and the live link in the README (wave 7)
+- [ ] 06-08-PLAN.md — Deployment readiness gate, the Community Cloud deploy checkpoint, and the live link in the README (wave 7) *(PARTIAL as of 2026-09-11. Task 1 is done and committed — the readiness gate is green (633 tests, clean tree, nothing unpushed, all four artifacts plus the entrypoint and `.streamlit/config.toml` tracked) and `test_no_competing_dependency_file_exists` is in. Task 2 is a `checkpoint:human-action` with `gate="blocking"`: Community Cloud has no CLI and no public API, so the deploy is a browser flow at share.streamlit.io and was returned rather than attempted. Task 3 (the README live link and its test) is blocked behind it, so criterion 5 and APP-02 remain unmet. Left unchecked deliberately — the box is checked when the app is live and the link is in the README, not when the plan has a SUMMARY. See 06-08-SUMMARY.md for the deployment tuple.)*
 
 **Wave 8** *(blocked on Wave 7 — wall-clock dependency, cannot complete in one session)*
 
@@ -249,7 +249,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 3. Uplift Evaluation Metric | 6/6 | Complete   | 2026-09-06 |
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
 | 5. Business & Policy Layer | 9/9 | Complete   | 2026-09-10 |
-| 6. Streamlit App & Deployment | 7/9 | In Progress|  |
+| 6. Streamlit App & Deployment | 8/9 | In Progress|  |
 | 7. Documentation & Delivery | 0/TBD | Not started | - |
 
 ---
