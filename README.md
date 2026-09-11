@@ -1,5 +1,9 @@
 # Dont-Email-Everyone
 
+**Live app:** <https://dont-email-everyone-hillstrom.streamlit.app/> — move the targeting-depth control and the incremental-revenue estimate moves with it, with its 95% interval beside it.
+
+Streamlit Community Cloud puts an app to sleep after **12 hours without traffic**, so a first visitor may land on a sleep page rather than the app. That is not a broken deployment: click "Yes, get this app back up!" and it wakes in a few seconds. Any visitor can do it — no Streamlit account, no sign-in.
+
 A causal inference analysis of the Hillstrom 2008 email marketing experiment. A non-technical, reader-facing overview (the business question, the targeting rule, and the incremental-revenue result) arrives in Phase 7; this README currently covers environment setup and pipeline reproduction only.
 
 ## Setup and reproduction

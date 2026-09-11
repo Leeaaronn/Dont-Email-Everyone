@@ -2315,3 +2315,79 @@ def test_no_competing_dependency_file_exists():
         "pass here cannot mean 'no dependency file at all', which would "
         "satisfy the competing-file check trivially."
     )
+
+
+# The live-app link, matched by SHAPE and never by the literal subdomain.
+# The subdomain has already changed once: the app was first deployed to
+# Community Cloud's auto-generated `dont-email-everyone-jqweqplufe7lxqd6tejnkc`
+# and renamed to `dont-email-everyone-hillstrom`, because the plan's proposed
+# plain `dont-email-everyone` is taken by someone else's app. A test pinned to
+# the literal string would have failed that rename, and the obvious repair --
+# editing the constant -- teaches the next person to edit the test whenever the
+# deployment moves. Criterion 5 asks for a live link, not for a particular one.
+STREAMLIT_APP_LINK = re.compile(r"https://[a-z0-9-]+\.streamlit\.app")
+
+# The sleep-and-wake note, keyed on two phrases rather than one sentence so a
+# rewording survives but a deletion does not. The second is Streamlit's own
+# button text, quoted in ROADMAP criterion 5 -- keying on it ties the README to
+# what the visitor actually sees on the sleep page.
+SLEEP_PHRASE = "12 hours without traffic"
+WAKE_PHRASE = "get this app back up"
+
+# How far the wake note may sit from the link. Generous on purpose: Phase 7 /
+# DOC-01 owns the README rewrite and this test must not dictate its structure,
+# only that the two stay together.
+WAKE_NOTE_WINDOW = 10
+
+
+def test_readme_carries_the_live_app_link():
+    """ROADMAP criterion 5's README half, and the note that stops a cold app reading as a dead one.
+
+    Two failures, not one. Without the link the criterion is simply unmet:
+    the deployment exists and nothing in the repository points at it, which
+    for a portfolio piece means a reviewer never opens it. Without the
+    sleep-and-wake note the failure is worse than absence, because
+    Community Cloud sleeps an app after 12 hours with no traffic and serves
+    a sleep page instead -- and a reviewer who lands on it with no
+    explanation concludes the deployment is broken. The note is the
+    difference between "click once to wake it" and "this doesn't work".
+    """
+    readme = (config.ROOT / "README.md").read_text(encoding="utf-8")
+    lines = readme.splitlines()
+
+    link_lines = [i for i, line in enumerate(lines) if STREAMLIT_APP_LINK.search(line)]
+    assert link_lines, (
+        "README.md carries no https://<subdomain>.streamlit.app link. ROADMAP "
+        "criterion 5 and APP-02 both require the live app's link to be in the "
+        "README -- a deployed app the repository does not point at is one a "
+        "reviewer never opens. The match is by shape, so re-deploying under a "
+        "new subdomain is fine; add the current URL rather than editing this "
+        "pattern."
+    )
+
+    assert SLEEP_PHRASE in readme, (
+        f"README.md does not say {SLEEP_PHRASE!r}. Streamlit Community Cloud "
+        "sleeps an app after 12 hours without traffic and serves a sleep page "
+        "to the next visitor. Unexplained, that page reads as a broken "
+        "deployment -- which is a worse outcome than no link at all, because "
+        "the reviewer now has evidence against the project rather than none "
+        "for it."
+    )
+    assert WAKE_PHRASE in readme, (
+        f"README.md does not say {WAKE_PHRASE!r}. Naming the sleep without "
+        "naming the one-click wake leaves a reviewer told the app may be "
+        "asleep and not told that ANY visitor can wake it with no Streamlit "
+        "account. That half is the actionable half, and it is the property "
+        "ROADMAP criterion 5 was amended to describe."
+    )
+
+    wake_lines = [i for i, line in enumerate(lines) if WAKE_PHRASE in line]
+    nearest = min(abs(w - l) for w in wake_lines for l in link_lines)
+    assert nearest <= WAKE_NOTE_WINDOW, (
+        f"the wake note is {nearest} lines from the nearest live-app link, "
+        f"more than the {WAKE_NOTE_WINDOW} allowed. Both are present, so this "
+        "is not a missing-content failure -- it is a placement one. A reviewer "
+        "clicks the link, lands on the sleep page, and comes back to the "
+        "README looking for an explanation where the link was. The fix is to "
+        "move the note back beside the link, not to widen this window."
+    )
