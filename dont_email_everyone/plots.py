@@ -1124,6 +1124,15 @@ _POLICY_EVERYONE_COLOUR = "#c65911"
 _POLICY_SELECTED_COLOUR = "#375623"
 
 
+# Inches held clear to the right of the legend, over and above what
+# `tight_layout` reserves. See the comment at the end of
+# `policy_curve_plot` for the measurement this is taken from; it is
+# asserted by
+# `tests/test_plots.py::test_policy_curve_legend_clears_the_axes_and_fits_the_canvas`,
+# which checks the SAVED raster and not only the live figure.
+_POLICY_LEGEND_EDGE_RESERVE_IN = 0.35
+
+
 def _guard_policy_contrast(contrast):
     """Return the contrast's spec, or raise naming every contrast there is.
 
@@ -1437,12 +1446,15 @@ def policy_curve_plot(
     #          10.6 |             611.8 |             620.8
     #          11.0 |             651.2 |             660.2
     #          11.2 |             670.9 |             679.9
+    #          11.6 |             675.2 |             684.2   <- with the
+    #                                       right-hand reserve below applied
     #
-    # So 11.2 in, the first width at which EVERY cell the app can draw is
-    # at least as wide as it was before. The legend's own column measures
-    # 309.3 px and does not change with the sixth entry, because the
-    # anchor's three-line entry is the widest either way.
-    fig, ax = plt.subplots(figsize=(11.2, 5.6))
+    # 11.6 in is the width at which every cell the app can draw is still at
+    # least as wide as it was before, AFTER the reserve taken out of the
+    # right margin further down. The legend's own column measures 309.3 px
+    # and does not change with the sixth entry, because the anchor's
+    # three-line entry is the widest either way.
+    fig, ax = plt.subplots(figsize=(11.6, 5.6))
 
     # Pinned, never auto-scaled, the same rule the Love plot's x limits and
     # the calibration plot's follow: the reader's question is whether the
@@ -1655,6 +1667,37 @@ def policy_curve_plot(
         framealpha=0.92,
     )
     _fit_titles(fig)
+
+    # An explicit right-hand reserve, taken AFTER `_fit_titles` because
+    # `_fit_titles` runs `tight_layout`, which would undo anything set
+    # before it.
+    #
+    # This exists because `tight_layout`'s own reservation is not enough,
+    # and the reason is a trap worth naming. The layout is solved at the
+    # FIGURE's dpi, and the PNG is rasterized at `savefig`'s -- 100 and 150
+    # here. Glyph advances are hinted to whole pixels, so a 7.5 pt legend
+    # string is not the same fraction of the canvas at the two dpis, and
+    # the text outgrows the frame that was sized for it. Measured on the
+    # headline spend cell at 11.2 in with no reserve, right-hand ink margin
+    # of the saved PNG:
+    #
+    #     save dpi | 100 | 150 | 200 | 300
+    #       margin |  17 |   0 |   0 |   1     <- px, clipped at 150 and 200
+    #
+    # 150 is exactly what `pipeline.py` saves at. The legend looked correct
+    # in every extent measured against the live figure and shipped CLIPPED
+    # into `reports/figures/`, which is worse than the overlap it replaced.
+    # With this reserve the same measurement reads 46 / 65 px at 150 / 200
+    # on the tightest of the four cells.
+    #
+    # The reserve is in INCHES, so it does not itself depend on the
+    # figure's dpi, and the axes is pulled left rather than the legend
+    # being nudged -- the legend is anchored to the axes' right edge, so
+    # moving the axes moves it, and the two cannot drift apart.
+    position = ax.get_position()
+    fig.subplots_adjust(
+        right=position.x1 - _POLICY_LEGEND_EDGE_RESERVE_IN / fig.get_figwidth()
+    )
     return fig
 
 

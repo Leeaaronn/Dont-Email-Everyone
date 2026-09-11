@@ -1756,6 +1756,28 @@ def test_policy_curve_plot_draws_nothing_new_when_selected_is_none(
     assert plt.get_fignums() == []
 
 
+def _ink_margins(path):
+    """The blank border, in saved pixels, on each side of a rendered PNG.
+
+    Reads the RASTER, not the figure. Every other geometric assertion in
+    this module measures an artist against the live figure, and on
+    2026-09-11 that turned out not to be the same question: see
+    `test_policy_curve_legend_clears_the_axes_and_fits_the_canvas`.
+    """
+    image = plt.imread(path)[..., :3]
+    inked = (image < 0.98).any(axis=2)
+    rows = np.flatnonzero(inked.any(axis=1))
+    columns = np.flatnonzero(inked.any(axis=0))
+    assert rows.size and columns.size, f"{path} rendered blank"
+    height, width = inked.shape
+    return {
+        "left": int(columns.min()),
+        "right": int(width - 1 - columns.max()),
+        "top": int(rows.min()),
+        "bottom": int(height - 1 - rows.max()),
+    }
+
+
 # The px floor the plot area may not fall below. Measured on the committed
 # headline spend cell at the geometry this repo shipped before the legend
 # moved outside the axes: an 800 px canvas gave the axes 666.5 px. The fix
@@ -1763,10 +1785,15 @@ def test_policy_curve_plot_draws_nothing_new_when_selected_is_none(
 # is the old plot width rather than a fraction of the new canvas.
 _POLICY_AXES_WIDTH_FLOOR_PX = 666.0
 
+# The dpi `pipeline.py` writes the two committed policy PNGs at, and the
+# dpi Streamlit writes the app's figures at. Both are checked, because the
+# defect below is invisible at the figure's own dpi and appears at these.
+_POLICY_SAVE_DPIS = (150, 200)
+
 
 @pytest.mark.parametrize("selected", [None, 0.37])
 def test_policy_curve_legend_clears_the_axes_and_fits_the_canvas(
-    policy_curve_frame, policy_band_frame, selected
+    policy_curve_frame, policy_band_frame, selected, tmp_path
 ):
     """The legend box may touch neither the plot area nor the canvas edge.
 
@@ -1792,6 +1819,22 @@ def test_policy_curve_legend_clears_the_axes_and_fits_the_canvas(
 
     Both legend sizes are checked: five entries with no selection, six with
     one, the sixth being the case the user reported.
+
+    The last block measures the SAVED RASTER, and it is not redundant with
+    the extent assertions above it. Moving the legend outside the axes
+    produced a figure on which every extent measured clean -- 18.8 px of
+    margin between the legend and the canvas edge -- and which still saved
+    CLIPPED at `pipeline.py`'s dpi. The layout is solved at the figure's
+    dpi and the PNG is rasterized at `savefig`'s, glyph advances are hinted
+    to whole pixels, and the legend text therefore outgrows the frame that
+    was sized for it. Right-hand ink margin of the saved file, headline
+    spend cell, before the reserve in `plots.py` was added:
+
+        save dpi | 100 | 150 | 200 | 300
+          margin |  17 |   0 |   0 |   1
+
+    A figure is not correct because its artists report the right numbers;
+    it is correct because the file a reader opens is readable.
     """
     plt.close("all")
     fig = plots.policy_curve_plot(
@@ -1870,6 +1913,27 @@ def test_policy_curve_legend_clears_the_axes_and_fits_the_canvas(
             f"The canvas is {canvas.width:.1f} px; widen it rather than "
             "letting the legend take the curve's room."
         )
+
+        # The raster. `pipeline.py` saves at 150 with no crop, so 150 is
+        # the number that decides what ships to `reports/figures/` and
+        # into Phase 7's README; 200 is Streamlit's, checked too so the
+        # figure is not merely correct at one magic dpi.
+        for dpi in _POLICY_SAVE_DPIS:
+            path = tmp_path / f"policy_curve_sel{selected}_dpi{dpi}.png"
+            fig.savefig(path, dpi=dpi)
+            margins = _ink_margins(path)
+            touching = {
+                edge: px for edge, px in margins.items() if px < 1
+            }
+            assert not touching, (
+                f"ink runs to the edge of the saved PNG at dpi={dpi}, "
+                f"selected={selected}: {touching} (all four margins "
+                f"{margins}). The figure's own extents said the legend was "
+                "clear; the file says it is cut off. Increase "
+                "plots._POLICY_LEGEND_EDGE_RESERVE_IN rather than adding a "
+                "crop to savefig -- a crop hides this in the app and "
+                "changes nothing in reports/figures/."
+            )
     finally:
         plt.close(fig)
     assert plt.get_fignums() == []
