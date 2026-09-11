@@ -524,6 +524,34 @@ VERSUS_EVERYONE_SENTENCE = (
 )
 
 
+# The repository this app reads, named once. The footer is the only place a
+# reviewer is told where the files on screen came from, and a link that is
+# not in the copy is a link that gets lost when the copy is edited.
+REPO_URL = "https://github.com/Leeaaronn/Dont-Email-Everyone"
+
+# Element 23, verbatim from the UI contract.
+#
+# "reads only files committed to this repository" IS THE APPROVED WORDING,
+# and the alternative phrasings are not available. `tests/test_no_network.py`
+# sweeps this whole file -- comments and string literals included, because
+# that sweep is deliberately blind to both -- for the six names that make a
+# module network-capable. A footer that promised the absence of any of them
+# by naming it would fail that test on correct code, which is the wrong
+# direction: the sweep guards a property criterion 4 rests on, and the copy
+# bends around it.
+#
+# The frame size is formatted from the artifact rather than typed, for the
+# reason every other count in this module is: the no-extrapolation sentence
+# has to be true of the holdout the figures above were actually measured on.
+FOOTER = (
+    "Data: the Hillstrom 2008 email marketing experiment. Outcome window: "
+    "the two weeks following the send. Every figure above is measured on "
+    "the {n_frame:,}-customer evaluation holdout as it stands, and nothing "
+    "here is scaled up to a larger list. This app reads only files "
+    "committed to this repository and fits no model. Source: {repo}"
+)
+
+
 def contrasts_table(curve, bands, ranking, k):
     """Build the two-by-three table of published contrasts at one depth.
 
@@ -866,3 +894,99 @@ st.subheader("Both published contrasts, at the depth you selected")
 st.table(contrasts_table(curve, bands, ranking, selected_k))
 st.caption(TABLE_CAPTION.format(n_frame=n_frame))
 st.markdown(VERSUS_EVERYONE_SENTENCE)
+
+st.divider()
+st.subheader("Assumptions, not data")
+
+# Elements 16 through 21 sit BELOW A DIVIDER, in a section whose heading
+# says what they are, and this placement is the decision rather than a
+# layout preference. At the app's opening cost and margin the cost-optimal
+# depth is 80%, four times the headline depth of 20%; the two side by side
+# on the first screen is the misreading 06-RESEARCH's Pitfall 5 names, in
+# which an exhibit selected on the evaluation rows is read as the project's
+# recommendation. ROADMAP criterion 3 asks that the depth MOVE as cost and
+# margin change, not that it be seen first.
+st.markdown(
+    f"**ASSUMED, not measured:** ${cost_per_email:.3f} per email, "
+    f"{gross_margin:.0%} gross margin. Hillstrom carries no cost data; "
+    "these are your numbers, not the experiment's."
+)
+
+# THE FULL 101-POINT GRID, ZERO INCLUDED, AND IT IS NOT THE CAPACITY
+# CONTROL'S GRID. The control drops the zero depth because
+# `economics.emails_at_capacity` raises there -- a campaign that selects
+# nobody is a caller-side error. The optimiser is the opposite case: a
+# cost-optimal depth of 0.00 is a REAL ANSWER, reached once cost per email
+# passes 139.7% of gross margin, and the committed sweep records it. Unify
+# the two grids in either direction and one of them breaks: give the control
+# the zero point and its leftmost position crashes the app, take it from the
+# optimiser and an answer the artifact publishes becomes unreachable.
+#
+# The optimum is computed on the SPEND curve's versus-nobody column,
+# because the profit it maximises is a gross margin applied to incremental
+# revenue less a price paid per email. It tracks the ranking control, so the
+# sensitivity rule's optimum is reachable, and at the shipped ranking it
+# reproduces all three pairs `manifest.json -> cost_exhibit` publishes.
+#
+# `economics.optimal_k` returns a TUPLE and carries a documented tie rule --
+# the smallest of equally profitable depths wins, which a flat tail on the
+# uplift curve makes common rather than exotic. An argmax written here would
+# resolve that tie by whatever the array happened to do.
+cost_rows = curve.loc[
+    (curve["ranking"] == ranking) & (curve["outcome"] == "spend")
+].sort_values("k")
+k_star, _profit_at_k_star = economics.optimal_k(
+    cost_rows["delta_none"].to_numpy(),
+    cost_rows["k"].to_numpy(),
+    cost_per_email=cost_per_email,
+    gross_margin=gross_margin,
+)
+
+# THE COST AND THE MARGIN ARE INSIDE THE LABEL, WHICH IS THE SAME ELEMENT AS
+# THE VALUE. Pitfall 5 is closed structurally rather than by adjacency:
+# there is no crop of this page that separates the depth from the price that
+# produced it, because separating them would mean separating a label from
+# its own number. `economics.optimal_k`'s docstring states this as a rule --
+# an optimum with no cost attached reads as a recommendation about the list
+# rather than a statement about a price -- and a caption underneath would
+# have been an adjacency, which is a weaker claim and the one D-07 already
+# had to defend with an index walk.
+#
+# This is the third and final metric. The contract caps them at three: two
+# halves of the D-03 pair and this one.
+st.metric(
+    f"Cost-optimal depth at ASSUMED ${cost_per_email:.3f} per email and "
+    f"{gross_margin:.0%} margin",
+    f"{k_star:.0%}",
+)
+st.caption(
+    "This depth was chosen by looking at the same customers it is scored "
+    "on, so it carries optimism the pre-registered "
+    f"{economics.HEADLINE_CAPACITY:.0%} anchor above exists to avoid. It "
+    "is an exhibit, never the recommendation, and no number in the "
+    "headline block is read off it."
+)
+
+# Element 20: the third and last figure, and the third and last call site of
+# the render helper. The whole of the committed sweep is passed -- the
+# factory separates the swept ratios from the illustrative pairs by the
+# frame's own flag, never by position, and handing it a filtered frame would
+# move that decision into the app layer.
+render(plots.cost_sweep_plot(sweep))
+
+# Both breakpoints are read from the artifact and formatted, not typed. They
+# are the finding this exhibit actually carries: the optimum's INSENSITIVITY
+# over the whole range of plausible prices is more useful than any single
+# optimum, and it is also why the headline above is stated at an exogenous
+# capacity rather than a cost-derived one.
+st.caption(
+    "The optimal depth does not move at all until cost per email reaches "
+    f"{manifest['cost_exhibit']['first_breakpoint']:.1%} of gross margin, "
+    "and reaches zero only at "
+    f"{manifest['cost_exhibit']['first_ratio_with_k_star_zero']:.1%}. "
+    "Email is nearly free relative to the purchase it produces, so for any "
+    "plausible real cost the optimal depth is the same depth."
+)
+
+st.divider()
+st.caption(FOOTER.format(n_frame=n_frame, repo=REPO_URL))

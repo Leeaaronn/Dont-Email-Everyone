@@ -768,16 +768,45 @@ def _headline_triples(at):
     return triples
 
 
+# The subheader the two policy curves live under. Plan 06-06 adds a THIRD
+# figure -- the cost exhibit, under `Assumptions, not data` -- so the two
+# helpers below are scoped BY SECTION rather than by taking every Image on
+# the page. Scoping by caption content would have been circular: the
+# property under test is what those captions say.
+POLICY_CURVE_SECTION = "Where the gain is, and is not, detectable"
+
+
+def _policy_curve_images(at):
+    """The `Image` elements sitting under the policy-curve subheader."""
+    images = []
+    section = None
+    for element in _main_elements(at):
+        kind = _element_kind(element)
+        if kind == "Subheader":
+            section = element.value
+        elif kind == "Image" and section == POLICY_CURVE_SECTION:
+            images.append(element)
+    return images
+
+
 def _curve_captions(at):
-    """The caption sitting immediately after each `Image`, in order."""
+    """The caption immediately after each POLICY-CURVE `Image`, in order."""
     elements = _main_elements(at)
-    return [
-        elements[index + 1].value
-        for index, element in enumerate(elements)
-        if _element_kind(element) == "Image"
-        and index + 1 < len(elements)
-        and _element_kind(elements[index + 1]) == "Caption"
-    ]
+    captions = []
+    section = None
+    for index, element in enumerate(elements):
+        kind = _element_kind(element)
+        if kind == "Subheader":
+            section = element.value
+            continue
+        if kind != "Image" or section != POLICY_CURVE_SECTION:
+            continue
+        if (
+            index + 1 < len(elements)
+            and _element_kind(elements[index + 1]) == "Caption"
+        ):
+            captions.append(elements[index + 1].value)
+    return captions
 
 
 def test_headline_cannot_be_read_without_its_qualifier():
@@ -1103,15 +1132,14 @@ def test_zero_by_construction_line_is_under_both_curves():
         str(config.ROOT / "streamlit_app.py"), default_timeout=60
     ).run()
 
-    images = [
-        element
-        for element in _main_elements(at)
-        if _element_kind(element) == "Image"
-    ]
+    images = _policy_curve_images(at)
     assert len(images) == 2, (
-        f"{len(images)} figures are on the page, not 2. The spend curve and "
-        "the visit curve are the D-03 pair in picture form, and a page "
-        "carrying one of them carries half the argument."
+        f"{len(images)} figures sit under {POLICY_CURVE_SECTION!r}, not 2. "
+        "The spend curve and the visit curve are the D-03 pair in picture "
+        "form, and a page carrying one of them carries half the argument. "
+        "The cost exhibit is a third figure on this page and is deliberately "
+        "NOT counted here: it lives under its own subheader, carries its own "
+        "gloss, and has nothing to say about the email-everyone marker."
     )
 
     captions = _curve_captions(at)
