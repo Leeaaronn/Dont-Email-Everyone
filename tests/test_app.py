@@ -1520,6 +1520,33 @@ def test_app_passes_no_styling_to_any_factory():
     builds them. A styling keyword passed from the app would be a second
     place that appearance is decided, and the committed PNGs and the
     browser's figures would stop being the same picture.
+
+    **As of 2026-09-12 the app bounds figure DISPLAY WIDTH deliberately**,
+    at `streamlit_app.FIGURE_DISPLAY_WIDTH_PX`, passed to `st.pyplot` and to
+    nothing else. That is not a violation of this contract, and the
+    distinction is worth stating rather than asserting: `width` is an
+    argument to the STREAMLIT ELEMENT, not to a `plots.py` factory. No inch,
+    no point size and no colour moves. The figure's geometry, its type and
+    its palette are still decided in exactly one place, and the committed
+    PNG and the browser's figure are still the same picture.
+
+    The substantive half is that **bounding a scale factor is not deciding
+    appearance**. The page was ALREADY scaling the figure by an arbitrary
+    factor: `layout="wide"` plus `st.pyplot`'s `width="stretch"` default
+    meant the factor was whatever the browser window happened to be, and on
+    a 2560 px viewport that put the tick labels at roughly 38 px against
+    16.00 px page body text. Capping it replaces an unbounded,
+    environment-supplied factor with a known one. It REMOVES a degree of
+    freedom from the appearance; it does not add one. An unbounded scale
+    factor is not neutrality -- it is the reader's monitor deciding the
+    typography, which is precisely what this contract exists to prevent.
+
+    `test_display_width_cap_tracks_the_policy_calibration` is what keeps the
+    number honest: it pins the cap as an IDENTITY against
+    `plots._POLICY_FIGSIZE_IN` and `plots._POLICY_FONT_SCALE`, so the
+    derivation lives next to the constants it depends on rather than in a
+    comment that can go stale. A reader following this contract's trail
+    should go there next.
     """
     body = _app_body()
 
@@ -1570,6 +1597,83 @@ def test_app_passes_no_styling_to_any_factory():
         "as economics.HEADLINE_CAPACITY so that retuning it is a one-line "
         "change; a transcribed copy is a second place it has to be changed "
         "and a place it can be missed."
+    )
+
+
+# The calibration the 05-08 legibility checkpoint approved, named here so a
+# reader can see these are the REFERENCE and not the policy figure's own
+# geometry: an 8.0-inch canvas at unity font scale, displayed at roughly 730
+# CSS px (`06-UI-SPEC.md:898`). Every apparent-type judgment this project has
+# made was made against that pair.
+_CALIBRATION_CANVAS_IN = 8.0
+_CALIBRATION_DISPLAY_PX = 730.0
+_CANVAS_PX_PER_IN = 100.0
+
+
+def test_display_width_cap_tracks_the_policy_calibration():
+    """The display cap is DERIVED from the figure, not typed beside it.
+
+    Apparent type in the browser is `points x (display_px / canvas_px)`. The
+    cap `streamlit_app.FIGURE_DISPLAY_WIDTH_PX` is the display width W that
+    puts the policy figure back on the reference ratio:
+
+        _POLICY_FONT_SCALE x (W / (_POLICY_FIGSIZE_IN x 100)) = 730 / 800
+
+    WHAT THIS TEST IS FOR, stated plainly, because the identity looks
+    stronger than it is. `_POLICY_FONT_SCALE` is *defined as*
+    `_POLICY_FIGSIZE_IN / 8.0`, so the figure's own width CANCELS out of the
+    identity: the cap stays correct for any canvas width while that coupling
+    holds. This test therefore does NOT catch a width change -- the coupling
+    already absorbs one, correctly. It catches DECOUPLING: someone
+    hand-typing `1.075`, or defining the scale against a different reference
+    canvas, so that the scale stops tracking the width it compensates for.
+    The negative control at the bottom is what makes that visible instead of
+    leaving a reader to wonder whether the assertion is a tautology.
+
+    It deliberately does not assert `cap == 730`. A literal pin is worthless
+    here: it would keep passing on a figure whose calibration had moved out
+    from under it, which is the only failure that matters.
+    """
+    cap = streamlit_app.FIGURE_DISPLAY_WIDTH_PX
+    canvas_px = plots._POLICY_FIGSIZE_IN * _CANVAS_PX_PER_IN
+    reference_ratio = _CALIBRATION_DISPLAY_PX / (
+        _CALIBRATION_CANVAS_IN * _CANVAS_PX_PER_IN
+    )
+
+    # approx, never `==`: the two sides evaluate to 0.9124999999999999 and
+    # 0.9125 at the current constants. Measured, not guessed.
+    assert plots._POLICY_FONT_SCALE * (cap / canvas_px) == pytest.approx(
+        reference_ratio
+    ), (
+        f"the policy figure's width ({plots._POLICY_FIGSIZE_IN} in) or its "
+        f"font scale ({plots._POLICY_FONT_SCALE}) has moved without the "
+        f"display cap ({cap} px) being re-derived, so the app now renders "
+        "the figure at a width its typography was not calibrated for. The "
+        "cap is `_POLICY_FONT_SCALE x W / canvas_px = 730/800` solved for "
+        "W. Re-solve it against the new constants and put the result in "
+        "streamlit_app.FIGURE_DISPLAY_WIDTH_PX -- do NOT edit the number in "
+        "this assertion, which is the calibration itself and not a property "
+        "of the figure."
+    )
+
+    # The negative control. Hold the font scale at its CURRENT value while
+    # moving the canvas off the width that scale was derived from -- the
+    # decoupling this test exists to catch -- and the identity must break.
+    # Without this, the assertion above is indistinguishable from one that
+    # cannot fail.
+    #
+    # The hypothetical width is derived from the real one rather than
+    # written as a literal. A literal (9.0, say) would silently STOP being a
+    # decoupling on the day the figure's real width became that value, and
+    # this control would then fail against a perfectly correct figure.
+    decoupled_canvas_px = (plots._POLICY_FIGSIZE_IN + 1.0) * _CANVAS_PX_PER_IN
+    assert plots._POLICY_FONT_SCALE * (
+        cap / decoupled_canvas_px
+    ) != pytest.approx(reference_ratio), (
+        "the calibration identity is satisfied even by a font scale that "
+        "does NOT track its canvas width, which means the assertion above "
+        "proves nothing. Check that this control still describes a genuine "
+        "decoupling before trusting the test that precedes it."
     )
 
 
