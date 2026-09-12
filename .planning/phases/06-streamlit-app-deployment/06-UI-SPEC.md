@@ -207,6 +207,27 @@ dated amendment to Human-Judgment-Only item 1 below for the defect and the fix; 
 expressed in axes fraction closes on an x-axis label positioned in points as the canvas shortens,
 and at 6.0 in it closed completely.)*
 
+*(**Amended 2026-09-12. The `width="stretch"` fact this whole block reasons from is no longer
+operative, and the arithmetic above survives it unchanged.** The block states, twice, that
+"`st.pyplot` renders with `width="stretch"`, so a figure is scaled to the column" and that
+"rendered width is the container width". As of today the app passes an explicit integer width at
+its single `st.pyplot` call, so **rendered width is `min(container width, 730 px)`** — the cap in
+`streamlit_app.py::FIGURE_DISPLAY_WIDTH_PX`.*
+
+*Everything derived from the old fact still holds, and it is worth saying why rather than leaving a
+reader to re-derive it. Apparent type still goes as `1 / canvas_width`; the two-lever table above —
+canvas WIDTH moving apparent type, canvas HEIGHT moving the footprint via the aspect ratio — is
+untouched; and the measured rejection of the proportional-scaling lever (footprint ratio **1.000**)
+is if anything now stronger, because the display width is pinned rather than incidental. What
+changes is only that the multiplier is now **known and bounded** instead of being whatever window
+the reader opened.*
+
+***One difference from the two amendments above is worth flagging explicitly**, because each of them
+recorded that `streamlit_app.py` was NOT touched: this change **does** touch it. It is the first
+deliberate edit to the app module in this phase. The diff is one module constant with its derivation
+in whole-line comments plus one keyword at the `st.pyplot` call — no factory call, no figure, no
+committed PNG, and `dont_email_everyone/plots.py` appears in no diff.)*
+
 *The scaling is **local by construction**, which matters because `_TITLE_SIZES` and the rcParams in
 the table above are shared by all nineteen committed figures. `_fit_titles` grew a `sizes` ladder
 parameter; `policy_curve_plot` is the only caller that passes one, and the tuple itself is unchanged.
@@ -256,6 +277,24 @@ explicit user decision on 2026-09-11**. `plots.py` was restyled, the two policy-
 regenerated and committed alongside the source that produced them, and the D-06 gate then printed
 exactly those two paths and nothing else. The rest of the exemption still holds: these point sizes
 remain unreachable from the app, and V18 is intact.)*
+
+*(**Amended 2026-09-12 — the same paragraph's remaining clause is now stale in its second half
+too.** It reads: "`layout="wide"` is the one pre-approved remedy if the UI legibility checkpoint
+finds the legend too small at **~730 CSS px**". Two corrections, on top of the 2026-09-11 one above.*
+
+*First, the `~730 CSS px` is no longer a thing the checkpoint might find the figure at — it is the
+width the app now **enforces**, via `streamlit_app.py::FIGURE_DISPLAY_WIDTH_PX` at the single
+`st.pyplot` call. The tilde was carrying real uncertainty: the actual rendered width was the
+browser window's, which on a 2560 px viewport was roughly 2090 CSS px, not 730.*
+
+*Second, `layout="wide"` is no longer the remedy for a figure-legibility finding of any kind,
+because it no longer governs the figure's width. It is kept for the prose, the contrasts table and
+the sidebar. A future legibility finding about the figures is now a question about the **cap** and
+the calibration it is derived from, not about the page layout.*
+
+*What is NOT amended: the paragraph's core claim, that these point sizes are unreachable from the
+app without `unsafe_allow_html`, still holds exactly. The cap is a display-width bound passed to a
+Streamlit element; it sets no point size and reaches no factory.)*
 
 Rules, each checkable:
 
@@ -416,6 +455,57 @@ the box covers part of the curve", at every shallow depth, on both rankings. The
 one the 2026-09-10 note above said not to take, restyling `plots.py`, taken under an **explicit user
 decision on 2026-09-11**. `layout="wide"` stays because a wider measure is right for this app on its
 own merits, not because it fixed this.)*
+
+*(**Amended 2026-09-12. The config line is unchanged and `layout="wide"` is kept — what changes is
+that it no longer governs the figures at all.** It widens the single measure for the prose, the
+`st.table` of contrasts and the sidebar, and that is right on its own merits. The figures are now
+bounded independently of it.*
+
+*What was wrong. `st.pyplot`'s `width="stretch"` default let the figure take the whole window, so
+the 2026-09-10 note above — "the ~730 CSS px that centred layout **yields**" — was recording a
+description of ONE monitor as though it were a property of the app. It is not a guarantee and
+nothing enforced it. On a 2560 px viewport (verified in a real browser: `innerWidth` 2560,
+`devicePixelRatio` 1) the figure rendered at roughly **2090 CSS px**. At the 8.6 × 7.5 in geometry
+then deployed that is also ~1823 px tall, taller than a typical viewport, which is why the rotated
+y-axis label was reported as "clipped mid-word" — it was **oversize, not clipped**. At the 8.6 × 6.0
+in geometry shipped since 260912-dvo the same viewport gives ~1478 px.*
+
+*The remedy as shipped: `streamlit_app.py::FIGURE_DISPLAY_WIDTH_PX`, an integer passed at the single
+`st.pyplot` call in `render()`. **730 CSS px is now enforced rather than assumed.** It is derived,
+not chosen: solving `_POLICY_FONT_SCALE × (W / (_POLICY_FIGSIZE_IN × 100)) = 730/800` gives W = 730
+exactly, and the figure's own width CANCELS because the scale is defined as `_POLICY_FIGSIZE_IN /
+8.0`. `tests/test_app.py::test_display_width_cap_tracks_the_policy_calibration` asserts that
+identity against the live constants and carries a negative control proving it fails on decoupling.*
+
+*An integer `width` is a **cap, never a floor**. Read on the installed wheel rather than taken from
+the docstring: the element container is styled `width: 730px` together with `max-width: 100%`, and
+the `<img>` inside it `width: auto; max-width: 100%; object-fit: contain`. CSS `max-width` beats
+`width`, so a container narrower than 730 px still wins and no narrow viewport can overflow or gain
+a horizontal scrollbar. This cannot make the app worse on a laptop or a phone.*
+
+***The cap governs the COST EXHIBIT too**, because it sits in the one `render()` helper that all
+three call sites pass through. Measured: `cost_sweep_plot` is 8.0 × 5.6 in at unity font scale,
+which IS the reference geometry the calibration is written against, so at the cap it lands on the
+same apparent type as the policy curves rather than merely near it.*
+
+*The measured evidence, from this task and not transcribed. In the plan's uncropped model all three
+geometries measure **identically** — 12.67 px at 730 and 36.28 px at 2090 — which is what proves
+this was never a figure-geometry defect: `_POLICY_FONT_SCALE` is holding apparent type exactly as it
+claims, and 260912-dvo's height cut did not move it. Measured instead through the raster
+`st.pyplot` actually ships (it applies `bbox_inches="tight"` and `dpi=200` of its own, cropping
+5.06% of the policy canvas's width and 1.38% of the cost canvas's), the y tick label lands at:*
+
+| figure | at the 730 cap | at 2090 CSS px |
+|--------|----------------|----------------|
+| policy curve, spend | **13.35 px** | 38.22 px |
+| policy curve, visit | **13.41 px** | 38.38 px |
+| cost exhibit | **12.85 px** | 36.79 px |
+
+*against **16.00 px** page body text. The cap takes the tick labels from ~2.4× body text down to
+~0.84× it. The residual 3.9% spread between the two figure families is Streamlit's tight crop, which
+the uncropped derivation cannot see and which no number in this contract previously accounted for;
+it is well inside the tolerance of a legibility judgment and is recorded here rather than tuned
+away.)*
 
 `initial_sidebar_state="expanded"` so criterion 1's control is visible on first paint on desktop,
 while the headline still reads if the sidebar is collapsed.
@@ -886,6 +976,32 @@ that map does not yet carry.
 | V19 | The selected rule is solid with a diamond marker; the anchor stays dashed with a circle | figure introspection (linestyle + marker, not colour) | `test_policy_curve_marks_the_selected_point_at_the_artifact_value` |
 | V20 | `anchor=economics.HEADLINE_CAPACITY` on every call; the literal `0.20` appears nowhere | source scan | **new** |
 
+*(**Amended 2026-09-12 — a judgement on rows V18 and V13, recorded deliberately instead of an edit
+to either row.** As of today the app passes `width=FIGURE_DISPLAY_WIDTH_PX` at its single
+`st.pyplot` call, which is the first keyword the app has ever passed alongside a figure. Both rows
+were re-read against that change and **both stay true exactly as written**, so neither is edited —
+an unnecessary edit to a contract row is churn, and the judgement is the useful artifact.*
+
+*V18 reads "the app passes no colour, `figsize`, `dpi`, `fontsize` or `pad` **to any factory**". The
+cap is passed to the Streamlit ELEMENT, not to `policy_curve_plot` or `cost_sweep_plot`. No inch, no
+point size and no colour is decided in the app; the figure's geometry, type and palette are still
+decided in exactly one place, and the committed PNG and the browser's figure are still the same
+picture. The deeper reason this is not a V18 violation is that **bounding a scale factor is not
+deciding appearance**: the page was already scaling the figure by an arbitrary factor, and a cap
+replaces an unbounded environment-supplied one with a known one. It removes a degree of freedom from
+the appearance rather than adding one. `test_app_passes_no_styling_to_any_factory` was run against
+the change with **every assertion byte-identical** — only its docstring grew, to carry this
+argument.*
+
+*V13 reads "No `* 100`, `100 *`, `/ 100`, no unit conversion". The cap's derivation needs exactly
+that canvas-px arithmetic, which is why the app carries the number as a plain integer literal and
+the derivation lives in whole-line comments, asserted in
+`test_display_width_cap_tracks_the_policy_calibration` rather than computed at runtime. Note that
+`_app_body()` strips **whole-line** comments only, so a trailing comment would still be scanned; the
+constant carries none. The non-comment body was grepped against every banned token in both rows —
+including the constant's NAME, since `FIGURE_DPI_WIDTH_PX` would have failed V18 on the name
+alone — and came back clean.)*
+
 ---
 
 ## Human-Judgment Only — routed to the UI legibility checkpoint
@@ -957,6 +1073,31 @@ instructions, both of which are judgments no test can make:
    5.5, 6.0 and 7.5 in on both legend sizes and asserts the raster gap at both save dpis, and is the
    regression guard for exactly that. It was seen to fail on the old anchor at 5.5 and 6.0 while
    **passing at 7.5** — which is why it renders at several heights and not at the shipped one.)*
+
+   *(**Amended 2026-09-12. The 730 in item 1 is now the app's enforced display width, not a
+   description of what a centred column happened to yield on the reviewer's monitor.** The clause
+   this supersedes is item 1's opening: "An 8.0-inch figure in `layout="centered"` displays at
+   roughly 730 CSS px, so the legend's 7.5 pt entries render near 9.5 CSS px". Every word of that
+   was conditional on one window. Nothing enforced it, and `layout="wide"` plus `st.pyplot`'s
+   `width="stretch"` default meant the real number was whatever the browser gave it — on a 2560 px
+   viewport, roughly 2090 CSS px.*
+
+   *As of today it is enforced by `streamlit_app.py::FIGURE_DISPLAY_WIDTH_PX` at the single
+   `st.pyplot` call, so **the legibility judgment the 05-08 and 06-07 checkpoints made is now
+   reproducible on any monitor instead of on one**. That is the substantive change: those
+   checkpoints approved a picture, and until today the app could not promise to show it.*
+
+   *The derivation, in one line: `_POLICY_FONT_SCALE × (W / (_POLICY_FIGSIZE_IN × 100)) = 730/800`
+   solved for W gives exactly 730, the figure's own width cancelling because the scale is defined as
+   `_POLICY_FIGSIZE_IN / 8.0`. The guard is
+   `tests/test_app.py::test_display_width_cap_tracks_the_policy_calibration`, which pins that as an
+   identity against the live `plots` constants — never as the literal 730, which would keep passing
+   on a figure whose calibration had moved out from under it.*
+
+   *On the pre-approved remedy named in item 1: `layout="wide"` was applied at 06-07, is **kept**,
+   and is now **explicitly not the figure's width governor**. The other prohibitions are untouched
+   by this change — no figure was shrunk in apparent size, no legend entry dropped, and `plots.py`
+   was not opened.)*
 2. **Coincident rules at first paint.** At `k = 0.20` the selected rule and the pre-registered anchor
    land on the same depth. Confirm the solid-green-diamond and dashed-purple-circle pair is
    distinguishable there, and that the element-7 caption's "sit on the same depth" wording reads as
