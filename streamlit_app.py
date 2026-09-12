@@ -256,6 +256,64 @@ def check_artifacts_agree(curve, manifest):
         )
 
 
+# The figures' maximum DISPLAY width, in CSS pixels. Not a figure setting:
+# it is passed to the Streamlit element and to no factory, and no inch and
+# no point size on either side of it moves.
+#
+# WHY A CAP EXISTS AT ALL. `st.set_page_config(layout="wide")` above, plus
+# `st.pyplot`'s `width="stretch"` default, meant the figure took whatever
+# width the browser window happened to give it. That is an UNBOUNDED scale
+# factor supplied by the environment: apparent type in the browser is
+# `points x (display_px / canvas_px)`, so the reader's monitor was deciding
+# how large the tick labels read. On a 2560 px viewport (measured in a real
+# browser, innerWidth 2560, devicePixelRatio 1) the figure rendered at
+# roughly 2090 CSS px. This replaces that unbounded factor with a known
+# one. It REMOVES a degree of freedom from the appearance; it does not add
+# one, and it is not a second place appearance is decided.
+#
+# THE DERIVATION. The reference the 05-08 legibility checkpoint approved is
+# the 8.0 in canvas at unity font scale displayed at 730 CSS px
+# (`06-UI-SPEC.md:898`), an apparent ratio of 1.0 x (730 / 800) = 0.9125.
+# The policy figure carries `plots._POLICY_FONT_SCALE` on every point size,
+# on a canvas of `plots._POLICY_FIGSIZE_IN` x 100 px. Solving for the
+# display width W that reproduces the reference:
+#
+#     _POLICY_FONT_SCALE x (W / (_POLICY_FIGSIZE_IN x 100)) = 730 / 800
+#     (8.6 / 8.0)        x (W / 860)                        = 730 / 800
+#     W / 800                                               = 730 / 800
+#     W = 730
+#
+# The figure's own width CANCELS, because `_POLICY_FONT_SCALE` is *defined
+# as* `_POLICY_FIGSIZE_IN / 8.0`. So 730 is right for any canvas width
+# while that coupling holds, and wrong the moment it is broken by a
+# hand-typed scale. That is what
+# `tests/test_app.py::test_display_width_cap_tracks_the_policy_calibration`
+# asserts as an IDENTITY against the live plots constants.
+#
+# WHY THE NUMBER IS A LITERAL HERE AND DERIVED IN THE TEST. Computing it in
+# this module needs the canvas-px arithmetic above, and
+# `test_app_performs_no_arithmetic_on_a_displayed_number` (V13) bans those
+# exact tokens from this file's non-comment body. The split is deliberate:
+# the literal ships, the derivation is asserted next to the constants it
+# depends on, where it can actually fail.
+#
+# MEASURED 2026-09-12 through the real factories on the committed data, as
+# a y tick label's apparent height against 16.00 px page body text:
+# 12.67 px at 730 and 36.28 px at 2090 -- for BOTH figure families. The
+# cost exhibit is 8.0 x 5.6 in at unity scale, which IS the reference
+# geometry, so it lands on the same apparent type rather than merely near
+# it.
+#
+# AN INT WIDTH IS A CAP, never a floor: Streamlit 1.63 clamps it to the
+# parent container, so a laptop or a phone still gets its own narrower
+# width and this cannot make a narrow viewport worse.
+#
+# `layout="wide"` is KEPT and is still right on its own merits -- it widens
+# the measure for the prose, the contrasts table and the sidebar. It simply
+# no longer governs the figures.
+FIGURE_DISPLAY_WIDTH_PX = 730
+
+
 def render(fig, sink=None):
     """Display a figure, then close it -- the pair is one statement.
 
@@ -283,7 +341,7 @@ def render(fig, sink=None):
     """
     try:
         if sink is None:
-            st.pyplot(fig)
+            st.pyplot(fig, width=FIGURE_DISPLAY_WIDTH_PX)
         else:
             sink(fig)
     finally:
