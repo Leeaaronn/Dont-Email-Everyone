@@ -70,6 +70,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.ticker as mticker  # noqa: E402
+import matplotlib.transforms as mtransforms  # noqa: E402
 import numpy as np  # noqa: E402
 
 # `config.OUTCOMES` is the project's single outcome -> unit mapping, and
@@ -1132,26 +1133,122 @@ _POLICY_SELECTED_COLOUR = "#375623"
 # which checks the SAVED raster and not only the live figure.
 _POLICY_LEGEND_EDGE_RESERVE_IN = 0.10
 
-# The policy curve's canvas width, in inches, and the factor every point
-# size on it is multiplied by.
+# The policy curve's canvas, in inches, and the factor every point size on
+# it is multiplied by.
 #
-# These two are one decision. `st.pyplot` renders with `width="stretch"`,
-# so apparent size in the browser is `points x dpi x (column_px /
-# canvas_px)` -- a wider canvas shrinks every glyph in the same proportion.
-# The width therefore moved as little as the layout allows (8.0 -> 8.6, to
-# keep the plot area above its 666.5 px baseline once the legend block
+# HEIGHT is the on-screen-footprint lever. WIDTH is the type-scale lever.
+# They are SEPARATE decisions, and the separation is forced by how the app
+# displays this figure. `st.pyplot` renders with `width="stretch"`
+# (verified on the installed wheel, in the app framework's own
+# `elements/pyplot.py` at lines 83-90). The framework is named only as
+# `st` anywhere under `dont_email_everyone/`, here and in every other
+# comment that refers to it: `tests/test_no_network.py` greps this package
+# for the bare package name, comment-blind, to prove the analysis does not
+# depend on the app. So the figure is scaled to the container width
+# whatever its inches are:
+# rendered width IS the container width, and rendered height is
+# `container_width x (height / width)`. Inches do not set on-screen size.
+# Only the ASPECT RATIO moves the footprint.
+#
+# WIDTH, therefore, still governs apparent type, and is unchanged at 8.6.
+# Apparent size in the browser is `points x dpi x (column_px /
+# canvas_px)`, so a wider canvas shrinks every glyph in the same
+# proportion. The width moved as little as the layout allows (8.0 -> 8.6,
+# to keep the plot area above its 666.5 px baseline once the legend block
 # below it is laid out), and the scale puts back exactly what that width
 # increase would otherwise have taken: 8.6/8.0, so apparent type is held.
-#
 # Written as the division of the two figures rather than as 1.075, so the
 # scale cannot silently stop matching the width it compensates for.
 #
-# Deliberately NOT applied by changing `_TITLE_SIZES` or the rcParams: both
-# are shared by all nineteen committed figures, and this is a two-figure
-# change. `_fit_titles` takes a `sizes` ladder for the same reason. Task
-# 3's D-06 drift gate is the check on that -- a third figure appearing in
-# `git status` after `pipeline all` would mean something shared had moved.
+# `_POLICY_FIGSIZE_IN` is that WIDTH, despite a name that reads like it is
+# both. It is kept anyway, so the asymmetry with `_POLICY_FIGHEIGHT_IN` is
+# chosen rather than careless: `06-UI-SPEC.md`'s dated contract rows pin
+# `_POLICY_FONT_SCALE = 8.6/8.0`, which is defined in terms of this name,
+# and a rename is churn in a file whose entire point here is that only the
+# HEIGHT moved. (The 2026-09-12 plan asserted that `06-UI-SPEC.md:761`
+# quotes `_POLICY_FIGSIZE_IN` directly. It does not -- the string appears
+# nowhere in that document. Re-grepped, not trusted.)
+#
+# HEIGHT came down 7.5 -> 6.0 on 2026-09-12, for a ~20% smaller footprint:
+# the measured aspect ratio is 0.800 of the 8.6 x 7.5 baseline's. It costs
+# nothing in type or in plot width. The plot area's drawn WIDTH is
+# unchanged at 687.4 px (696.4 on the visit cell) at EVERY height tried,
+# 5.0 through 9.0, and `_fit_titles` steps down its ladder by testing
+# title WIDTH against canvas width only -- height is not in that test --
+# so the type ladder cannot move either. The committed PNGs go
+# 1290x1125 -> 1290x900 at `pipeline.py`'s dpi 150.
+#
+# Getting to 6.0 needed `_POLICY_LEGEND_DROP_IN` first. The height alone
+# drove the legend's frame through the x-axis label's descenders; see that
+# constant for the measurement and for why the old anchor's UNIT, not the
+# height, was the defect.
+#
+# Scaling the figure down PROPORTIONALLY was measured and rejected, on two
+# independent grounds. It is recorded here because it is the intuitive
+# lever and it is the wrong one:
+#   - At 6.02 x 5.25 in (0.70 linear, aspect held) the measured app
+#     footprint ratio is 1.000. Literally no on-screen change -- which is
+#     the `width="stretch"` fact above, restated as a measurement.
+#   - That geometry then fails on the raster too. With the point sizes
+#     held, its saved PNG has left and right ink margins of 0 px at dpi
+#     150 on every cell -- the exact clipping failure caught on 2026-09-11.
+#     With the point sizes scaled down instead, the plot area collapses
+#     from 687.4 px to 458.4 px, far below the 666.5 px floor
+#     `tests/test_plots.py::_POLICY_AXES_WIDTH_FLOOR_PX` defends.
+# `tests/test_plots.py::test_policy_curve_footprint_comes_out_of_the_height_not_the_scale`
+# is the gate: it fails on a held aspect ratio and names the 1.000.
+#
+# Neither lever is applied by changing `_TITLE_SIZES` or the rcParams:
+# both are shared by all nineteen committed figures, and this is a
+# two-figure change. `_fit_titles` takes a `sizes` ladder for the same
+# reason. The D-06 drift gate is the check on that -- a third figure
+# appearing in `git status` after `pipeline all` would mean something
+# shared had moved.
 _POLICY_FIGSIZE_IN = 8.6
+_POLICY_FIGHEIGHT_IN = 6.0
+
+# How far below the axes' bottom edge the legend hangs, in INCHES.
+#
+# The unit is the whole point of this constant. Until 2026-09-12 the drop
+# was `bbox_to_anchor=(0.0, -0.15)` -- 0.15 of the AXES HEIGHT -- and that
+# is a bug that only shows up when the canvas gets shorter. The gap below
+# the axes is shared with the x-axis label and the x tick labels, and
+# matplotlib offsets those in POINTS, which do not shrink. So an
+# axes-fraction gap closes on a fixed-size label as the axes shrinks, and
+# at some height the legend's frame is drawn straight through the label's
+# descenders.
+#
+# That is not a theory. Taking the height to 6.0 with the old anchor, px
+# between the x label's lowest ink and the legend's highest ink on the
+# binding cell (`selected=0.20`, the six-entry legend, which is the app's
+# FIRST PAINT), at dpi 150 / 200:
+#
+#     canvas height | 7.5 | 6.5 | 6.4 | 6.3 | 6.2 | 6.1 | 6.0
+#            dpi150 |  26 |   6 |   5 |   2 |   0 |  -2 |  -3
+#            dpi200 |  35 |   9 |   6 |   3 |   1 |  -2 |  -5
+#
+# Negative is the frame drawn THROUGH the glyphs, confirmed by opening the
+# file. With the drop in inches the same measurement is FLAT -- 25-26 px
+# at dpi 150 and 34 px at 200, at every canvas height from 5.0 to 9.0 in.
+# 0.62 in is chosen to reproduce the clearance the 8.6 x 7.5 figure
+# actually shipped with (26 / 35), so the shorter canvas gives up nothing.
+#
+# Measured as INK IN THE SAVED RASTER, never as artist extents. An extent
+# includes the font's empty descender band, so the same cell that measures
+# a clean +0.2 px of extent clearance can ship with the frame through the
+# glyphs. This is the 2026-09-11 lesson restated: a figure is correct
+# because the file a reader opens is readable, not because its artists
+# report the right numbers. `tests/test_plots.py::
+# test_policy_curve_legend_gap_is_invariant_to_the_canvas_height` reads
+# the raster at both save dpis across a range of heights and is the
+# regression guard -- the failure mode here is a FONT-METRIC one, so it
+# can come back from a matplotlib upgrade with no edit to this file.
+#
+# Kept distinct from `_POLICY_LEGEND_EDGE_RESERVE_IN` above, which is a
+# different 0.10 in defending a different edge: that one holds the legend
+# off the CANVAS bottom, this one holds it off the AXES and the labels
+# under it.
+_POLICY_LEGEND_DROP_IN = 0.62
 _POLICY_FONT_SCALE = _POLICY_FIGSIZE_IN / 8.0
 
 
@@ -1467,7 +1564,11 @@ def policy_curve_plot(
     # is forced by how the app displays this figure. `st.pyplot` renders
     # with `width="stretch"`, so the figure is scaled to the COLUMN width
     # and apparent size on screen is proportional to `1 / canvas_width`.
-    # Nothing depends on canvas HEIGHT, because the page scrolls.
+    # Apparent TYPE therefore depends on the width alone. Canvas height is
+    # not free, but it is cheap and it is charged differently: it buys the
+    # legend's room out of the figure's ASPECT RATIO, which is the whole of
+    # what sets the rendered footprint on a page that scrolls. See the
+    # `_POLICY_FIGHEIGHT_IN` comment block for that lever.
     #
     # Taking the room out of the width was measured and rejected. At
     # 11.6 in with the legend in a right-hand column the plot is 684 px --
@@ -1485,11 +1586,19 @@ def policy_curve_plot(
     # Widening the canvas buys nothing at all once the type follows it. A
     # side legend costs half the plot's on-screen width at any width.
     #
-    # Below the axes it costs height instead, which the app does not charge
-    # for. At 8.6 x 7.5 in the plot keeps 674 px -- above its 666.5 px
-    # baseline -- and apparent type is held exactly, because the canvas
-    # grew only 8.6/8.0 and `_POLICY_FONT_SCALE` puts that back.
-    fig, ax = plt.subplots(figsize=(_POLICY_FIGSIZE_IN, 7.5))
+    # Below the axes it costs height instead, which the app charges for
+    # only through the aspect ratio and never in apparent type. At
+    # 8.6 x 6.0 in the plot keeps 687.4 px -- above its 666.5 px baseline,
+    # and the same width it had at 8.6 x 7.5, because the drawn width does
+    # not depend on the canvas height -- and apparent type is held exactly,
+    # because the canvas grew only 8.6/8.0 in WIDTH and
+    # `_POLICY_FONT_SCALE` puts that back.
+    #
+    # What that costs is room under the axes, which the legend shares with
+    # the x-axis label. `_POLICY_LEGEND_DROP_IN` is what makes the room
+    # survive the shorter canvas; it is in inches for a reason recorded
+    # there.
+    fig, ax = plt.subplots(figsize=(_POLICY_FIGSIZE_IN, _POLICY_FIGHEIGHT_IN))
 
     # Pinned, never auto-scaled, the same rule the Love plot's x limits and
     # the calibration plot's follow: the reader's question is whether the
@@ -1523,7 +1632,46 @@ def policy_curve_plot(
     # shaded edge always falls between two computed depths and never on a k
     # whose band was never computed.
     step = float(np.median(np.diff(k))) if k.size > 1 else 1.0
-    zero_span_label = "95% band covers zero: no gain detectable at this depth"
+    # ONE entry naming BOTH states of one variable, on two lines.
+    #
+    # The hatching was the only thing on the chart with a name. The white
+    # depths between the hatched runs are where the gain IS detectable --
+    # on the spend curve the more important state, and the one a reader
+    # actually wants -- and they were labelled nothing at all, leaving the
+    # reader to infer a state from the ABSENCE of a mark.
+    #
+    # Not a seventh legend entry, for three reasons:
+    #  - Six entries fill two columns in three rows. A seventh starts a
+    #    fourth row and makes the legend TALLER, which fights the ~20%
+    #    height reduction this same change delivers. On two lines inside
+    #    the existing entry it costs nothing: the pre-registered anchor's
+    #    entry beside it is already three lines, so this row is three
+    #    lines tall either way and the second line lands in space the
+    #    layout had already reserved.
+    #  - D-08 pins ONE encoding of the covers-zero region, explained by
+    #    this figure's own legend entry. One entry naming a state and its
+    #    complement is still one encoding of one variable; two entries
+    #    would be the "two things that can disagree" D-08 exists to stop,
+    #    and `tests/test_app.py::test_app_adds_no_second_covers_zero_encoding`
+    #    guards the same line from the app's side.
+    #  - The app-caption route is closed twice over: that same test forbids
+    #    the app restating this wording, and the app is not touched here.
+    #
+    # The FIRST LINE IS THE PRE-2026-09-12 STRING, BYTE FOR BYTE, and that
+    # is deliberate rather than lazy. It is quoted verbatim in
+    # `reports/policy.md`, `06-UI-SPEC.md`, `06-CONTEXT.md` and
+    # `06-RESEARCH.md`; keeping it intact means the reword adds a sentence
+    # without falsifying four documents. It also pins the legend's WIDTH:
+    # the widest line is unchanged, so the two-column block cannot grow
+    # past the canvas edge -- which is the dpi-150 clipping trap from
+    # 2026-09-11, reachable by a longer legend string just as easily as by
+    # a side column. Asserted on the saved raster, at both save dpis, by
+    # `test_policy_curve_legend_clears_the_axes_and_fits_the_canvas` and
+    # `test_policy_curve_legend_names_both_states_of_the_shading`.
+    zero_span_label = (
+        "95% band covers zero: no gain detectable at this depth\n"
+        "Unhatched: the gain is detectable at that depth"
+    )
     for run in _true_runs(covers_zero):
         ax.axvspan(
             max(0.0, k[run[0]] - step / 2.0),
@@ -1753,9 +1901,30 @@ def policy_curve_plot(
     # Anchored to the axes' BOTTOM-left and hanging below it. Two columns,
     # because one would be six stacked rows of which the anchor's is three
     # lines, and the block would be taller than it is wide.
+    #
+    # The drop is in INCHES, via `offset_copy` on `ax.transAxes`. It used to
+    # be `bbox_to_anchor=(0.0, -0.15)` -- 0.15 of the AXES HEIGHT -- and
+    # that unit is the bug `_POLICY_LEGEND_DROP_IN` exists to fix. See that
+    # constant for the measurement; the short version is that the gap has
+    # to clear the x-axis label, the x-axis label's offset is in POINTS,
+    # and a gap in axes fraction shrinks against it as the canvas gets
+    # shorter.
+    #
+    # `offset_copy(ax.transAxes, ...)` and not a figure-fraction or a bare
+    # `dpi_scale_trans` anchor, because the property the old anchor had is
+    # worth keeping: the legend is positioned RELATIVE TO THE AXES, so when
+    # `_fit_titles` runs `tight_layout` below -- after this call -- and
+    # moves the axes, the legend moves with it and the two cannot drift
+    # apart. `offset_copy` composes with the live `ax.transAxes`, so that
+    # still holds; it only replaces the unit the offset is measured in.
+    # `ScaledTranslation` holds the figure's live `dpi_scale_trans`, so the
+    # drop is also a true 0.62 in at every save dpi.
     ax.legend(
         loc="upper left",
-        bbox_to_anchor=(0.0, -0.15),
+        bbox_to_anchor=(0.0, 0.0),
+        bbox_transform=mtransforms.offset_copy(
+            ax.transAxes, fig, y=-_POLICY_LEGEND_DROP_IN, units="inches"
+        ),
         borderaxespad=0.0,
         ncol=2,
         fontsize=7.5 * _POLICY_FONT_SCALE,

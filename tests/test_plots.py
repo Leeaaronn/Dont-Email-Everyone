@@ -2101,6 +2101,506 @@ def test_policy_curve_anchor_survives_a_selection_on_top_of_it(
     assert plt.get_fignums() == []
 
 
+
+
+# The baseline aspect ratio this figure shipped at before 2026-09-12:
+# 8.6 x 7.5 in. The height came down to 6.0 in; the width did not move.
+# Kept as the two inches rather than as 0.87209 so a reader can see which
+# geometry is being superseded.
+_POLICY_BASELINE_ASPECT = 7.5 / 8.6
+
+# How much of that baseline aspect ratio the shipped figure may still
+# occupy. `st.pyplot` renders with `width="stretch"`, so the app's rendered
+# height is `container_width x (height / width)` and the aspect ratio IS
+# the on-screen footprint. The shipped 6.0 / 8.6 measures 0.800 of the
+# baseline -- a ~20% smaller footprint. The gate is set at 0.85 so the
+# height is free to move within a sane band without the test having to be
+# rewritten, and so that the value it forbids is unambiguous: 1.000, which
+# is what proportional scaling measures.
+_POLICY_ASPECT_CEILING = 0.85
+
+
+@pytest.mark.parametrize("selected", [None, 0.20])
+def test_policy_curve_footprint_comes_out_of_the_height_not_the_scale(
+    policy_curve_frame, policy_band_frame, selected
+):
+    """Making this figure smaller on the page is a HEIGHT change, only.
+
+    `st.pyplot` renders with `width="stretch"`
+    (`streamlit/elements/pyplot.py:83-90` on the installed wheel), so the
+    app scales the figure to the container width whatever its inches are.
+    Rendered width is the container width; rendered height is
+    `container_width x (fig_height / fig_width)`. Inches do not set
+    on-screen size. Their RATIO does.
+
+    The consequence is the reason this test exists. Scaling the figure down
+    proportionally -- the intuitive way to make a plot smaller -- holds the
+    aspect ratio constant and therefore changes NOTHING on screen. Measured
+    at 6.02 x 5.25 in (0.70 linear): footprint ratio 1.000. That geometry
+    also either saves with 0 px left and right ink margins at dpi 150 with
+    the point sizes held, or collapses the plot area to 458.4 px against
+    the 666.5 px floor with them scaled. Both were measured and both were
+    rejected; the aspect assertion below is what fails on either.
+
+    So the test is in two halves, matching the two levers:
+
+      * WIDTH is the type-scale lever, and it did not move. Apparent type
+        in the browser is `points x dpi x (column_px / canvas_px)`, so it
+        is a function of the width alone; `_POLICY_FONT_SCALE` compensates
+        exactly that width. Both are pinned here, because a test about
+        height has to prove the height moved ALONE.
+      * HEIGHT is the footprint lever, and it did move.
+
+    The last two blocks are the cost of spending footprint out of the
+    height. The legend hangs below the axes and the x-axis label and x
+    tick labels live in the same gap, so a shorter canvas is a chance to
+    drive them into each other -- it did, at 6.0 in, while the drop was
+    still `bbox_to_anchor=(0.0, -0.15)` in AXES fraction. The drop is now
+    `_POLICY_LEGEND_DROP_IN` inches and the gap no longer scales at all;
+    `test_policy_curve_legend_gap_is_invariant_to_the_canvas_height`
+    measures that directly, in the raster, and is the regression guard.
+    This test keeps the structural half: the legend sits wholly BELOW the
+    axes (not merely non-intersecting, which a side legend would also
+    satisfy -- and a side legend is the arrangement 2026-09-11 removed)
+    and clears both the x label and every drawn tick label.
+    """
+    plt.close("all")
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected,
+        title=(
+            "Targeted top-k against a random send of the same size\n"
+            "Ranking: uplift_womens_visit    Outcome: spend"
+        ),
+    )
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ax = fig.axes[0]
+
+        # --- the width lever, which must NOT have moved -------------------
+        width_in = fig.get_figwidth()
+        assert width_in == pytest.approx(8.6), (
+            f"the policy curve's canvas is {width_in} in wide, not 8.6. "
+            "Width is the type-scale lever: apparent type in the browser "
+            "is proportional to 1 / canvas_width, and 8.6 is the value "
+            "`_POLICY_FONT_SCALE` puts back. Moving it changes how large "
+            "every glyph reads, which is not what a footprint change is "
+            "allowed to do."
+        )
+        assert plots._POLICY_FONT_SCALE == pytest.approx(
+            plots._POLICY_FIGSIZE_IN / 8.0
+        ), (
+            f"_POLICY_FONT_SCALE is {plots._POLICY_FONT_SCALE}, which is "
+            f"no longer _POLICY_FIGSIZE_IN / 8.0 = "
+            f"{plots._POLICY_FIGSIZE_IN / 8.0}. The scale exists to put "
+            "back exactly what the 8.0 -> 8.6 width move took; once the "
+            "two stop matching, apparent type has silently moved."
+        )
+
+        # --- the height lever, which must have ----------------------------
+        aspect = fig.get_figheight() / width_in
+        ratio = aspect / _POLICY_BASELINE_ASPECT
+        assert ratio <= _POLICY_ASPECT_CEILING, (
+            f"the canvas is {width_in} x {fig.get_figheight()} in, an "
+            f"aspect ratio of {aspect:.5f} -- {ratio:.3f} of the "
+            f"{_POLICY_BASELINE_ASPECT:.5f} this figure shipped at before "
+            f"2026-09-12, against a ceiling of {_POLICY_ASPECT_CEILING}. "
+            'Because `st.pyplot` renders with width="stretch", the app\'s '
+            "rendered height is container_width x (height / width), so the "
+            "aspect ratio IS the on-screen footprint and reducing the "
+            "height is the only thing that shrinks it. A ratio of 1.000 is "
+            "the signature of proportional scaling -- both dimensions cut "
+            "together -- which was measured and changes nothing on screen."
+        )
+
+        # --- what spending height costs, part 1: the legend ---------------
+        legend = ax.get_legend()
+        assert legend is not None, "the policy curve drew no legend at all"
+        legend_box = legend.get_window_extent(renderer)
+        axes_box = ax.get_window_extent(renderer)
+        gap = axes_box.y0 - legend_box.y1
+        assert legend_box.y1 <= axes_box.y0, (
+            f"the legend's top edge is at y={legend_box.y1:.1f} px, above "
+            f"the axes' bottom edge at y={axes_box.y0:.1f} px "
+            f"({-gap:.1f} px of rise) at selected={selected}. The legend "
+            "must sit WHOLLY BELOW the axes: the entire footprint argument "
+            "is that the legend's cost is paid in height, which the app "
+            "charges for only through the aspect ratio, rather than in "
+            "width, which would take the curve's room."
+        )
+
+        # --- part 2: the x label and the tick labels share that gap -------
+        below_axes = [("x-axis label", ax.xaxis.get_label())]
+        below_axes += [
+            (f"x tick label {text.get_text()!r}", text)
+            for text in ax.get_xticklabels()
+            if text.get_text().strip()
+        ]
+        assert len(below_axes) >= 2, (
+            "no x tick labels were drawn, so this half of the test would "
+            "assert nothing"
+        )
+        for name, artist in below_axes:
+            artist_box = artist.get_window_extent(renderer)
+            overlap_w = (
+                min(legend_box.x1, artist_box.x1)
+                - max(legend_box.x0, artist_box.x0)
+            )
+            overlap_h = (
+                min(legend_box.y1, artist_box.y1)
+                - max(legend_box.y0, artist_box.y0)
+            )
+            assert overlap_w <= 0.0 or overlap_h <= 0.0, (
+                f"the legend overlaps the {name} by {overlap_w:.1f} x "
+                f"{overlap_h:.1f} px at selected={selected}: legend "
+                f"y=({legend_box.y0:.1f}, {legend_box.y1:.1f}), {name} "
+                f"y=({artist_box.y0:.1f}, {artist_box.y1:.1f}). The legend "
+                f"hangs {gap:.1f} px below an axes {axes_box.height:.1f} px "
+                f"tall, at a fixed {plots._POLICY_LEGEND_DROP_IN} in drop, "
+                "and these labels live in that gap. Raise "
+                "plots._POLICY_LEGEND_DROP_IN -- it is in INCHES precisely "
+                "so the gap does not shrink with the canvas."
+            )
+
+        # --- and the width the height change is not allowed to touch ------
+        assert axes_box.width >= _POLICY_AXES_WIDTH_FLOOR_PX, (
+            f"the plot area measured {axes_box.width:.1f} px wide at "
+            f"selected={selected}, below the "
+            f"{_POLICY_AXES_WIDTH_FLOOR_PX} px floor. A HEIGHT-only change "
+            "cannot move the drawn width -- if this fails, both dimensions "
+            "moved and the figure was scaled, not shortened."
+        )
+    finally:
+        plt.close(fig)
+    assert plt.get_fignums() == []
+
+
+
+
+# The canvas heights the legend gap is measured at. 6.0 is what ships;
+# 7.5 is what shipped before 2026-09-12; 5.5 is shorter than anything
+# proposed, and is here because the property under test is that the gap
+# does NOT depend on this number, which a single height cannot show.
+_POLICY_GAP_HEIGHTS_IN = (5.5, 6.0, 7.5)
+
+# The floor, in SAVED pixels, for the blank space between the x-axis
+# label's lowest ink and the legend's highest. Measured flat at 25-26 px
+# at dpi 150 and 34 px at dpi 200 across every height above, so 8 px is a
+# long way below the shipped value and a long way above the defect: with
+# the pre-2026-09-12 axes-fraction anchor this measured -3 px at 6.0 in.
+# Set with room for font metrics to move under a matplotlib or Python
+# upgrade, which is the failure mode this guard exists for, while still
+# catching any return of a gap that scales with the canvas.
+_POLICY_LABEL_GAP_FLOOR_PX = 8
+
+
+def _label_to_legend_ink_gap(fig, ax, tmp_path, dpi, tag):
+    """Saved px between the x label's lowest ink and the legend's highest.
+
+    Reads the RASTER, and reads it twice. Artist extents cannot answer
+    this question: a Text's window extent includes the font's full
+    ascent/descent box, which is empty for a label whose glyphs do not
+    descend that far, so a cell can report a clear +0.2 px of extent
+    separation and still save with the legend's frame drawn through the
+    descenders of `Targeting depth k (percentage ...)`. That is what
+    happened on 2026-09-12 and it is the same class of defect as the
+    2026-09-11 clipping: every artist reported the right number and the
+    file shipped wrong.
+
+    Twice, because the legend's frame spans the label's own columns, so a
+    single render cannot tell "the label's lowest ink" from "the legend's
+    top frame line". The legend is hidden for the first save and restored
+    for the second; the layout is already solved by then, so hiding it
+    moves nothing. The difference of the two rasters is the legend.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    legend = ax.get_legend()
+    label_box = ax.xaxis.get_label().get_window_extent(renderer)
+    axes_box = ax.get_window_extent(renderer)
+    # as figure FRACTIONS, so they survive the change of save dpi
+    axes_bottom = axes_box.y0 / fig.bbox.height
+    label_x0 = label_box.x0 / fig.bbox.width
+    label_x1 = label_box.x1 / fig.bbox.width
+
+    without = tmp_path / f"gap_{tag}_dpi{dpi}_nolegend.png"
+    whole = tmp_path / f"gap_{tag}_dpi{dpi}_full.png"
+    legend.set_visible(False)
+    fig.savefig(without, dpi=dpi)
+    legend.set_visible(True)
+    fig.savefig(whole, dpi=dpi)
+
+    bare = (plt.imread(without)[..., :3] < 0.98).any(axis=2)
+    full = (plt.imread(whole)[..., :3] < 0.98).any(axis=2)
+    rows, columns = bare.shape
+    # image rows run top-down, figure y runs bottom-up
+    axes_bottom_row = (1.0 - axes_bottom) * rows
+    first = int(label_x0 * columns)
+    last = int(np.ceil(label_x1 * columns))
+
+    label_rows = np.flatnonzero(bare[:, first:last].any(axis=1))
+    label_rows = label_rows[label_rows > axes_bottom_row]
+    legend_rows = np.flatnonzero((full & ~bare).any(axis=1))
+    legend_rows = legend_rows[legend_rows > axes_bottom_row]
+    assert label_rows.size, f"no x-label ink found below the axes in {without}"
+    assert legend_rows.size, f"the legend drew no ink at all in {whole}"
+    return int(legend_rows.min()) - int(label_rows.max())
+
+
+@pytest.mark.parametrize("height_in", _POLICY_GAP_HEIGHTS_IN)
+@pytest.mark.parametrize("selected", [None, 0.20])
+def test_policy_curve_legend_gap_is_invariant_to_the_canvas_height(
+    policy_curve_frame, policy_band_frame, selected, height_in,
+    tmp_path, monkeypatch
+):
+    """The legend's gap below the axes may not scale with the canvas.
+
+    This is the regression guard for the 2026-09-12 defect, and the defect
+    is worth stating precisely because its shape is not obvious.
+
+    The legend hangs below the axes. The x-axis label and the x tick
+    labels hang in the same gap. Matplotlib positions those in POINTS, a
+    fixed distance that does not care how tall the axes is. The legend's
+    drop used to be `bbox_to_anchor=(0.0, -0.15)` -- 0.15 of the AXES
+    HEIGHT. Two different units for two things that have to clear each
+    other, so the gap closed as the canvas got shorter, and at 6.0 in the
+    legend's frame was drawn through the label's descenders. Measured on
+    the binding cell, px of ink separation at dpi 150:
+
+        canvas in | 7.5 | 6.5 | 6.3 | 6.1 | 6.0
+           px gap |  26 |   6 |   2 |  -2 |  -3
+
+    The fix is `plots._POLICY_LEGEND_DROP_IN`, a drop in INCHES applied
+    through `offset_copy(ax.transAxes, ...)`. After it, the same row reads
+    25-26 px at every height from 5.0 to 9.0 in.
+
+    So the assertion is INVARIANCE, not a single measurement. A test at
+    the shipped height alone would have passed at 6.3 in with 2 px and
+    told nobody that the figure was 0.1 in from a defect. Rendering at
+    several heights is what makes the property visible, and the property
+    -- not the number -- is what has to survive.
+
+    It matters beyond this task. The gap is a function of FONT METRICS,
+    so a matplotlib or Python upgrade can move it with no edit to
+    `plots.py` at all. The quick task queued behind this one is exactly
+    such an upgrade.
+
+    Both legend sizes are checked: five entries with no selection and six
+    with one. The six-entry box is taller, takes more of the layout, and
+    is the binding case -- and it is also the app's first paint, because
+    k = 20% is the default depth.
+    """
+    plt.close("all")
+    monkeypatch.setattr(plots, "_POLICY_FIGHEIGHT_IN", height_in)
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected,
+        title=(
+            "Targeted top-k against a random send of the same size\n"
+            "Ranking: uplift_womens_visit    Outcome: spend"
+        ),
+    )
+    try:
+        ax = fig.axes[0]
+        assert fig.get_figheight() == pytest.approx(height_in)
+        assert fig.get_figwidth() == pytest.approx(8.6), (
+            "the width moved with the height; this test is about the "
+            "height alone"
+        )
+        measured = {}
+        for dpi in _POLICY_SAVE_DPIS:
+            gap = _label_to_legend_ink_gap(
+                fig, ax, tmp_path, dpi, f"h{height_in}_sel{selected}"
+            )
+            measured[dpi] = gap
+            assert gap >= _POLICY_LABEL_GAP_FLOOR_PX, (
+                f"only {gap} px of blank raster between the x-axis label "
+                f"and the legend at {fig.get_figwidth()} x {height_in} in, "
+                f"selected={selected}, dpi={dpi} -- below the "
+                f"{_POLICY_LABEL_GAP_FLOOR_PX} px floor, and a NEGATIVE "
+                "value means the legend's frame is drawn through the "
+                "label's descenders. The gap is supposed to be "
+                f"{plots._POLICY_LEGEND_DROP_IN} in minus the label's own "
+                "offset, in INCHES, and therefore the same at every canvas "
+                "height. If this fails at the short heights only, the drop "
+                "has gone back to being a fraction of the axes -- that is "
+                "the 2026-09-12 defect. If it fails at EVERY height, the "
+                "font metrics moved under you (a matplotlib or Python "
+                "upgrade will do it) and plots._POLICY_LEGEND_DROP_IN is "
+                "the constant to raise."
+            )
+        # The gap must also not have been bought by starving the plot.
+        axes_box = ax.get_window_extent(fig.canvas.get_renderer())
+        assert axes_box.width >= _POLICY_AXES_WIDTH_FLOOR_PX, (
+            f"the plot area measured {axes_box.width:.1f} px wide at "
+            f"height {height_in} in, below the "
+            f"{_POLICY_AXES_WIDTH_FLOOR_PX} px floor. The legend's drop is "
+            "vertical; it has no business touching the width."
+        )
+        assert measured
+    finally:
+        plt.close(fig)
+    assert plt.get_fignums() == []
+
+
+
+
+# The pre-2026-09-12 covers-zero legend entry, byte for byte. It is quoted
+# verbatim in `reports/policy.md`, `06-UI-SPEC.md`, `06-CONTEXT.md` and
+# `06-RESEARCH.md`, so the reword below had to CONTAIN it rather than
+# replace it -- otherwise one string edit silently falsifies four
+# documents. Pinned here so that stops being a thing anyone has to notice.
+_POLICY_COVERS_ZERO_LINE = (
+    "95% band covers zero: no gain detectable at this depth"
+)
+
+
+@pytest.mark.parametrize("selected", [None, 0.20])
+def test_policy_curve_legend_names_both_states_of_the_shading(
+    policy_curve_frame, policy_band_frame, selected, tmp_path
+):
+    """The unhatched depths are a state too, and they must be named.
+
+    The hatched runs mark where the 95% band covers zero. The white gaps
+    between them are where the gain IS detectable -- on the spend curve
+    the more important of the two states, because it is the one a reader
+    is looking for -- and until 2026-09-12 they carried no label at all.
+    A reader had to infer a state from the ABSENCE of a mark, which is
+    exactly the inference this figure exists to spare them.
+
+    Fixed by rewording the existing entry to name both states on two
+    lines, NOT by adding a seventh entry. Three things pin that choice and
+    this test asserts all three:
+
+      * **Entry count is unchanged** (5 without a selection, 6 with).
+        Six entries fill two columns in three rows; a seventh starts a
+        fourth row and makes the legend taller, fighting the ~20% height
+        reduction shipped in the same change. The anchor's entry beside it
+        is already three lines, so a second line here lands in reserved
+        space and costs nothing.
+      * **D-08 holds**: one encoding of the covers-zero region, explained
+        by one legend entry of this figure's own. A state and its
+        complement named in one entry is still one encoding of one
+        variable. Two entries would be two things that can disagree, which
+        is what `tests/test_app.py::
+        test_app_adds_no_second_covers_zero_encoding` guards from the
+        app's side.
+      * **The legend did not get wider.** The first line is the old string
+        byte for byte, so the widest line in the block is unchanged. That
+        is load-bearing, not sentiment: a longer legend string reaches the
+        canvas edge the same way the right-hand column did on 2026-09-11,
+        and the failure is invisible until the raster is written. So the
+        saved PNG is checked at both save dpis here too.
+    """
+    plt.close("all")
+    fig = plots.policy_curve_plot(
+        policy_curve_frame,
+        policy_band_frame,
+        contrast="delta_random",
+        unit="$",
+        anchor=economics.HEADLINE_CAPACITY,
+        selected=selected,
+        title=(
+            "Targeted top-k against a random send of the same size\n"
+            "Ranking: uplift_womens_visit    Outcome: spend"
+        ),
+    )
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ax = fig.axes[0]
+        legend = ax.get_legend()
+        texts = [text.get_text() for text in legend.get_texts()]
+
+        expected_entries = 5 if selected is None else 6
+        assert len(texts) == expected_entries, (
+            f"the legend has {len(texts)} entries at selected={selected}, "
+            f"expected {expected_entries}: {texts}. Naming the unhatched "
+            "state must not cost a seventh entry -- that starts a fourth "
+            "row in the two-column block and makes the legend taller, "
+            "which is the opposite of what the 2026-09-12 change is for."
+        )
+
+        shading = [t for t in texts if _POLICY_COVERS_ZERO_LINE in t]
+        assert len(shading) == 1, (
+            f"expected exactly ONE legend entry carrying "
+            f"{_POLICY_COVERS_ZERO_LINE!r}, found {len(shading)}: {texts}. "
+            "D-08 pins a single encoding of the covers-zero region with a "
+            "single entry explaining it; a second entry for the complement "
+            "is a second thing that can disagree with the first. And the "
+            "line itself is quoted verbatim in reports/policy.md and three "
+            "planning documents, so it may be added to but not rewritten."
+        )
+        entry = shading[0]
+        lines = entry.split("\n")
+        assert lines[0] == _POLICY_COVERS_ZERO_LINE, (
+            f"the entry's first line is {lines[0]!r}, not the pinned "
+            f"{_POLICY_COVERS_ZERO_LINE!r}. reports/policy.md quotes that "
+            "string verbatim, as do 06-UI-SPEC.md, 06-CONTEXT.md and "
+            "06-RESEARCH.md -- editing it here falsifies four documents "
+            "that no test in this repo reads."
+        )
+        assert len(lines) == 2, (
+            f"expected the entry on two lines, got {len(lines)}: {lines!r}"
+        )
+        assert "nhatched" in lines[1], (
+            f"the entry's second line is {lines[1]!r}, which does not name "
+            "the unhatched state. The white depths between the hatched "
+            "runs are where the gain IS detectable, and leaving them "
+            "unnamed asks the reader to infer a state from a missing mark."
+        )
+
+        # Width is the trap. The widest line must not have moved, or the
+        # block can reach the canvas edge -- the 2026-09-11 failure by a
+        # different road.
+        longest = max((line for t in texts for line in t.split("\n")), key=len)
+        assert len(longest) <= len(_POLICY_COVERS_ZERO_LINE), (
+            f"the longest legend line is now {longest!r} at "
+            f"{len(longest)} characters, past the "
+            f"{len(_POLICY_COVERS_ZERO_LINE)} of the line that used to set "
+            "the block's width. A wider legend reaches the canvas edge and "
+            "the clipping does not show up until the raster is written."
+        )
+
+        canvas = fig.bbox
+        box = legend.get_window_extent(renderer)
+        axes_box = ax.get_window_extent(renderer)
+        assert box.y1 <= axes_box.y0, (
+            "the reworded entry pushed the legend back up onto the axes: "
+            f"legend top y={box.y1:.1f}, axes bottom y={axes_box.y0:.1f}"
+        )
+        assert box.x1 <= canvas.x1, (
+            f"the legend now runs {box.x1 - canvas.x1:.1f} px past the "
+            f"right edge of a {canvas.width:.1f} px canvas"
+        )
+
+        # And the file, at both dpis `savefig` is called with.
+        for dpi in _POLICY_SAVE_DPIS:
+            path = tmp_path / f"reword_sel{selected}_dpi{dpi}.png"
+            fig.savefig(path, dpi=dpi)
+            margins = _ink_margins(path)
+            touching = {edge: px for edge, px in margins.items() if px < 1}
+            assert not touching, (
+                f"ink runs to the edge of the saved PNG at dpi={dpi}, "
+                f"selected={selected}: {touching} (all four {margins}). "
+                "The reworded legend entry is clipping the file. Shorten "
+                "the added line -- it may not be wider than the pinned "
+                "first line -- rather than adding a crop to savefig."
+            )
+    finally:
+        plt.close(fig)
+    assert plt.get_fignums() == []
+
+
 # --------------------------------------------------------------------------
 # cost_sweep_plot
 # --------------------------------------------------------------------------
