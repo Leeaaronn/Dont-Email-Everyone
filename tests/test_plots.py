@@ -2110,9 +2110,11 @@ def test_policy_curve_anchor_survives_a_selection_on_top_of_it(
 _POLICY_BASELINE_ASPECT = 7.5 / 8.6
 
 # How much of that baseline aspect ratio the shipped figure may still
-# occupy. `st.pyplot` renders with `width="stretch"`, so the app's rendered
-# height is `container_width x (height / width)` and the aspect ratio IS
-# the on-screen footprint. The shipped 6.0 / 8.6 measures 0.800 of the
+# occupy. The app scales the figure to a width chosen outside its inches --
+# an explicit display cap since 2026-09-12, `st.pyplot`'s `width="stretch"`
+# default before it -- so the rendered height is
+# `rendered_width x (height / width)` and the aspect ratio IS the on-screen
+# footprint under either. The shipped 6.0 / 8.6 measures 0.800 of the
 # baseline -- a ~20% smaller footprint. The gate is set at 0.85 so the
 # height is free to move within a sane band without the test having to be
 # rewritten, and so that the value it forbids is unambiguous: 1.000, which
@@ -2126,12 +2128,14 @@ def test_policy_curve_footprint_comes_out_of_the_height_not_the_scale(
 ):
     """Making this figure smaller on the page is a HEIGHT change, only.
 
-    `st.pyplot` renders with `width="stretch"`
-    (`streamlit/elements/pyplot.py:83-90` on the installed wheel), so the
-    app scales the figure to the container width whatever its inches are.
-    Rendered width is the container width; rendered height is
-    `container_width x (fig_height / fig_width)`. Inches do not set
-    on-screen size. Their RATIO does.
+    The app scales the figure to a width chosen outside its inches: since
+    2026-09-12 `streamlit_app.FIGURE_DISPLAY_WIDTH_PX`, an explicit cap
+    passed at the single `st.pyplot` call, and before it the element's
+    `width="stretch"` default (`streamlit/elements/pyplot.py:83-90` on the
+    installed wheel). Rendered width is `min(container width, cap)`;
+    rendered height is `rendered_width x (fig_height / fig_width)`. Inches
+    do not set on-screen size under either. Their RATIO does, which is why
+    capping the width did not touch this test.
 
     The consequence is the reason this test exists. Scaling the figure down
     proportionally -- the intuitive way to make a plot smaller -- holds the
@@ -2210,9 +2214,10 @@ def test_policy_curve_footprint_comes_out_of_the_height_not_the_scale(
             f"aspect ratio of {aspect:.5f} -- {ratio:.3f} of the "
             f"{_POLICY_BASELINE_ASPECT:.5f} this figure shipped at before "
             f"2026-09-12, against a ceiling of {_POLICY_ASPECT_CEILING}. "
-            'Because `st.pyplot` renders with width="stretch", the app\'s '
-            "rendered height is container_width x (height / width), so the "
-            "aspect ratio IS the on-screen footprint and reducing the "
+            "Because the app scales this figure to a width chosen "
+            "outside its inches, the rendered height is rendered_width x "
+            "(height / width), so the aspect ratio IS the on-screen "
+            "footprint and reducing the "
             "height is the only thing that shrinks it. A ratio of 1.000 is "
             "the signature of proportional scaling -- both dimensions cut "
             "together -- which was measured and changes nothing on screen."

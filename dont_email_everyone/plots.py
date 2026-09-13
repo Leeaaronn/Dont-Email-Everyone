@@ -1138,16 +1138,20 @@ _POLICY_LEGEND_EDGE_RESERVE_IN = 0.10
 #
 # HEIGHT is the on-screen-footprint lever. WIDTH is the type-scale lever.
 # They are SEPARATE decisions, and the separation is forced by how the app
-# displays this figure. `st.pyplot` renders with `width="stretch"`
-# (verified on the installed wheel, in the app framework's own
-# `elements/pyplot.py` at lines 83-90). The framework is named only as
-# `st` anywhere under `dont_email_everyone/`, here and in every other
-# comment that refers to it: `tests/test_no_network.py` greps this package
-# for the bare package name, comment-blind, to prove the analysis does not
-# depend on the app. So the figure is scaled to the container width
-# whatever its inches are:
-# rendered width IS the container width, and rendered height is
-# `container_width x (height / width)`. Inches do not set on-screen size.
+# displays this figure. The app passes `st.pyplot` an explicit integer
+# width, so rendered width is `min(container width, that cap)` -- since
+# 2026-09-12; before then the element's `width="stretch"` default made it
+# the container width outright. The framework is named only as `st`
+# anywhere under `dont_email_everyone/`, here and in every other comment
+# that refers to it: `tests/test_no_network.py` greps this package for the
+# bare package name, comment-blind, to prove the analysis does not depend
+# on the app.
+#
+# WHICH OF THE TWO SETS THE RENDERED WIDTH DOES NOT MATTER HERE, and that
+# is why capping it changed nothing in this module. Either way the figure
+# is scaled to a width chosen OUTSIDE its inches, and rendered height is
+# then `rendered_width x (height / width)`. Inches do not set on-screen
+# size. Their RATIO does, and the ratio is this module's to choose.
 # Only the ASPECT RATIO moves the footprint.
 #
 # WIDTH, therefore, still governs apparent type, and is unchanged at 8.6.
@@ -1188,7 +1192,9 @@ _POLICY_LEGEND_EDGE_RESERVE_IN = 0.10
 # lever and it is the wrong one:
 #   - At 6.02 x 5.25 in (0.70 linear, aspect held) the measured app
 #     footprint ratio is 1.000. Literally no on-screen change -- which is
-#     the `width="stretch"` fact above, restated as a measurement.
+#     the scaled-to-an-outside-width fact above, restated as a
+#     measurement. It holds under the display cap for the same reason it
+#     held under `width="stretch"`: neither reads the figure's inches.
 #   - That geometry then fails on the raster too. With the point sizes
 #     held, its saved PNG has left and right ink margins of 0 px at dpi
 #     150 on every cell -- the exact clipping failure caught on 2026-09-11.
@@ -1561,9 +1567,10 @@ def policy_curve_plot(
     # The legend has to leave the plot area: in-axes it crossed the
     # selection rule and covered the curve (reported from the deployed app,
     # 2026-09-11). The question is where the room comes from, and the answer
-    # is forced by how the app displays this figure. `st.pyplot` renders
-    # with `width="stretch"`, so the figure is scaled to the COLUMN width
-    # and apparent size on screen is proportional to `1 / canvas_width`.
+    # is forced by how the app displays this figure. The figure is scaled
+    # to a width chosen outside its inches -- the app's display cap since
+    # 2026-09-12, the column width before it -- so apparent size on screen
+    # is proportional to `1 / canvas_width` either way.
     # Apparent TYPE therefore depends on the width alone. Canvas height is
     # not free, but it is cheap and it is charged differently: it buys the
     # legend's room out of the figure's ASPECT RATIO, which is the whole of
