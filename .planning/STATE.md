@@ -310,6 +310,7 @@ None yet.
 | 260911-l0p | Move the policy curve legend outside the axes and regenerate the figures | 2026-09-11 | 4496718 | [260911-l0p-move-the-policy-curve-legend-outside-the](./quick/260911-l0p-move-the-policy-curve-legend-outside-the/) |
 | 260912-dvo | Cut the policy curve's rendered footprint 20% via a height-only change, and name both shading states | 2026-09-12 | d75e05f | [260912-dvo-reduce-the-policy-curve-figure-height-20](./quick/260912-dvo-reduce-the-policy-curve-figure-height-20/) |
 | 260912-jil | Cap the figures' display width at a derived 730 CSS px so apparent type matches the page on any monitor | 2026-09-12 | 937a944 | [260912-jil-cap-the-policy-figure-display-width-at-7](./quick/260912-jil-cap-the-policy-figure-display-width-at-7/) |
+| 260913-knu | Raise the figures' display cap from 730 to 1100 CSS px after 730 was reviewed as too small; figure sizing CLOSED | 2026-09-13 | 4833d67 | [260913-knu-raise-the-figure-display-width-cap-from-](./quick/260913-knu-raise-the-figure-display-width-cap-from-/) |
 
 ## Deferred Items
 
