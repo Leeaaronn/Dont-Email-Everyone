@@ -1,10 +1,19 @@
 """Shared pytest fixtures for the ingestion, schema-validation, and
-experiment-validity estimation suites.
+experiment-validity estimation suites, and ONE harness patch.
 
 No manipulation of the interpreter's module search path of any kind:
 `pythonpath = ["."]` in pyproject.toml already makes `dont_email_everyone`
 importable.
+
+The harness patch is at the bottom of this file and is the only thing here
+that is not a fixture: `AppTest`'s per-script-run timeout ships measured on
+`time.time()`, a wall clock the operating system steps, and is re-measured
+here on `time.monotonic()`. Its docstring carries the evidence, and
+`tests/test_app.py::test_apptest_timeout_is_measured_on_an_elapsed_clock`
+proves the patch is installed and that it can still fail.
 """
+
+import time
 
 import numpy as np
 import pandas as pd
@@ -251,3 +260,131 @@ def multi_corrupt(raw_df):
     out.loc[out.index[1], "segment"] = "Nobody"
     out.loc[out.index[2], "spend"] = np.nan
     return out
+
+
+# --------------------------------------------------------------------------
+# The `AppTest` script-run budget is an ELAPSED time, so it is measured on a
+# clock that measures elapsed time
+# --------------------------------------------------------------------------
+
+# The single place the replacement below differs from the code it replaces.
+# Named so the test that guards this patch asserts against the constant
+# rather than against a re-typed string.
+APPTEST_TIMEOUT_CLOCK = time.monotonic
+
+
+def _require_widgets_deltas_on_a_monotonic_clock(runner, timeout=3):
+    """`streamlit.testing.v1.local_script_runner.require_widgets_deltas`,
+    with one word changed: the budget is measured with `time.monotonic()`
+    instead of `time.time()`.
+
+    WHAT WAS WRONG. The shipped implementation is::
+
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            time.sleep(0.001)
+            if runner.script_stopped():
+                return
+        ...
+        raise RuntimeError(f"AppTest script run timed out after {timeout}(s)")
+
+    `time.time()` is a WALL CLOCK. It is not a measure of elapsed time and
+    the operating system may step it in either direction at any moment. This
+    development machine steps it forward after every sleep/resume cycle,
+    because the clock is frozen while the machine is suspended and w32time
+    then corrects it in one jump. Three such steps were recorded in the
+    Windows System log on 2026-09-12 alone (Kernel-General event id 1):
+    **+66.5 s, +245.5 s and +2272 s**. A step of 60 s or more landing while
+    this loop is in flight expires the deadline on its next iteration, and
+    the loop raises its timeout against a script run that is perfectly
+    healthy and about to finish.
+
+    THIS IS NOT A TIMEOUT BUMP, and the distinction is the whole point. The
+    budget is still 60 seconds and a script that genuinely hangs still fails
+    at 60 seconds. What changes is the INSTRUMENT, not the ALLOWANCE:
+    `time.monotonic()` is documented as "not affected by system clock
+    updates", which is precisely the property a duration needs and the
+    property `time.time()` does not have.
+
+    WHY THIS LOOKED LIKE A LOAD PROBLEM AND IS NOT. The symptom was recorded
+    as an intermittent failure of
+    `tests/test_app.py::test_headline_tracks_the_committed_curve` "under
+    full-suite load". Three measurements say otherwise:
+
+    - 627 instrumented script runs across four sessions ran in 0.644 s to
+      2.113 s, p99 1.984 s. Nothing is near 60 s and there is no tail.
+    - `tests/test_app.py` is the FIRST module the full suite runs, so no
+      earlier test can have created any condition it suffers from.
+    - The failing full-suite run took 575.2 s and a PASSING one took
+      763.8 s. A real 60-second stall cannot make a run finish sooner. A
+      wall clock that jumped forward can, and does: injecting the recorded
+      +66.5 s step takes this test from 18.0 s green to 10.4 s red.
+
+    What a full-suite run actually changes is EXPOSURE. It keeps the process
+    alive for eight to fifteen minutes, usually unattended, which is exactly
+    when this machine suspends; a nine-second run of the test alone almost
+    never overlaps a clock step. And within that window
+    `test_headline_tracks_the_committed_curve` is the largest target by a
+    wide margin: it drives ten of the twenty-one script runs in the file, so
+    roughly half of all the time the process spends inside this loop belongs
+    to it. That is the entire reason this test, and not another, is the one
+    that fails.
+
+    The timeout message carries the MEASURED elapsed seconds. If this ever
+    fires again, that number says immediately whether a script run really
+    took the whole budget or whether something moved a clock again -- which
+    is the question that cost this investigation its first several hours.
+    """
+    t0 = APPTEST_TIMEOUT_CLOCK()
+    while True:
+        elapsed = APPTEST_TIMEOUT_CLOCK() - t0
+        if elapsed >= timeout:
+            break
+        time.sleep(0.001)
+        if runner.script_stopped():
+            return
+
+    err_string = (
+        f"AppTest script run timed out after {timeout}(s) "
+        f"({elapsed:.3f}s measured on {APPTEST_TIMEOUT_CLOCK.__name__})"
+    )
+
+    # Shut the runner down before raising, so the script does not hang on.
+    runner.request_stop()
+    runner.join()
+
+    raise RuntimeError(err_string)
+
+
+def pytest_configure(config):
+    """Install the monotonic-clock timeout before any test runs.
+
+    Done here rather than in `tests/test_app.py` because the defect belongs
+    to the harness rather than to the app: any future test that drives
+    `AppTest` inherits the fix without having to know it exists.
+
+    `LocalScriptRunner.run` calls `require_widgets_deltas` as a module
+    global, so rebinding the module attribute is what takes effect; patching
+    the class would not. The import is local so that a session which never
+    touches Streamlit does not pay for it.
+
+    The `AttributeError` is deliberate and unhandled. If a Streamlit upgrade
+    renames or removes this function, this patch must fail loudly at session
+    start -- silently failing to install it would restore the original
+    defect and leave a comment claiming otherwise.
+    """
+    from streamlit.testing.v1 import local_script_runner
+
+    if not hasattr(local_script_runner, "require_widgets_deltas"):
+        raise AttributeError(
+            "streamlit.testing.v1.local_script_runner no longer exports "
+            "require_widgets_deltas, so the monotonic-clock timeout patch in "
+            "tests/conftest.py did not install. Re-read that patch's "
+            "docstring before deleting it: without it, any forward step of "
+            "the system wall clock larger than an AppTest's default_timeout "
+            "fails a healthy script run."
+        )
+
+    local_script_runner.require_widgets_deltas = (
+        _require_widgets_deltas_on_a_monotonic_clock
+    )

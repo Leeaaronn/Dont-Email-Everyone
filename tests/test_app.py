@@ -52,6 +52,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import tomllib
 
 import matplotlib
@@ -62,6 +63,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+import conftest  # noqa: E402
 import streamlit_app  # noqa: E402
 from dont_email_everyone import config, economics, plots  # noqa: E402
 
@@ -569,6 +571,175 @@ def test_app_fits_nothing():
             f"`{token}` appears in streamlit_app.py's non-comment body: "
             f"{consequence}."
         )
+
+
+# --------------------------------------------------------------------------
+# The harness patch in tests/conftest.py, guarded
+# --------------------------------------------------------------------------
+
+# A budget small enough that the whole test costs milliseconds, and large
+# enough that a scheduler hiccup on a loaded machine cannot expire it. The
+# property under test is scale-free: it is which CLOCK the budget is
+# measured on, not how big the budget is.
+FAKE_TIMEOUT = 2.0
+
+# Bigger than FAKE_TIMEOUT by a wide margin, and of the same order as the
+# +2272 s step this machine's Windows System log recorded on 2026-09-12. The
+# smallest step recorded that day, +66.5 s, was already larger than the 60 s
+# budget `_run_app` and `test_headline_tracks_the_committed_curve` use.
+WALL_CLOCK_STEP = 3600.0
+
+
+class _StopsAfter:
+    """A stand-in runner that reports completion after N polls.
+
+    Small enough to be obvious, which matters: a fake that got this wrong
+    would make the assertions below pass for the wrong reason. `polls`
+    counts how many times the loop asked, so a test can assert the loop
+    really ran rather than returned on its first look.
+    """
+
+    def __init__(self, polls_until_stopped):
+        self.polls_until_stopped = polls_until_stopped
+        self.polls = 0
+        self.stop_requested = False
+        self.joined = False
+
+    def script_stopped(self):
+        self.polls += 1
+        return self.polls >= self.polls_until_stopped
+
+    def request_stop(self):
+        self.stop_requested = True
+
+    def join(self):
+        self.joined = True
+
+
+def _stepping_wall_clock(step):
+    """A `time.time` replacement that jumps forward once, on first call.
+
+    The real `time.time` is captured HERE, before the replacement is
+    installed, because a replacement that called `time.time` through the
+    module would call itself.
+    """
+    real_time = time.time
+    state = {"offset": 0.0}
+
+    def clock():
+        now = real_time() + state["offset"]
+        state["offset"] = step
+        return now
+
+    return clock
+
+
+def _shipped_loop(runner, timeout):
+    """`require_widgets_deltas` as Streamlit ships it, transcribed.
+
+    Transcribed rather than imported, because the point of the patch is that
+    the shipped version is no longer reachable. Without this the test below
+    has no negative control, and a test whose negative control is missing
+    cannot distinguish a working patch from a patch that does nothing --
+    which is the exact failure mode `test_render_helper_closes_every_figure`
+    was written to avoid on the figure-closing side.
+    """
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        time.sleep(0.001)
+        if runner.script_stopped():
+            return
+    runner.request_stop()
+    runner.join()
+    raise RuntimeError(f"AppTest script run timed out after {timeout}(s)")
+
+
+def test_apptest_timeout_is_measured_on_an_elapsed_clock(monkeypatch):
+    """A forward step of the wall clock must not fail a healthy script run.
+
+    WHAT THIS PROTECTS. `test_headline_tracks_the_committed_curve` failed
+    intermittently with `RuntimeError: AppTest script run timed out after
+    60(s)` while every script run in this file was completing in under a
+    second -- 627 instrumented runs, maximum 2.113 s. It was not slow. The
+    shipped timeout loop measures its budget with `time.time()`, and this
+    machine steps `time.time()` forward after every sleep/resume cycle:
+    +66.5 s, +245.5 s and +2272 s were all recorded on 2026-09-12. A step
+    larger than the budget expires the deadline against a healthy run.
+
+    THREE ASSERTIONS, AND EACH ONE IS LOAD-BEARING.
+
+    1. The installed loop survives the step. This is the fix.
+    2. The SHIPPED loop does not survive the same step. This is the negative
+       control: without it, assertion 1 would pass just as happily against a
+       patch that was never installed, because nothing else in this suite
+       steps a clock.
+    3. The installed loop still times out on a runner that never stops. This
+       is what separates the fix from the thing the fix must not be -- a
+       timeout that was widened, or removed. The budget is unchanged; only
+       the instrument changed.
+    """
+    from streamlit.testing.v1 import local_script_runner
+
+    installed = local_script_runner.require_widgets_deltas
+
+    assert installed is conftest._require_widgets_deltas_on_a_monotonic_clock, (
+        "streamlit.testing.v1.local_script_runner.require_widgets_deltas is "
+        f"{installed!r}, not the monotonic-clock replacement tests/conftest.py "
+        "installs in pytest_configure. Every AppTest in this file is then "
+        "measuring a 60-second budget on a wall clock the operating system "
+        "steps, and a forward step larger than 60 s fails a healthy run."
+    )
+    assert conftest.APPTEST_TIMEOUT_CLOCK is time.monotonic, (
+        "the AppTest timeout clock is "
+        f"{conftest.APPTEST_TIMEOUT_CLOCK!r}. It must be time.monotonic, the "
+        "one clock Python documents as unaffected by system clock updates."
+    )
+
+    # 1. The fix: a wall-clock step of an hour, mid-run, changes nothing.
+    monkeypatch.setattr(time, "time", _stepping_wall_clock(WALL_CLOCK_STEP))
+    healthy = _StopsAfter(polls_until_stopped=5)
+    installed(healthy, timeout=FAKE_TIMEOUT)
+
+    assert healthy.polls == 5, (
+        f"the installed loop polled {healthy.polls} times, not 5, so it did "
+        "not run to the point where the fake runner reports completion and "
+        "this test proved nothing about it."
+    )
+    assert not healthy.stop_requested, (
+        "the installed loop asked the runner to stop even though the runner "
+        "reported completion. It took the timeout branch."
+    )
+
+    # 2. The negative control: the shipped loop fails on the same step.
+    shipped_runner = _StopsAfter(polls_until_stopped=5)
+    with pytest.raises(RuntimeError, match="timed out"):
+        _shipped_loop(shipped_runner, timeout=FAKE_TIMEOUT)
+
+    assert shipped_runner.stop_requested and shipped_runner.joined, (
+        "the transcribed shipped loop raised without shutting its runner "
+        "down, so it is no longer a faithful transcription and the negative "
+        "control is not controlling for what it claims to."
+    )
+
+    # 3. The budget is still a budget. A runner that never reports completion
+    #    still fails, and fails on real elapsed time.
+    monkeypatch.undo()
+    hung = _StopsAfter(polls_until_stopped=10**9)
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="timed out after 0.25"):
+        installed(hung, timeout=0.25)
+    waited = time.monotonic() - started
+
+    assert 0.25 <= waited < FAKE_TIMEOUT, (
+        f"the installed loop gave up after {waited:.3f}s against a 0.25s "
+        "budget. The fix must not have widened or disabled the timeout -- a "
+        "genuinely hung script run still has to fail, and fail on time."
+    )
+    assert hung.stop_requested and hung.joined, (
+        "the installed loop raised without shutting the runner down, which "
+        "is what leaves a real script thread running after the test that "
+        "owned it has failed."
+    )
 
 
 @pytest.mark.slow
