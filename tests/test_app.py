@@ -1771,13 +1771,35 @@ def test_app_passes_no_styling_to_any_factory():
     )
 
 
-# The calibration the 05-08 legibility checkpoint approved, named here so a
-# reader can see these are the REFERENCE and not the policy figure's own
-# geometry: an 8.0-inch canvas at unity font scale, displayed at roughly 730
-# CSS px (`06-UI-SPEC.md:898`). Every apparent-type judgment this project has
-# made was made against that pair.
+# The calibration the apparent-type judgments are made against, named here so
+# a reader can see these are the REFERENCE and not the policy figure's own
+# geometry: an 8.0-inch canvas at unity font scale, displayed at some width a
+# HUMAN approved the type at.
+#
+# The display half of that pair has moved once, and a reader should know why
+# rather than find 1100 sitting where 730 was:
+#
+#   730 CSS px  -- the 05-08 legibility checkpoint (`06-UI-SPEC.md:898`),
+#                  approved against a STATIC PNG. Shipped 2026-09-12 as the
+#                  first bound on a width that had been unbounded.
+#   1100 CSS px -- SUPERSEDES it, 2026-09-13, from a review of the RUNNING
+#                  app on a normal desktop window, where 730 was found
+#                  legible only just: the policy curve's six legend entries
+#                  measured 10.01 CSS px against 16.00 px page body text.
+#
+# The canvas half (8.0 in at unity scale) has NOT moved and is not expected
+# to -- it is the geometry the reference type was set on, not a judgment.
+#
+# Moving the display half is not a way around the identity below, and it is
+# worth saying so plainly because raising a constant a test asserts against
+# is exactly what working around a test looks like. What the identity guards
+# is `_POLICY_FONT_SCALE` tracking `_POLICY_FIGSIZE_IN`; that coupling is
+# untouched here, and the negative control at the bottom of the test still
+# proves the assertion can fail. What moved is the human's answer to a
+# question only a human can answer, on better evidence than the first answer
+# had.
 _CALIBRATION_CANVAS_IN = 8.0
-_CALIBRATION_DISPLAY_PX = 730.0
+_CALIBRATION_DISPLAY_PX = 1100.0
 _CANVAS_PX_PER_IN = 100.0
 
 
@@ -1788,7 +1810,7 @@ def test_display_width_cap_tracks_the_policy_calibration():
     cap `streamlit_app.FIGURE_DISPLAY_WIDTH_PX` is the display width W that
     puts the policy figure back on the reference ratio:
 
-        _POLICY_FONT_SCALE x (W / (_POLICY_FIGSIZE_IN x 100)) = 730 / 800
+        _POLICY_FONT_SCALE x (W / (_POLICY_FIGSIZE_IN x 100)) = 1100 / 800
 
     WHAT THIS TEST IS FOR, stated plainly, because the identity looks
     stronger than it is. `_POLICY_FONT_SCALE` is *defined as*
@@ -1801,7 +1823,7 @@ def test_display_width_cap_tracks_the_policy_calibration():
     The negative control at the bottom is what makes that visible instead of
     leaving a reader to wonder whether the assertion is a tautology.
 
-    It deliberately does not assert `cap == 730`. A literal pin is worthless
+    It deliberately does not assert `cap == 1100`. A literal pin is worthless
     here: it would keep passing on a figure whose calibration had moved out
     from under it, which is the only failure that matters.
     """
@@ -1820,7 +1842,7 @@ def test_display_width_cap_tracks_the_policy_calibration():
         f"font scale ({plots._POLICY_FONT_SCALE}) has moved without the "
         f"display cap ({cap} px) being re-derived, so the app now renders "
         "the figure at a width its typography was not calibrated for. The "
-        "cap is `_POLICY_FONT_SCALE x W / canvas_px = 730/800` solved for "
+        "cap is `_POLICY_FONT_SCALE x W / canvas_px = 1100/800` solved for "
         "W. Re-solve it against the new constants and put the result in "
         "streamlit_app.FIGURE_DISPLAY_WIDTH_PX -- do NOT edit the number in "
         "this assertion, which is the calibration itself and not a property "

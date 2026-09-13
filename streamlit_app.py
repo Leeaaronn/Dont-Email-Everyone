@@ -271,20 +271,33 @@ def check_artifacts_agree(curve, manifest):
 # one. It REMOVES a degree of freedom from the appearance; it does not add
 # one, and it is not a second place appearance is decided.
 #
-# THE DERIVATION. The reference the 05-08 legibility checkpoint approved is
-# the 8.0 in canvas at unity font scale displayed at 730 CSS px
-# (`06-UI-SPEC.md:898`), an apparent ratio of 1.0 x (730 / 800) = 0.9125.
-# The policy figure carries `plots._POLICY_FONT_SCALE` on every point size,
-# on a canvas of `plots._POLICY_FIGSIZE_IN` x 100 px. Solving for the
-# display width W that reproduces the reference:
+# THE DERIVATION. The reference this solves against is a display width the
+# figures' apparent type was JUDGED at by a human, not a constant of the
+# figure. It has moved once, and the move is the point:
 #
-#     _POLICY_FONT_SCALE x (W / (_POLICY_FIGSIZE_IN x 100)) = 730 / 800
-#     (8.6 / 8.0)        x (W / 860)                        = 730 / 800
-#     W / 800                                               = 730 / 800
-#     W = 730
+#   730 CSS px  -- the 05-08 legibility checkpoint, approved against a
+#                  STATIC PNG at 8.0 in and unity font scale
+#                  (`06-UI-SPEC.md:898`). Shipped 2026-09-12.
+#   1100 CSS px -- SUPERSEDES it, 2026-09-13, from a review of the running
+#                  app on a normal desktop window. At 730 the cap was
+#                  correct in kind and too small in degree: the six
+#                  policy-curve legend entries measured 10.01 CSS px
+#                  against 16.00 px page body text, which is legible only
+#                  just. A live app on a real window is better evidence
+#                  about apparent type than a static PNG, so it wins.
+#
+# The reference is an apparent ratio of 1.0 x (1100 / 800) = 1.375. The
+# policy figure carries `plots._POLICY_FONT_SCALE` on every point size, on
+# a canvas of `plots._POLICY_FIGSIZE_IN` x 100 px. Solving for the display
+# width W that reproduces it:
+#
+#     _POLICY_FONT_SCALE x (W / (_POLICY_FIGSIZE_IN x 100)) = 1100 / 800
+#     (8.6 / 8.0)        x (W / 860)                        = 1100 / 800
+#     W / 800                                               = 1100 / 800
+#     W = 1100
 #
 # The figure's own width CANCELS, because `_POLICY_FONT_SCALE` is *defined
-# as* `_POLICY_FIGSIZE_IN / 8.0`. So 730 is right for any canvas width
+# as* `_POLICY_FIGSIZE_IN / 8.0`. So 1100 is right for any canvas width
 # while that coupling holds, and wrong the moment it is broken by a
 # hand-typed scale. That is what
 # `tests/test_app.py::test_display_width_cap_tracks_the_policy_calibration`
@@ -297,21 +310,33 @@ def check_artifacts_agree(curve, manifest):
 # the literal ships, the derivation is asserted next to the constants it
 # depends on, where it can actually fail.
 #
-# MEASURED 2026-09-12 through the real factories on the committed data, as
-# a y tick label's apparent height against 16.00 px page body text:
-# 12.67 px at 730 and 36.28 px at 2090 -- for BOTH figure families. The
-# cost exhibit is 8.0 x 5.6 in at unity scale, which IS the reference
-# geometry, so it lands on the same apparent type rather than merely near
-# it.
+# MEASURED 2026-09-13 through the real factories on the committed data, and
+# through the raster the pyplot element actually ships (it applies
+# `bbox_inches="tight"` and `dpi=200` of its own, cropping 5.06% of the
+# policy canvas's width, 5.47% of the visit canvas's and 1.38% of the cost
+# canvas's), as apparent height against 16.00 px page body text:
+#
+#                        at 730      at 1100     unbounded (~2090)
+#   policy ticks         13.35 px    20.11 px    38.22 px
+#   policy legend        10.01 px    15.09 px    28.66 px
+#   cost exhibit ticks   12.85 px    19.36 px    36.79 px
+#
+# The legend is the binding constraint, not the ticks: it is the smallest
+# type either figure family carries, and it is what a reader reported as
+# marginal at the old cap. Tick labels at 1.26x body text are deliberately
+# a little large -- that is the chosen direction of error, an oversized
+# figure being the cheaper mistake than another round of tuning.
 #
 # AN INT WIDTH IS A CAP, never a floor: Streamlit 1.63 clamps it to the
 # parent container, so a laptop or a phone still gets its own narrower
-# width and this cannot make a narrow viewport worse.
+# width and this cannot make a narrow viewport worse. Raising the cap does
+# not change that -- it raises the ceiling, and every viewport already
+# below it is unaffected.
 #
 # `layout="wide"` is KEPT and is still right on its own merits -- it widens
 # the measure for the prose, the contrasts table and the sidebar. It simply
 # no longer governs the figures.
-FIGURE_DISPLAY_WIDTH_PX = 730
+FIGURE_DISPLAY_WIDTH_PX = 1100
 
 
 def render(fig, sink=None):
