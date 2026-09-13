@@ -214,6 +214,11 @@ operative, and the arithmetic above survives it unchanged.** The block states, t
 its single `st.pyplot` call, so **rendered width is `min(container width, 730 px)`** — the cap in
 `streamlit_app.py::FIGURE_DISPLAY_WIDTH_PX`.*
 
+*(**Amended 2026-09-13: the cap is 1100 px, not 730.** `min(container width, 730 px)` above should
+read `min(container width, 1100 px)`. The shape of the claim is unchanged — it is still a cap, still
+clamped by the container, still the one number at the one call site. Only the number moved, and the
+amendment at the apparent-type table below says why.)*
+
 *Everything derived from the old fact still holds, and it is worth saying why rather than leaving a
 reader to re-derive it. Apparent type still goes as `1 / canvas_width`; the two-lever table above —
 canvas WIDTH moving apparent type, canvas HEIGHT moving the footprint via the aspect ratio — is
@@ -506,6 +511,38 @@ claims, and 260912-dvo's height cut did not move it. Measured instead through th
 the uncropped derivation cannot see and which no number in this contract previously accounted for;
 it is well inside the tolerance of a legibility judgment and is recorded here rather than tuned
 away.)*
+
+*(**Amended 2026-09-13. The cap is raised from 730 to 1100 CSS px. 730 was correct in kind and too
+small in degree.** What it supersedes is the sentence above — "The cap takes the tick labels from
+~2.4× body text down to ~0.84× it" — and the `at the 730 cap` column of the table with it.*
+
+*The defect 730 was built for is closed and stays closed: reviewed on the deployed app, apparent
+type matches the page, the legend sits below the plot and clear of it, and the unhatched label is
+in. The complaint that replaces it is the opposite one. On a normal desktop window the figure is
+too small to read comfortably, tick labels and the six legend entries both at the edge of
+legibility. **The legend is what binds** — it is the smallest type either family carries, and at 730
+it measures 10.01 CSS px against 16.00 px page body text.*
+
+*Re-measured 2026-09-13 by the same method, through the raster `st.pyplot` actually ships. The
+method is validated before it is trusted: it reproduces the 13.35 / 13.41 / 12.85 px recorded above
+at 730, exactly.*
+
+| figure | at the 730 cap | **at the 1100 cap** | at 2090 CSS px |
+|--------|----------------|---------------------|----------------|
+| policy curve, spend | 13.35 px | **20.11 px** | 38.22 px |
+| policy curve, visit | 13.41 px | **20.20 px** | 38.38 px |
+| policy curve, legend entries | 10.01 px | **15.09 px** | 28.66 px |
+| cost exhibit | 12.85 px | **19.36 px** | 36.79 px |
+
+*against **16.00 px** page body text. The legend clears it comfortably at 0.94× body text; the tick
+labels land at 1.26×, knowingly a little large. That is a CHOSEN direction of error, recorded as a
+decision rather than left to look like an oversight: the reviewer's instruction was that a slightly
+oversized figure is a smaller problem than another round of tuning. 1235 px was the next candidate
+and was rejected — it puts the legend at 16.94 px, larger than the page's own body text, which reads
+as a mistake rather than as emphasis.*
+
+*Apparent type is exactly linear in display width, so this was a choice from a band and not a
+search. No figure geometry moved: no inch, no point size, no colour, and no PNG regenerated.)*
 
 `initial_sidebar_state="expanded"` so criterion 1's control is visible on first paint on desktop,
 while the headline still reads if the sidebar is collapsed.
@@ -1093,6 +1130,24 @@ instructions, both of which are judgments no test can make:
    `tests/test_app.py::test_display_width_cap_tracks_the_policy_calibration`, which pins that as an
    identity against the live `plots` constants — never as the literal 730, which would keep passing
    on a figure whose calibration had moved out from under it.*
+
+   *(**Amended 2026-09-13. The reference in that derivation is now 1100, not 730, and the
+   provenance of the number is the whole of what changed.** The line above should read
+   `_POLICY_FONT_SCALE × (W / (_POLICY_FIGSIZE_IN × 100)) = 1100/800`, giving W = 1100 by the same
+   cancellation.*
+
+   *Why that is not a test being worked around, said plainly because raising a constant a test
+   asserts against is exactly what working around a test looks like. The identity reduces to
+   `cap == _CALIBRATION_DISPLAY_PX` once `_POLICY_FONT_SCALE` cancels, so the cap cannot move
+   unless the reference moves with it. What the identity GUARDS is `_POLICY_FONT_SCALE` tracking
+   `_POLICY_FIGSIZE_IN` — that coupling is untouched, and the test's negative control still proves
+   the assertion can fail.*
+
+   *What moved is a human's answer to a question only a human can answer, on better evidence. **730
+   was approved against a static PNG** at the 05-08 checkpoint. **1100 comes from a review of the
+   running app on a real desktop window**, which is strictly better evidence about apparent type
+   than a PNG viewed at whatever size it was viewed at. The reference constant carries both, dated,
+   so this contract's trail does not go cold at the newer number.)*
 
    *On the pre-approved remedy named in item 1: `layout="wide"` was applied at 06-07, is **kept**,
    and is now **explicitly not the figure's width governor**. The other prohibitions are untouched
