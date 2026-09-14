@@ -81,6 +81,26 @@ them** — they are not locked the way D-01 to D-03 are.
   Criterion 4's purpose is that the result survives a COLD app, so the
   screenshot must carry the headline numbers legibly, not just be decorative.
 
+- **D-07: the README distinguishes the interpreter it REPRODUCES on from the
+  one Community Cloud SERVES on.** Both facts are true and they are not in
+  conflict once separated:
+  - **Python 3.11** is the development and reproduction interpreter. The local
+    venv is 3.11.5 and `requirements.txt` was resolved and verified against
+    `cp311-win_amd64` with `--only-binary=:all:`. This is what criterion 5's
+    fresh-clone reproduction claim is about, and it stays as stated.
+  - **Python 3.14.7** is what the deployment runs, verified from the Community
+    Cloud console on 2026-09-13 (`06-09-DEPLOY-VERIFICATION.md`).
+
+  The README's existing "Required interpreter: Python 3.11" line is therefore
+  not wrong, it is INCOMPLETE — it reads as a claim about the whole project
+  when it is a claim about reproduction. The fix is a qualifier, not a
+  correction, and the deployed version should be stated alongside it rather
+  than left for a reader to discover.
+
+  **This does NOT decide Phase 6's follow-up** — whether to pin the Cloud
+  runtime back down remains open and belongs there. D-07 only governs what the
+  README says about a situation that currently exists.
+
 </decisions>
 
 <canonical_refs>
@@ -138,13 +158,8 @@ labelling as fixed, and the wording as open.
 <open_questions>
 ## Open Questions — for the planner, not the user
 
-1. **The README says "Required interpreter: Python 3.11" (line 11), and the
-   deployment was verified on 2026-09-13 to run Python 3.14.7.** Both cannot be
-   presented as true without qualification. This phase is where a reader meets
-   that claim, so it has to be resolved here even though the underlying
-   decision belongs to Phase 6's follow-ups. The local venv IS 3.11.5, so the
-   honest reading is that 3.11 is the DEVELOPMENT interpreter and 3.14.7 is
-   what Community Cloud serves. Flagged, not decided.
+1. **RESOLVED 2026-09-13 — see D-07 below.** (Was: the README claims Python
+   3.11 while the deployment runs 3.14.7.)
 
 2. **Criterion 2 says "verified by regenerating artifacts and diffing."** D-05
    implements the verification as a test against the committed manifest.
