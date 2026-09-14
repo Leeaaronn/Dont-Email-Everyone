@@ -35,17 +35,22 @@ https://dont-email-everyone-hillstrom.streamlit.app/
   1. The 12-hour cold-start check. Last known traffic 2026-09-11T21:04Z, so the earliest
      valid run is 2026-09-12T09:04Z. Any visit to the app before then resets the clock.
   2. The build-log check for scikit-learn / statsmodels / duckdb / pandera (threat T-06-31).
-     NOT performed at deploy time. The failure mode is silent by construction, so an
-     unperformed check is NOT a pass. Log: Community Cloud -> Manage app -> terminal pane.
-  3. The deployed Python version, readable from the Community Cloud app settings pane.
-     Not captured at deploy time; low consequence (all pins have cp311/cp312/cp313 wheels),
-     recorded for reproducibility.
+     PERFORMED 2026-09-13 against the 23:30 UTC build -- PASS. All 42 installed packages
+     read from the log and none of the four is among them. See
+     .planning/phases/06-streamlit-app-deployment/06-09-DEPLOY-VERIFICATION.md.
+  3. The deployed Python version. PERFORMED 2026-09-13: it is **3.14.7**, NOT the 3.11
+     this file recorded, and OUTSIDE the cp311/cp312/cp313 range that was the stated
+     reason the item was low consequence. Nothing broke -- all 42 packages resolved on
+     3.14.7 -- but requirements.txt's "Pinned Python 3.11" header and its numpy decision
+     (b) no longer describe the deployment. Cloud also overrode the deliberate
+     pyarrow==25.0.1 pin with 24.0.0 for a known segfault. Three follow-up DECISIONS are
+     recorded in 06-09-DEPLOY-VERIFICATION.md; none is taken.
 
 Also outstanding: a human incognito VISUAL check. Reachability was proven by unauthenticated
 curl reaching HTTP 200 on the app shell; the rendered page itself was never observed, because
 content arrives over a websocket into an SPA.
 
-Last activity: 2026-09-12 - Completed quick task 260912-jil: figure display width capped at a derived 730 CSS px, human-verified on a wide monitor and at laptop width
+Last activity: 2026-09-13 - Completed quick task 260913-knu: display cap raised 730 -> 1100 CSS px and figure sizing CLOSED; then performed two of the three inherited deploy verifications against the live 23:30 UTC build (T-06-31 PASS; Python is 3.14.7, not the recorded 3.11)
 
 Progress: [██████████] 98%
 
