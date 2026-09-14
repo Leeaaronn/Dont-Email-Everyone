@@ -227,7 +227,29 @@ Plans:
   4. A repo-wide grep for `accuracy_score|roc_auc|\.score\(|classification_report` returns no hits in the README or the app, and a static screenshot of the app's key output is embedded so the result survives a cold app.
   5. `python -m dont_email_everyone.pipeline all` on a fresh clone reproduces every artifact and figure from the vendored CSV.
 
-**Plans**: TBD
+**Plans:** 0/6 plans executed
+
+Plans:
+**Wave 1** *(no dependencies — the two evidence plans, runnable together)*
+
+- [ ] 07-01-PLAN.md — `tests/test_fresh_clone.py`: an in-process `pipeline all` against a redirected tree, proving the committed artifact and figure sets are a regeneration product; carries criterion 5 and issues the criterion-2 ruling the later plans cite (wave 1)
+- [ ] 07-02-PLAN.md — The two committed screenshots, `docs/SCREENSHOT-CAPTURE.md`, and the first assertions in `tests/test_readme.py`; carries the cold-app half of criterion 4. **Not autonomous** — the capture is a human action (wave 1)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 07-03-PLAN.md — The README first screen in D-01's order, the manifest-provenance test, the bounded literal sweep, the ordering test and the classification-metric ban; carries criterion 1 and the provenance half of criterion 2 (wave 2)
+
+**Wave 3** *(blocked on Wave 2 — same file)*
+
+- [ ] 07-04-PLAN.md — The method section where ATE, Qini and T-learner are finally introduced (clearing 07-03's `xfail`), D-04's four depth links, D-07's interpreter record, and three stale setup-section claims corrected (wave 3)
+
+**Wave 4** *(blocked on Wave 3 — same file)*
+
+- [ ] 07-05-PLAN.md — The limitations section a skeptic would have written: criterion 3's six named items, each individually asserted against the ROADMAP wording (wave 4)
+
+**Wave 5** *(blocked on Wave 4 — same file)*
+
+- [ ] 07-06-PLAN.md — The blocking human read of the finished README, the five-criterion discharge, DOC-01 marked, and the surviving forward-reference sentence in `reports/validity.md` amended. **Not autonomous** (wave 5)
 
 ## Coverage Notes
 
@@ -250,7 +272,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 4. Uplift Modeling | 9/9 | Complete   | 2026-09-09 |
 | 5. Business & Policy Layer | 9/9 | Complete   | 2026-09-10 |
 | 6. Streamlit App & Deployment | 8/9 | In Progress|  |
-| 7. Documentation & Delivery | 0/TBD | Not started | - |
+| 7. Documentation & Delivery | 0/6 | Planned | - |
 
 ---
 *Roadmap created: 2026-09-01*
