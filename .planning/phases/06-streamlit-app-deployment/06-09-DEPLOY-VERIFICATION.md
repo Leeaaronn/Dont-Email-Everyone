@@ -97,16 +97,59 @@ knew about. 24.0.0 satisfies streamlit's specifier, so nothing breaks. But the
 deployed environment **does not match the pinned one**, and decision (d)'s
 reasoning silently no longer describes what runs.
 
+## 5. The 12-hour cold-start check — **PERFORMED 2026-09-15, PASS**
+
+Observed by the user in a logged-out browser on 2026-09-15, against a
+deployment whose last recorded traffic was 2026-09-11T21:04Z. Elapsed: roughly
+**3.5 days**, against a requirement of at least 12 hours. The margin is not
+marginal — this is well clear of the boundary, so no question arises about
+whether the app had actually been left to sleep.
+
+What was observed, as reported:
+
+> it was a sleep page, it took about 5 seconds to wake. it loaded cleanly.
+> i used the live app
+
+That is every clause of the criterion:
+
+| Clause | Observed |
+|---|---|
+| at least 12 hours after last traffic | ~3.5 days |
+| a logged-out visitor | logged-out browser, not the authenticated owner |
+| lands on a sleep page | yes — the sleep page appeared at first paint |
+| can wake it in **one click** | yes |
+| it then loads **without error** | yes — "it loaded cleanly", ~5 seconds |
+
+**This also discharges the human incognito VISUAL check.** The gap §4's
+predecessor left open was that reachability had only ever been proven by
+unauthenticated `curl` reaching HTTP 200 on the app shell, while the *rendered*
+page had never been observed by a logged-out human — the content arrives over a
+websocket into an SPA, so an HTTP 200 on the shell says nothing about what
+paints. A logged-out human has now watched it paint, and went on to photograph
+it: `docs/app_headline.png` is that render, and its six headline numbers were
+checked against `data/processed/manifest.json` and match.
+
+Sequencing note, recorded because it is reusable rather than incidental: this
+observation and Phase 7's screenshot capture were deliberately performed in that
+order in a single session. Every visit resets the 12-hour clock, so capturing
+the screenshots first would have destroyed the only evidence this check can ever
+be made from and pushed it out another 12 hours. The clock has now reset from
+2026-09-15; any future cold-start observation must be measured from this visit.
+
 ## Status of the three inherited verifications
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | 12-hour cold-start check | **still open** — not performed here; this session generated traffic, which resets the clock |
+| 1 | 12-hour cold-start check | **PASS**, performed 2026-09-15 — sleep page, one-click wake, ~5 s, loaded cleanly; see §5 |
 | 2 | Build-log scan for the four packages (T-06-31) | **PASS**, performed 2026-09-13 |
 | 3 | Deployed Python version | **recorded: 3.14.7** — and it contradicts the recorded tuple; see §3 |
 
-Also still open: the human incognito VISUAL check. This session observed the
-rendered page while authenticated as the owner, which is not the same thing.
+The human incognito VISUAL check is also now **closed** by §5 — a logged-out
+human observed the rendered page, which `curl` could not establish.
+
+All three inherited verifications are now discharged. What remains open on
+Phase 6 is not a verification but the three **decisions** below, which are the
+user's to take.
 
 ## Recommended follow-ups (NOT performed — these are decisions, not chores)
 
