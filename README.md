@@ -117,6 +117,28 @@ Four write-ups carry the evidence. The README is the front door; these are the r
 
 <!-- method:end -->
 
+<!-- limitations:begin -->
+
+## What would break this result
+
+A reader who wants to disbelieve the headline should start here. Nothing above this section repairs any of the following, and this list is the project's own — it was not assembled after someone asked for it.
+
+- **The data is from 2008.** Email norms, spam filtering, inbox placement, list hygiene and what customers expect from a retailer have all moved since. Nothing here establishes that the same customers would respond the same way to the same email today, or that the segmentation the model found still exists.
+
+- **A single two-week observation window.** Visits, orders and revenue are counted in the fortnight after the send and nowhere else. A policy that pulls a purchase forward by three weeks and a policy that creates a purchase which would never have happened look identical in this data. Nothing here separates them.
+
+- **One retailer.** One company's list, one catalogue, one pair of creatives. Everything here is a statement about this retailer's customers — not evidence about another retailer, another category, or a list assembled differently.
+
+- **Cost per email and gross margin are assumptions, not data.** The Hillstrom experiment records neither. The app's cost and margin controls are the reader's numbers, not the experiment's, and the analysis code adopts no default for either — deliberately, because a fabricated constant would be silently inherited by every profit figure downstream. What the project does instead is sweep the cost-to-margin ratio and report where the answer changes: the recommended depth does not move at all until that ratio reaches **0.068**, and it falls to zero only at **1.397**.
+
+- **The winner's curse on threshold selection.** The cost-optimal depth k\* is chosen by looking at the same customers it is then scored on, so the profit reported at that depth is optimistic by construction. Picking the best-looking point on a noisy curve and then quoting that point's height is the error, and it is one that no amount of additional data fixes. What the project does about it: the published headline sits at a capacity anchor fixed and committed **before** any policy number existed, not at k\*, and the cost-optimal depth is shown as a sensitivity exhibit rather than as a recommendation. The related optimism is measured rather than assumed to be small — at the published depth, a model's own belief about its top-k visit effect is **1.26 times** what the randomization actually delivered.
+
+- **Nobody ran this policy.** The randomization supports an unbiased estimate of what a top-k targeting rule *would have* earned on these 21,347 customers in that fortnight. It does not establish that running the policy for a year produces the same effect, that the customers you stop emailing remain unharmed by not being emailed, or that the model's ranking is stable enough to re-fit next quarter and get the same list.
+
+These six are the ones this project's own success criteria require it to state. They are not the whole list. [`reports/policy.md`](reports/policy.md) section 13, "What would break the claim", carries the longer one — including the anchor being a convention rather than a discovered optimum, the small number of purchase events underneath the revenue estimate, and the fact that everything rests on a single pre-committed split.
+
+<!-- limitations:end -->
+
 ## Setup and reproduction
 
 **Two interpreters are in play, and both statements are true.**
