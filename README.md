@@ -54,6 +54,69 @@ The two images below are the app's own output, so the result is readable even wh
 
 <!-- headline:end -->
 
+<!-- method:begin -->
+
+## How that answer was produced
+
+### The experiment
+
+64,000 customers were randomly assigned to one of three groups: an email featuring mens merchandise, an email featuring womens merchandise, or no email at all. Site visits, orders and revenue were recorded over the two weeks after the send.
+
+The random assignment is the entire foundation. Because nobody chose who got which email, a difference between the groups is caused by the email rather than by who happened to be in each group — there is no "customers who get emails are keener anyway" explanation to rule out, because the groups were built by a coin flip.
+
+That randomization was **checked, not assumed**: every covariate balances across all three arms, and a joint test over all of them fails to reject. → [`reports/validity.md`](reports/validity.md)
+
+### Average treatment effect
+
+The average treatment effect — **ATE**, the term you will meet in the write-ups — is the average difference in an outcome between the emailed group and the no-email group. That is the whole definition; the notation elsewhere adds precision, not meaning.
+
+For the womens-email arm — the arm this project's targeting rule acts on:
+
+| Outcome | Effect vs no email | 95% interval |
+|---|---|---|
+| Site visits | **+4.52 percentage points** | +3.89 to +5.16 |
+| Orders | **+0.31 percentage points** | +0.15 to +0.47 |
+| Revenue | **+$0.42 per customer** | +$0.17 to +$0.68 |
+
+All three are comfortably away from zero. **Email works, on average.**
+
+And that is exactly where the average stops being useful. It says the campaign worked; it does not say *who to email*. Those are different questions, and the rest of this section is about the second one.
+
+### Uplift, and the T-learner
+
+Uplift is the change in *one customer's* behaviour caused by the email. It is never observed for anybody — each customer was either emailed or not, never both, so the number we want is missing for every single row in the data.
+
+The T-learner works around that. Fit one model on the emailed customers and a second model on the no-email customers, then take the difference between the two predictions for the same customer. That difference is the predicted uplift. Both models see only **pre-treatment** customer attributes — history, recency, channel, segment — so nothing measured after the send can leak into a prediction about it.
+
+The honest accounting: of **6** eligible model cells, **2** cleared the project's pre-registered bar, and both are on the **womens** arm — one for **visit**, one for **conversion**. **Four did not clear it.** A README that reports the winners and omits the losers is exactly what the model write-up exists to prevent. → [`reports/model.md`](reports/model.md)
+
+### Qini, and why accuracy is the wrong yardstick
+
+A **Qini curve** asks: if you email the top k% of a ranking rather than the same number of customers picked at random, how much extra outcome do you get? Plot that across every depth and you can see where a ranking earns its keep and where it stops. **Uplift-at-k** is one point on that curve — the answer at a single depth.
+
+A classification score answers a different question. Accuracy and AUC measure whether a model can pick who *will buy*. A targeting rule needs to know who will buy **because they were emailed** — and the customers most likely to buy are frequently the ones who would have bought anyway, which makes a list of likely buyers close to the worst list to spend a send budget on.
+
+So no classification-family figure appears anywhere in this project as a result. That is a deliberate constraint, and it is enforced by tests rather than by intention. → [`reports/metric.md`](reports/metric.md)
+
+### From a ranking to a dollar figure
+
+The headline is **not** a sum of predicted uplift. If it were, it would inherit every one of the model's own optimistic beliefs about itself.
+
+Instead it is estimated from the randomization, on a **held-out half** of the customers the models never saw (32,001 of them), using known-propensity inverse-probability weighting. In plain words: take each customer's *actual, observed* outcome, and re-weight it by how likely that customer was to have received the treatment the policy would have given them. The estimate comes from what really happened, not from what a model predicted would happen.
+
+That distinction is worth its place because the gap is measurable. At the published depth, the model's own belief about its site-visit effect is **1.26 times** what the randomization actually delivered. A pipeline that skipped this step would have published the larger number in good faith. → [`reports/policy.md`](reports/policy.md)
+
+### Going deeper
+
+Four write-ups carry the evidence. The README is the front door; these are the rooms.
+
+- [`reports/validity.md`](reports/validity.md) — does this experiment support causal claims at all? Balance across arms, the omnibus test, all six treatment effects, and interval coverage.
+- [`reports/metric.md`](reports/metric.md) — what the Qini convention is here, why it is trustworthy, and the list of things the number may not be used for.
+- [`reports/model.md`](reports/model.md) — which model cells were published, which failed the pre-registered bar, and why the failures are reported rather than dropped.
+- [`reports/policy.md`](reports/policy.md) — the estimator, the headline, the cost exhibit, and the full list of what would break the claim.
+
+<!-- method:end -->
+
 ## Setup and reproduction
 
 Required interpreter: **Python 3.11**.
