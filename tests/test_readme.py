@@ -820,10 +820,28 @@ def test_readme_states_both_interpreters():
         "Community Cloud actually serves. Recording only the local "
         "interpreter is what made the pre-D-07 README misleading."
     )
-    assert "2026-09-13" in section, (
-        "the setup section does not carry the date the deployed version "
-        "was read. An undated platform reading cannot be judged for age, "
-        "and Cloud selects its own runtime."
+    # THE READ DATE LIVES IN docs/decisions.md, NOT HERE, and the assertion
+    # followed the fact rather than being dropped with it.
+    #
+    # It was originally asserted inside this section. A review moved the
+    # wheel tag, the console read date and the package count out of the
+    # README on the grounds that a reader at this point is trying to run the
+    # pipeline, not audit the environment -- which is right. What the
+    # criterion actually requires is that the reading is DATED somewhere a
+    # reader can reach, because Cloud can change its default runtime without
+    # notice and an undated observation cannot be judged for age. Relocating
+    # the assertion preserves that property; deleting it would not have.
+    decisions = config.ROOT / "docs" / "decisions.md"
+    assert decisions.is_file(), (
+        f"{decisions} is missing. The setup section delegates the "
+        "interpreter detail to it, so its absence leaves the deployment "
+        "reading undated and unexplained."
+    )
+    assert "2026-09-13" in decisions.read_text(encoding="utf-8"), (
+        "docs/decisions.md does not carry the date the deployed Python "
+        "version was read. Community Cloud selects its own runtime and can "
+        "change it without notice, so an undated reading cannot be judged "
+        "for age -- it is an observation, not a standing guarantee."
     )
 
     for index in (m.start() for m in re.finditer(r"3\.14\.7", section)):
@@ -839,25 +857,32 @@ def test_readme_states_both_interpreters():
             "no role attached tells a reader nothing."
         )
 
-    # SCOPED TO A LINE, not to a character window, and the distinction was
-    # forced by a real false positive rather than chosen up front. The two
-    # interpreter facts are written as adjacent bullets, so a 120-character
-    # window starting at the "3.11" ending the first bullet reaches into the
-    # "deployed" opening the second -- and fails on prose that is correct and
-    # is in fact exactly what D-07 asked for.
+    # SCOPED TO A SENTENCE, and it took two narrowings to get here. Both
+    # were forced by false positives on correct prose, and the history is
+    # recorded because the unit is the whole design of this guard:
     #
-    # A line is also the RIGHT unit on the merits. The falsehood D-07 exists
-    # to prevent is a sentence asserting the deployment runs 3.11; it cannot
-    # be spread across two bullets, because two bullets are two claims. A
-    # character window was measuring proximity when the thing that matters is
-    # co-assertion.
-    for line in section.splitlines():
-        if "3.11" not in line:
+    #   1. A 120-CHARACTER WINDOW failed first. The two interpreter facts
+    #      were adjacent bullets, so a window anchored at the "3.11" ending
+    #      one bullet reached the "deployed" opening the next.
+    #   2. A LINE failed second, when a review compressed the two facts into
+    #      one sentence pair on a single line. The line names both, and says
+    #      something entirely correct about each.
+    #
+    # A sentence is the terminal unit, and it is what the rule always meant:
+    # the falsehood is a SENTENCE asserting the deployment runs 3.11. Two
+    # sentences are two claims, however they are laid out, so no future
+    # reflow can produce this failure on correct prose again.
+    #
+    # The split avoids breaking on the periods inside "3.11" and "3.14.7" by
+    # requiring whitespace and a capital after the terminator -- version
+    # numbers carry neither.
+    for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z*`\[])", section):
+        if "3.11" not in sentence:
             continue
         for word in DEPLOYMENT_WORDS:
-            assert word not in line, (
-                f"this line names both {word!r} and '3.11':\n"
-                f"  {line.strip()}\n"
+            assert word not in sentence, (
+                f"this sentence names both {word!r} and '3.11':\n"
+                f"  {sentence.strip()}\n"
                 "The deployment runs 3.14.7, not 3.11. This is the exact "
                 "false implication D-07 exists to prevent -- 3.11 is the "
                 "reproduction interpreter and nothing else."
