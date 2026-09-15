@@ -39,11 +39,15 @@ why each one fails on CORRECT code. That finding is cited here rather than
 re-argued.
 """
 
-import pathlib
+import json
 import re
 import subprocess
 
+import streamlit_app
+
 from dont_email_everyone import config
+
+README = config.ROOT / "README.md"
 
 DOCS = config.ROOT / "docs"
 
@@ -202,10 +206,229 @@ def test_screenshot_capture_record_names_a_real_commit():
         )
 
 
-# DEFERRED TO PLAN 07-03, deliberately, so the gap reads as scheduled
-# rather than forgotten: the assertion that README.md actually EMBEDS these
-# two images belongs to the plan that writes the embed. Asserting it here
-# would fail on a README that does not yet have a first screen, and a test
-# that fails for the whole of wave 2 is a test that gets commented out.
+# ---------------------------------------------------------------------------
+# D-05: number provenance is enforced by a TEST, not by generating the README.
 #
-# 07-03 adds it alongside the provenance assertions, in this module.
+# This block is the FIRST LINK of the chain plan 07-01 ruled on, restated here
+# so a reader of this file alone can see where the README's numbers come from
+# and how far back the guarantee reaches:
+#
+#     README literal
+#       -> (THIS BLOCK, every run) manifest.json scalar
+#       -> (test_artifacts.py::test_headline_reproduces_from_committed_columns)
+#          scored_holdout.parquet
+#       -> (test_fresh_clone.py) the vendored CSV and the committed code
+#
+# Every link is mechanical. No link is a human transcription. ROADMAP Phase 7
+# criterion 2 asks for exactly that, and its two halves are discharged by two
+# different mechanisms: this block pins the README to the manifest, and
+# test_fresh_clone.py is what stops the manifest from being a hand-maintained
+# file -- which is what "verified by regenerating artifacts and diffing rather
+# than by hand-copying" is a guard against.
+# ---------------------------------------------------------------------------
+
+# The six first-screen contrasts, as (outcome, manifest key) pairs. Both
+# outcomes crossed with the point estimate and both interval endpoints.
+HEADLINE_SCALARS = tuple(
+    (outcome, key)
+    for outcome in ("spend", "visit")
+    for key in ("vs_random", "vs_random_lo", "vs_random_hi")
+)
+
+# The contrast the whole first screen is ABOUT. Asserted as a guard rather
+# than assumed: if the artifact's headline contrast ever changed, every
+# sentence on the first screen would be describing a different comparison
+# while still quoting numbers that matched, and the six assertions above
+# would all pass. This is the only assertion that can catch that.
+EXPECTED_CONTRAST = "vs_random_send_of_the_same_size"
+
+# Numbers that legitimately appear on the first screen and are NOT results.
+# Each carries the reason it is not a result. An entry without a reason is
+# how this test degrades into an allowlist of whatever happens to be in the
+# file, so do not add one.
+FIRST_SCREEN_NON_RESULT_NUMBERS = (
+    ("95%", "the confidence level -- a convention fixed before any estimate was computed, not a measurement"),
+    ("12", "Community Cloud's sleep window in hours -- a platform property, documented at streamlit.io"),
+    ("64,000", "the experiment's total enrolment across all three arms -- a property of the Hillstrom 2008 dataset, not an estimate from it"),
+    ("101", "the number of grid points in the policy sweep -- a design parameter chosen before the sweep ran"),
+    ("500", "the bootstrap replicate count -- a seeded design parameter, recorded in the artifact"),
+)
+
+# Optional sign, optional currency sign, digits with thousands separators,
+# optional decimal part, optional trailing percent. Deliberately greedy about
+# what counts as a number: a sweep that missed a spelling would be a sweep
+# that passes while an untraceable number sits on the first screen.
+NUMERIC_LITERAL = re.compile(r"[+-]?\$?\d[\d,]*(?:\.\d+)?%?")
+
+HEADLINE_BEGIN = "<!-- headline:begin -->"
+HEADLINE_END = "<!-- headline:end -->"
+
+
+def _manifest():
+    return json.loads(
+        (config.PROCESSED / "manifest.json").read_text(encoding="utf-8")
+    )
+
+
+def _readme():
+    return README.read_text(encoding="utf-8")
+
+
+def _first_screen(text):
+    """Return the text between the first-screen markers.
+
+    Both markers are asserted present and ordered. A missing marker must
+    fail LOUDLY rather than silently yield an empty string -- an empty
+    region makes the reverse sweep below vacuously pass, which is the one
+    failure mode that would leave an untraceable number published while the
+    suite stayed green.
+    """
+    begin = text.find(HEADLINE_BEGIN)
+    end = text.find(HEADLINE_END)
+    assert begin != -1, (
+        f"README.md has no {HEADLINE_BEGIN} marker. The first-screen region "
+        "is what bounds the untraceable-number sweep; without it that test "
+        "cannot run at all."
+    )
+    assert end != -1, f"README.md has no {HEADLINE_END} marker."
+    assert begin < end, (
+        f"{HEADLINE_BEGIN} appears at offset {begin}, after "
+        f"{HEADLINE_END} at {end}. The markers are inverted."
+    )
+    return text[begin:end]
+
+
+def _expected_number_strings(manifest):
+    """Every number the first screen is ALLOWED to state as a result.
+
+    Derived, never typed. See the docstring of the forward test for why
+    routing through `streamlit_app.display_value` is the design rather than
+    a convenience.
+    """
+    per_outcome = manifest["headline"]["per_outcome"]
+    frame = manifest["frame"]
+
+    expected = {
+        streamlit_app.display_value(outcome, per_outcome[outcome][key])
+        for outcome, key in HEADLINE_SCALARS
+    }
+    expected.add(f"{frame['n_customers']:,}")
+    expected.add(f"{frame['n_targeted']:,}")
+    expected.add(f"{frame['capacity_k']:.0%}")
+    return expected
+
+
+def test_readme_headline_numbers_trace_to_the_manifest():
+    """Every first-screen result appears in README.md at the manifest's value.
+
+    FORMATTING THROUGH THE APP'S OWN FUNCTION IS THE DESIGN, NOT A
+    CONVENIENCE. D-01 requires the README and the deployed app to tell one
+    story. If this test formatted the expected strings independently -- even
+    correctly, today -- the two reader-facing surfaces could print one
+    quantity at two grains and both would still pass. Routing through
+    `streamlit_app.display_value` makes the display grain a property of the
+    app module rather than of a literal in this file, so a precision change
+    in the app either propagates into the README or fails here.
+
+    That is the same move `streamlit_app.curve_caption` makes when it
+    formats its anchor from `economics.HEADLINE_CAPACITY` rather than typing
+    the percentage into the copy.
+    """
+    manifest = _manifest()
+    text = _readme()
+
+    assert manifest["headline"]["contrast"] == EXPECTED_CONTRAST, (
+        "the manifest's headline contrast is "
+        f"{manifest['headline']['contrast']!r}, not {EXPECTED_CONTRAST!r}. "
+        "Every sentence on the README's first screen describes a comparison "
+        "against a random send of the same size. If the artifact's contrast "
+        "moved, that prose is now about a different comparison while still "
+        "quoting numbers that match, and no other assertion here can see it."
+    )
+
+    per_outcome = manifest["headline"]["per_outcome"]
+    for outcome, key in HEADLINE_SCALARS:
+        quoted = streamlit_app.display_value(outcome, per_outcome[outcome][key])
+        assert quoted in text, (
+            f"README.md does not quote headline.per_outcome.{outcome}.{key}, "
+            f"which formats to {quoted!r}. A headline the artifact carries "
+            "that the README does not quote is a headline nobody can check "
+            "-- and if the README states some other spelling of it instead, "
+            "the two differ and a reader cannot tell which is current."
+        )
+
+    frame = manifest["frame"]
+    for label, quoted in (
+        ("frame.n_customers", f"{frame['n_customers']:,}"),
+        ("frame.n_targeted", f"{frame['n_targeted']:,}"),
+        ("frame.capacity_k", f"{frame['capacity_k']:.0%}"),
+    ):
+        assert quoted in text, (
+            f"README.md does not quote {label}, which formats to {quoted!r}. "
+            "The recommendation sentence is built from these three, so a "
+            "mismatch means the instruction on the first screen describes a "
+            "policy the artifact does not support."
+        )
+
+
+def test_readme_first_screen_publishes_no_untraceable_number():
+    """No number on the first screen came from nowhere.
+
+    This is the half of criterion 2 that the forward test cannot reach. The
+    forward test proves the manifest's numbers are in the README; it says
+    nothing whatever about a number in the README that traces to no
+    artifact -- a stale figure left behind by an edit, or one typed from
+    memory.
+
+    SCOPE, STATED HONESTLY. This sweep covers the first-screen region only.
+    It is bounded there because that is where criteria 1 and 2 bite hardest
+    and because the markers make the boundary exact rather than a guess. The
+    rest of the README is covered by the forward test above and by plan
+    07-04's own assertions. A sweep over the whole file would have to
+    allowlist Python versions, artifact counts, table row counts and section
+    numbers, and an allowlist that long stops being evidence of anything.
+    """
+    manifest = _manifest()
+    region = _first_screen(_readme())
+
+    allowed = _expected_number_strings(manifest)
+    allowed.update(literal for literal, _reason in FIRST_SCREEN_NON_RESULT_NUMBERS)
+
+    for match in NUMERIC_LITERAL.finditer(region):
+        literal = match.group()
+        if literal in allowed:
+            continue
+        start = max(0, match.start() - 40)
+        context = region[start : match.end() + 40].replace("\n", " ")
+        raise AssertionError(
+            f"{literal!r} appears on the README's first screen but traces to "
+            f"no committed artifact.\n"
+            f"  context: ...{context}...\n"
+            "Either trace it to data/processed/manifest.json and quote it "
+            "through streamlit_app.display_value, or add it to "
+            "FIRST_SCREEN_NON_RESULT_NUMBERS **with the reason it is not a "
+            "result**. Do not widen NUMERIC_LITERAL -- a number this sweep "
+            "cannot see is a number nobody is checking."
+        )
+
+
+def test_first_screen_non_result_numbers_each_carry_a_reason():
+    """The exception list is closed and every entry is justified.
+
+    Without this, `FIRST_SCREEN_NON_RESULT_NUMBERS` decays into an
+    allowlist of whatever happened to be in the file on the day someone hit
+    a failure. The reason text is the thing that makes a future reader able
+    to judge whether an entry still belongs.
+    """
+    for entry in FIRST_SCREEN_NON_RESULT_NUMBERS:
+        assert len(entry) == 2, (
+            f"{entry!r} is not a (literal, reason) pair. Every exception "
+            "carries the reason it is not a result."
+        )
+        literal, reason = entry
+        assert literal and literal.strip(), f"empty literal in {entry!r}"
+        assert reason and len(reason.strip()) >= 20, (
+            f"{literal!r} is exempted with the reason {reason!r}, which is "
+            "too short to be one. State what the number is and why it is "
+            "not a measurement."
+        )

@@ -48,7 +48,7 @@ The two images below are the app's own output, so the result is readable even wh
 
 *The app's own headline block, captured at the pre-registered 20% targeting depth.*
 
-![Policy curve showing incremental spend versus a random send of the same size across every targeting depth, with a 95% bootstrap band. Hatching marks the depths where the band covers zero; the band is unhatched only between roughly 14% and 20% and again near 50%.](docs/app_policy_curve.png)
+![Policy curve showing incremental spend versus a random send of the same size across every targeting depth, with a 95% bootstrap band. Hatching marks the depths where the band covers zero, which is most of them; the band clears zero only in two narrow stretches.](docs/app_policy_curve.png)
 
 *Where the revenue gain is, and is not, distinguishable from zero.*
 
