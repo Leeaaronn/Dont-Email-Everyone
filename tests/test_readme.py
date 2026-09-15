@@ -432,3 +432,136 @@ def test_first_screen_non_result_numbers_each_carry_a_reason():
             "too short to be one. State what the number is and why it is "
             "not a measurement."
         )
+
+
+# ---------------------------------------------------------------------------
+# Criterion 1's ordering constraint, and criterion 4's classification grep.
+# ---------------------------------------------------------------------------
+
+# The three terms criterion 1 names. A reader must reach the business
+# question and the headline dollar answer before meeting any of them.
+#
+# `ATE` is matched WITH A WORD BOUNDARY and CASE-SENSITIVELY. An unanchored
+# substring match hits "estimate", "rate", "generated" and "related", which
+# would fail on correct prose -- and the repair a later reader reaches for
+# when a test fails on correct prose is to weaken the test. This comment is
+# here because that repair would be made in the wrong direction.
+JARGON_PATTERNS = (
+    ("ATE", re.compile(r"\bATE\b")),
+    ("Qini", re.compile(r"Qini")),
+    ("T-learner", re.compile(r"T-learner")),
+)
+
+
+def test_readme_states_the_result_before_any_jargon():
+    """Criterion 1: the answer comes before the vocabulary.
+
+    The criterion requires the business question and the headline dollar
+    answer to appear "before any mention of ATE, Qini, or T-learner, and
+    understandable without knowing those terms". The first half is an
+    ordering and is what this test enforces. The second half -- whether the
+    prose is actually understandable -- is not decidable by any assertion
+    over a markdown file, and plan 07-06's human read-through is what
+    covers it.
+
+    THE VACUITY GUARD IS THE LOAD-BEARING HALF. An ordering assertion over
+    terms that appear nowhere is true of every file, including an empty
+    one. `tests/test_reports.py` records the same argument as the reason
+    `policy.md`'s ordering test was deliberately not written in plan 05-01.
+    Plan 07-04 writes the method section that introduces all three terms,
+    so until it lands this test has nothing to order against.
+    """
+    text = _readme()
+    end = text.find(HEADLINE_END)
+    assert end != -1, f"README.md has no {HEADLINE_END} marker."
+
+    found = {
+        name: match.start()
+        for name, pattern in JARGON_PATTERNS
+        if (match := pattern.search(text))
+    }
+
+    assert found, (
+        "none of ATE, Qini or T-learner appears in README.md, so this "
+        "ordering assertion is true of any file and is testing nothing. "
+        "Plan 07-04 writes the method section that introduces all three. "
+        "If that section exists and this still fails, the terms were "
+        "renamed and this test needs to learn the new names -- do not "
+        "delete the guard."
+    )
+
+    for name, offset in found.items():
+        assert offset > end, (
+            f"{name!r} first appears at offset {offset}, which is before "
+            f"the end of the first-screen block at offset {end}. ROADMAP "
+            "Phase 7 criterion 1 requires the business question and the "
+            "headline result to be readable without knowing that term. "
+            "Move the mention below the headline:end marker, or say the "
+            "same thing in plain words above it."
+        )
+
+
+def test_readme_and_app_have_no_classification_metric():
+    """Criterion 4's first half, over both reader-facing surfaces.
+
+    This test KEEPS a property rather than establishing one: the grep was
+    verified clean in both files on 2026-09-13. The distinction matters to
+    whoever reads a future failure, because it means something was ADDED,
+    not that something was never fixed.
+
+    Why the property matters: accuracy is the wrong yardstick for uplift.
+    A model can rank who is likely to buy with excellent accuracy and be
+    worthless at ranking who buys BECAUSE they were emailed. A
+    classification-family figure presented as a headline result would be
+    this project asserting the exact confusion it was built to avoid.
+
+    Each spelling is assembled by concatenation so that this file does not
+    trip the repository-wide grep it exists to enforce -- the same
+    construction `tests/test_reports.py` uses, which took it from
+    `tests/test_evaluation.py`'s purity sweep.
+    """
+    banned = (
+        "accuracy" + "_score",
+        "roc" + "_auc",
+        "classification" + "_report",
+        "." + "score(",
+    )
+    surfaces = {
+        "README.md": _readme(),
+        "streamlit_app.py": (config.ROOT / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        ),
+    }
+    for filename, text in surfaces.items():
+        for token in banned:
+            assert token not in text, (
+                f"{filename} contains {token!r}. Accuracy is the wrong "
+                "yardstick for uplift -- a model can rank who is likely to "
+                "buy very accurately and be worthless at ranking who buys "
+                "BECAUSE they were emailed. A classification-family figure "
+                "on a reader-facing surface would present that confusion "
+                "as a result."
+            )
+
+
+def test_readme_embeds_both_app_screenshots():
+    """Both screenshots are embedded ON the first screen, not merely present.
+
+    This is the assertion plan 07-02 deliberately deferred to here, because
+    it is the plan that writes the embed.
+
+    "Inside the region" rather than "somewhere in the file" is the whole
+    point. Criterion 4's purpose is that the result survives a cold app,
+    and an image below the fold is one the reviewer who bounced off the
+    sleep page never reaches.
+    """
+    region = _first_screen(_readme())
+    for name in APP_SCREENSHOTS:
+        reference = f"docs/{name}"
+        assert reference in region, (
+            f"{reference} is not referenced inside the first-screen block. "
+            "A reviewer who lands on a sleeping app reads the first screen "
+            "and nothing else; an image below the fold does not reach them, "
+            "which leaves ROADMAP Phase 7 criterion 4 unmet even though the "
+            "file is committed."
+        )
