@@ -212,12 +212,12 @@ Filled in at capture time. The SHA is what makes the staleness check above runna
 
 | Field | Value |
 |---|---|
-| Date captured | *(not yet captured)* |
-| Source used | *(live app / local — record which)* |
-| Browser | *(name and version)* |
-| Browser zoom | *(must read 100%)* |
-| Window width at capture | *(the measured width where the 1100 px cap binds)* |
-| `streamlit_app.py` at capture | *(40-hex SHA from the command below)* |
+| Date captured | **2026-09-15** |
+| Source used | **the live app** — <https://dont-email-everyone-hillstrom.streamlit.app/> |
+| Browser | not recorded at capture time |
+| Browser zoom | **100%** |
+| Window width at capture | **~1600 px**, the width at which the 1100 px cap binds |
+| `streamlit_app.py` at capture | **`4833d67e781da968575a4dba43506c6a6b53f070`** |
 
 ```
 git log -1 --format=%H -- streamlit_app.py
@@ -225,7 +225,30 @@ git log -1 --format=%H -- streamlit_app.py
 
 Confirmed at capture time:
 
-- [ ] the six headline numbers in frame matched the working tree's published values
-- [ ] both verdict lines are legible in `app_headline.png`
-- [ ] the legend and the caption line are inside `app_policy_curve.png`
-- [ ] neither image contains browser chrome, a window title, a taskbar or a notification
+- [x] the six headline numbers in frame matched the working tree's published values
+- [x] both verdict lines are legible in `app_headline.png`
+- [x] the legend and the caption line are inside `app_policy_curve.png`
+- [x] neither image contains browser chrome, a window title, a taskbar or a notification
+
+Produced: `app_headline.png` at 1127x604, `app_policy_curve.png` at 1226x910.
+
+The window width is recorded as approximate because that is how it was measured — by
+dragging to the binding point rather than by setting a number. The binding point is the
+reproducible target; 1600 is where it fell on this monitor, and a different browser's
+furniture will move it slightly without changing the picture.
+
+The headline capture includes the page title and standfirst above the bordered container.
+That is wider than the crop this recipe specifies and it was kept deliberately: the image
+is displayed standalone at the top of the README, where the title gives it context that the
+bare container would not have.
+
+Both images were checked against `data/processed/manifest.json` after capture, not only by
+eye. The headline's six values and the curve legend's `+$0.1016 (95% band -$0.0299 to
++$0.3034)` agree with the committed manifest.
+
+### Capture history
+
+| Date | What changed | Why |
+|---|---|---|
+| 2026-09-15 | first capture | — |
+| 2026-09-15 | `app_policy_curve.png` re-shot | the first attempt was taken maximized on a 2560 px monitor, where the uncapped caption stretches to ~2090 px while the figure stays at 1100, so no crop held both. Re-taken at the binding width. See the warning in §3. |
