@@ -1,10 +1,58 @@
-# Dont-Email-Everyone
+# Don't Email Everyone
+
+**Which customers should we email, and how much more revenue does targeting them produce than sending the same number of emails to customers picked at random?**
+
+<!-- headline:begin -->
+
+## The answer
+
+**With a budget of 4,269 sends to a 21,347-person list, email the top 20% ranked by predicted uplift rather than 4,269 people picked at random.**
+
+"Uplift" here means the customers whose behaviour *changed because they were emailed* — not the customers most likely to buy. Those are different groups, and the difference is the whole point.
+
+Both results below come from the same randomized experiment, and each carries its 95% interval. Where an interval includes zero, this data cannot show a gain.
+
+### Extra revenue: +$0.102 per customer on the list
+
+95% interval **-$0.030 to +$0.303**.
+
+> **Not detectable at this depth:** the 95% interval includes zero, so this data cannot distinguish this from no gain at all.
+
+The revenue gain is the number a reader wants and it is the number this data is weakest on. Spend is a rare, high-variance outcome — most customers spend nothing — and 64,000 customers is not enough to resolve a ten-cent difference. Stated plainly: **this experiment does not demonstrate that targeting increases revenue.**
+
+### Extra site visits: +0.006 per customer on the list
+
+95% interval **+0.002 to +0.010**.
+
+> **Detectable at this depth:** the 95% interval lies entirely above zero.
+
+Targeting does produce a measurable gain in site visits. This is the result the data supports.
+
+### Targeting does not beat emailing everyone
+
+There is no depth at which this data shows a gain against emailing **everyone**. Swept over three outcomes, three rankings and all 101 grid points at 500 bootstrap replicates, not one depth produces a versus-everyone interval that excludes zero from above.
+
+With genuinely free email, the correct action is to email everyone. Beating a blanket send at zero marginal cost requires that the customers you decline to email are ones the email measurably *harms*, and this experiment does not contain enough of them.
+
+This result is about spending a **fixed budget** of sends well — the decision a capacity-constrained marketer actually faces — which is why the comparator throughout is a random send of the same size.
+
+### See it live
 
 **Live app:** <https://dont-email-everyone-hillstrom.streamlit.app/> — move the targeting-depth control and the incremental-revenue estimate moves with it, with its 95% interval beside it.
 
 Streamlit Community Cloud puts an app to sleep after **12 hours without traffic**, so a first visitor may land on a sleep page rather than the app. That is not a broken deployment: click "Yes, get this app back up!" and it wakes in a few seconds. Any visitor can do it — no Streamlit account, no sign-in.
 
-A causal inference analysis of the Hillstrom 2008 email marketing experiment. A non-technical, reader-facing overview (the business question, the targeting rule, and the incremental-revenue result) arrives in Phase 7; this README currently covers environment setup and pipeline reproduction only.
+The two images below are the app's own output, so the result is readable even when the app is asleep.
+
+![The app's headline block: the targeting recommendation, the incremental revenue estimate with its 95% interval and a not-detectable verdict, and the incremental site-visit estimate with its 95% interval and a detectable verdict.](docs/app_headline.png)
+
+*The app's own headline block, captured at the pre-registered 20% targeting depth.*
+
+![Policy curve showing incremental spend versus a random send of the same size across every targeting depth, with a 95% bootstrap band. Hatching marks the depths where the band covers zero; the band is unhatched only between roughly 14% and 20% and again near 50%.](docs/app_policy_curve.png)
+
+*Where the revenue gain is, and is not, distinguishable from zero.*
+
+<!-- headline:end -->
 
 ## Setup and reproduction
 
