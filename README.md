@@ -124,7 +124,7 @@ Four write-ups carry the evidence. The README is the front door; these are the r
 - **Reproduction and development run on Python 3.11.** The local environment is 3.11.5, and `requirements.txt` was resolved and verified as a set against `cp311-win_amd64` with `--only-binary=:all:`. The commands in this section, and the fresh-clone reproduction claim below, are all about 3.11.
 - **The deployed app runs Python 3.14.7.** Streamlit Community Cloud selects its own runtime; this version was read from the Cloud console and its build log on 2026-09-13, where all 42 serve-time packages resolved.
 
-The two never meet: the 3.11 pin is about reproducing the *analysis*, while the deployment installs only the slim serve-time requirements and runs no part of the pipeline.
+The two never meet: the pin above is about reproducing the *analysis*, while the deployment installs only the slim serve-time requirements and runs no part of the pipeline.
 
 ```
 py -3.11 -m venv .venv

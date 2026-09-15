@@ -6,8 +6,8 @@ file. It states a targeting rule, two point estimates, two confidence
 intervals and two detectability verdicts, and a reviewer who reads only the
 first screen leaves with those numbers. Every one of them must be provable
 against a committed artifact rather than trusted, which is what ROADMAP
-Phase 7 criterion 2 asks for and what the assertions in this module and in
-plans 07-03 and 07-04 exist to supply.
+Phase 7 criterion 2 asks for and what the assertions in this module, added
+across plans 07-03, 07-04 and 07-05, exist to supply.
 
 WHERE THE REST OF THE README'S ASSERTIONS LIVE. One of them is not here:
 
@@ -24,9 +24,14 @@ WHAT THIS FILE CANNOT DO. It cannot decide whether a sentence is TRUE, and
 it cannot decide whether the README reads well to someone who has never met
 the phrase "average treatment effect". No assertion over a markdown file
 can. `tests/test_reports.py` records exactly this limit for `model.md` and
-discharges it with an explicit human checkpoint; plan 07-04 does the same
-here. A test that appeared to cover prose quality would be worse than no
-test, because it would retire the checkpoint that actually covers it.
+discharges it with an explicit human checkpoint; plan 07-06 does the same
+here, with a human read-through of the whole rendered file. A test that
+appeared to cover prose quality would be worse than no test, because it
+would retire the checkpoint that actually covers it.
+
+That checkpoint is also what covers D-04 -- whether the method section
+LINKS to the depth documents rather than restating their arguments. That
+is a judgement about prose, and no assertion here reaches it.
 
 THE SCREENSHOTS. Two PNGs under `docs/` carry the headline result for the
 reviewer who lands on a sleeping app -- Community Cloud sleeps a free-tier
@@ -565,3 +570,295 @@ def test_readme_embeds_both_app_screenshots():
             "which leaves ROADMAP Phase 7 criterion 4 unmet even though the "
             "file is committed."
         )
+
+
+# ---------------------------------------------------------------------------
+# The method section. A second link on the criterion 2 chain plan 07-01 ruled
+# on -- the first screen is pinned to manifest.json above; the method section
+# is pinned to ate.json and model.json here, and both inherit the same
+# guarantee back to the vendored CSV through tests/test_fresh_clone.py.
+# ---------------------------------------------------------------------------
+
+METHOD_BEGIN = "<!-- method:begin -->"
+METHOD_END = "<!-- method:end -->"
+
+SETUP_HEADING = "## Setup and reproduction"
+
+# Words that identify a statement as being about the DEPLOYMENT rather than
+# about local reproduction. Used by the two-interpreter test in both
+# directions: to confirm 3.14.7 is described as the served runtime, and to
+# confirm 3.11 is never described that way.
+DEPLOYMENT_WORDS = ("deploy", "Community Cloud", "serves", "served", "serve-time")
+
+# How close two strings have to be before the text is making a claim about
+# their relationship rather than mentioning them in the same section.
+# 300 characters is roughly a paragraph; 120 is roughly a sentence, which is
+# the right scale for "does this sentence say the deployment runs 3.11".
+ASSOCIATION_WINDOW = 300
+# Retained for the 3.14.7 association check only; the 3.11 guard is
+# line-scoped, for the reason recorded beside it.
+SENTENCE_WINDOW = 120
+
+
+def _method_section(text):
+    """Return the text between the method markers, failing loudly if absent.
+
+    Same contract and same reason as `_first_screen`: an empty region makes
+    every assertion below vacuously pass.
+    """
+    begin = text.find(METHOD_BEGIN)
+    end = text.find(METHOD_END)
+    assert begin != -1, (
+        f"README.md has no {METHOD_BEGIN} marker. The method section is "
+        "what ROADMAP Phase 7 criterion 1's ordering test orders against."
+    )
+    assert end != -1, f"README.md has no {METHOD_END} marker."
+    assert begin < end, (
+        f"{METHOD_BEGIN} appears at offset {begin}, after {METHOD_END} at "
+        f"{end}. The markers are inverted."
+    )
+    return text[begin:end]
+
+
+def _setup_section(text):
+    """Return the setup section, up to the next `## ` heading."""
+    start = text.find(SETUP_HEADING)
+    assert start != -1, f"README.md has no {SETUP_HEADING!r} heading."
+    nxt = text.find("\n## ", start + len(SETUP_HEADING))
+    return text[start:] if nxt == -1 else text[start:nxt]
+
+
+def _effect_strings(row):
+    """Format one ate.json effect row at this README's display grain.
+
+    BRANCHES ON THE ROW'S OWN `unit` FIELD, never on the outcome name. If a
+    unit ever changed in the artifact, branching on the outcome would go on
+    formatting dollars as percentage points and the test would keep passing
+    while the README said something false.
+
+    Two grains only, fixed by plan 07-04 Task 1 so the prose and this test
+    cannot drift apart. Do not introduce a third.
+    """
+    unit = row["unit"]
+    if unit == "pp":
+        return {
+            key: f"{row[key] * 100:+.2f}"
+            for key in ("effect", "ci_low", "ci_high")
+        }
+    if unit == "$":
+        return {
+            key: "+$" + f"{row[key]:.2f}"
+            for key in ("effect", "ci_low", "ci_high")
+        }
+    raise AssertionError(
+        f"ate.json row {row['arm']}/{row['outcome']} carries unit {unit!r}, "
+        "which this README has no display grain for. Adding one means "
+        "deciding how it is spelled in the prose too."
+    )
+
+
+def test_readme_method_numbers_trace_to_the_committed_effects():
+    """Every number in the method section is derived from a committed artifact.
+
+    This is the SECOND link on the chain plan 07-01 ruled on. The first
+    screen is pinned to `manifest.json` by the forward test above; the
+    method section is pinned to `ate.json` and `model.json` here. Both
+    inherit the rest of the chain -- back through `scored_holdout.parquet`
+    to the vendored CSV -- from `tests/test_fresh_clone.py`, so neither
+    needs to re-derive it.
+
+    No number is typed in this function. An acceptance criterion greps this
+    file to prove it.
+    """
+    effects = json.loads(
+        (config.PROCESSED / "ate.json").read_text(encoding="utf-8")
+    )["effects"]
+    region = _method_section(_readme())
+
+    womens = [row for row in effects if row["arm"] == "womens"]
+    assert len(womens) == 3, (
+        f"expected three womens-arm rows in ate.json, found {len(womens)}. "
+        "The method section states one line per outcome for that arm."
+    )
+
+    for row in womens:
+        for field, quoted in _effect_strings(row).items():
+            assert quoted in region, (
+                f"the method section does not quote ate.json "
+                f"effects[womens/{row['outcome']}].{field}, which formats to "
+                f"{quoted!r} at this README's grain. A method section "
+                "quoting an effect the artifact no longer carries is a "
+                "method section nobody can check."
+            )
+
+    model = json.loads(
+        (config.PROCESSED / "model.json").read_text(encoding="utf-8")
+    )
+    headline = model["headline"]
+
+    for field in ("n_eligible", "n_shipping"):
+        assert str(headline[field]) in region, (
+            f"the method section does not state model.json "
+            f"headline.{field} ({headline[field]}). The count of cells that "
+            "did NOT ship is the honest half of that paragraph, and it is "
+            "derived by subtraction from these two."
+        )
+
+    # THE LOOSER ASSERTION HERE IS DELIBERATE, not an oversight. A shipping
+    # cell is spelled `womens/visit/linear` in the artifact -- an internal
+    # identifier. The README is reader-facing prose and should not be forced
+    # to carry a slash-delimited cell name to satisfy a test, so each cell's
+    # ARM and OUTCOME components are asserted instead. The learner component
+    # is not: "linear" is an implementation detail the depth document owns.
+    for cell in headline["shipping_cells"]:
+        arm, outcome, _learner = cell.split("/")
+        for component in (arm, outcome):
+            assert component in region, (
+                f"the method section does not name {component!r}, a "
+                f"component of the shipping cell {cell!r} from model.json. "
+                "The README states which cells cleared the pre-registered "
+                "bar; a cell it cannot name is one a reader cannot look up."
+            )
+
+
+# Markdown link targets: both `[text](target)` and `![alt](target)`. The
+# leading bang is not captured because an image and a link resolve to a path
+# in exactly the same way and fail in exactly the same way.
+MARKDOWN_LINK = re.compile(r"\]\(([^)]+)\)")
+
+
+def test_readme_relative_links_resolve():
+    """Every relative link in the README resolves to a git-tracked path.
+
+    BOTH HALVES MATTER AND THEY FAIL DIFFERENTLY. A path that exists
+    locally but is untracked works perfectly on the author's machine and
+    404s for every reader of a public repository -- which is the one
+    failure this project can least afford in the one file every reviewer
+    opens. Existence alone would not catch it.
+
+    This also covers the two screenshot embeds on the first screen, so the
+    coupling between `docs/*.png` and the README is now checked from both
+    ends: `test_app_screenshots_are_committed` proves the files are there,
+    and this proves the README points at them correctly.
+    """
+    text = _readme()
+    tracked = subprocess.run(
+        ["git", "ls-files"],
+        cwd=config.ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    tracked_paths = {line.strip() for line in tracked}
+
+    for match in MARKDOWN_LINK.finditer(text):
+        target = match.group(1).strip()
+        if target.startswith("http") or target.startswith("#"):
+            continue
+        relative = target.split("#", 1)[0]
+        if not relative:
+            continue
+
+        assert (config.ROOT / relative).exists(), (
+            f"README.md links to {target!r}, which does not exist on disk. "
+            "A broken relative link in the front door is a dead end for "
+            "every reader who follows it."
+        )
+        assert relative in tracked_paths, (
+            f"README.md links to {target!r}, which exists locally but is "
+            "NOT tracked by git. It works on this machine and 404s for "
+            "everyone who clones or browses the repository -- run "
+            f"`git add {relative}`."
+        )
+
+
+def test_readme_links_every_depth_report():
+    """The front door reaches all four depth documents.
+
+    The expected set is built by GLOBBING `reports/*.md`, never by typing
+    four names. D-04 makes those documents the project's depth layer, and a
+    fifth report added in a later phase and never linked is depth nobody
+    reaches -- a hand-typed list here would pass happily while that
+    happened.
+
+    `tests/test_reports.py` keeps `REPORT_NAMES` as a presence allowlist.
+    This is the other direction: presence is not reachability.
+    """
+    text = _readme()
+    reports = sorted((config.ROOT / "reports").glob("*.md"))
+    assert reports, "no reports/*.md found -- this test would be vacuous."
+
+    for report in reports:
+        reference = f"reports/{report.name}"
+        assert reference in text, (
+            f"{reference} exists but is not linked from README.md. D-04 "
+            "makes the README the front door and these documents the "
+            "depth; a write-up nobody can reach from the front door is "
+            "depth that does not count."
+        )
+
+
+def test_readme_states_both_interpreters():
+    """D-07: the reproduction interpreter and the served one, both recorded.
+
+    The pre-D-07 README stated a bare required interpreter of Python 3.11
+    and nothing else, which implied BY OMISSION that the deployment ran
+    3.11 too. It runs 3.14.7. D-07 ruled that line incomplete rather than
+    wrong, so this test checks that both facts are present and that the
+    specific false one is absent.
+
+    The final assertion is the one with teeth. Asserting that 3.14.7
+    appears somewhere would pass on a README that also claimed the
+    deployment ran 3.11 in the next paragraph; the proximity guard is what
+    makes the absence of that claim checkable.
+    """
+    section = _setup_section(_readme())
+
+    assert "3.11" in section, "the setup section does not name Python 3.11."
+    assert "3.14.7" in section, (
+        "the setup section does not name Python 3.14.7, the version "
+        "Community Cloud actually serves. Recording only the local "
+        "interpreter is what made the pre-D-07 README misleading."
+    )
+    assert "2026-09-13" in section, (
+        "the setup section does not carry the date the deployed version "
+        "was read. An undated platform reading cannot be judged for age, "
+        "and Cloud selects its own runtime."
+    )
+
+    for index in (m.start() for m in re.finditer(r"3\.14\.7", section)):
+        window = section[
+            max(0, index - ASSOCIATION_WINDOW) : index + ASSOCIATION_WINDOW
+        ]
+        if any(word in window for word in DEPLOYMENT_WORDS):
+            break
+    else:
+        raise AssertionError(
+            "3.14.7 appears in the setup section but is not identified as "
+            "the deployed runtime anywhere near it. A version number with "
+            "no role attached tells a reader nothing."
+        )
+
+    # SCOPED TO A LINE, not to a character window, and the distinction was
+    # forced by a real false positive rather than chosen up front. The two
+    # interpreter facts are written as adjacent bullets, so a 120-character
+    # window starting at the "3.11" ending the first bullet reaches into the
+    # "deployed" opening the second -- and fails on prose that is correct and
+    # is in fact exactly what D-07 asked for.
+    #
+    # A line is also the RIGHT unit on the merits. The falsehood D-07 exists
+    # to prevent is a sentence asserting the deployment runs 3.11; it cannot
+    # be spread across two bullets, because two bullets are two claims. A
+    # character window was measuring proximity when the thing that matters is
+    # co-assertion.
+    for line in section.splitlines():
+        if "3.11" not in line:
+            continue
+        for word in DEPLOYMENT_WORDS:
+            assert word not in line, (
+                f"this line names both {word!r} and '3.11':\n"
+                f"  {line.strip()}\n"
+                "The deployment runs 3.14.7, not 3.11. This is the exact "
+                "false implication D-07 exists to prevent -- 3.11 is the "
+                "reproduction interpreter and nothing else."
+            )
