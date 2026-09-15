@@ -70,16 +70,30 @@ control stays at its default.
 cap makes the figure narrower than 1100 and the capture no longer shows what the cap
 delivers. It shows what the window happened to allow.
 
-So the capture must be taken at or above the viewport width where the cap **binds** —
-where the container is wide enough that the figure stops growing.
+So the capture must be taken **at** the viewport width where the cap **binds** — where the
+container is just wide enough that the figure stops growing. Not below it, and — this is
+the part that is easy to get wrong — **not far above it either**.
+
+> **Do not capture maximized on a wide monitor.** `st.pyplot` is capped at 1100 px, but
+> `st.caption` is **not** — it is an ordinary text element that fills the whole container.
+> On a 2560 px monitor the container is roughly 2090 px, so the caption stretches to
+> ~2090 px while the figure stays at 1100. No crop contains both: tight around the figure
+> cuts the caption off, and wide enough for the caption strands a 1100 px chart in
+> whitespace. This was hit for real during the 2026-09-15 capture and cost a re-shoot.
+>
+> At the binding width the container is only slightly wider than the figure, so the caption
+> wraps to roughly the figure's own width and sits in a tidy block beneath it. That is the
+> width where one crop gets the subheader, the figure, the legend and the caption together.
 
 **Measure it, do not assume it.** The procedure:
 
 1. Open the app and find the spend policy curve.
-2. Widen the browser window in steps, watching the figure.
-3. At some width the figure stops getting wider and whitespace appears to its right. That
-   is the cap binding.
-4. Record that width in the capture record.
+2. **Narrow** the browser window until the whitespace to the right of the chart disappears
+   and the figure just starts to shrink; then widen back a little, until it stops growing.
+3. That is the cap binding. The figure is at its full 1100 px and the container is as
+   close to it as it gets.
+4. Record that width in the capture record. (F12 shows the viewport size in the top-right
+   corner while dragging, if an exact number is wanted.)
 
 The one measurement on record: `quick-260912-jil` verified in a real browser
 (`innerWidth` 2560, `devicePixelRatio` 1) that a 2560 px viewport yields roughly **2090
