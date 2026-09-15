@@ -862,3 +862,233 @@ def test_readme_states_both_interpreters():
                 "false implication D-07 exists to prevent -- 3.11 is the "
                 "reproduction interpreter and nothing else."
             )
+
+
+# ---------------------------------------------------------------------------
+# ROADMAP Phase 7 criterion 3 -- the skeptic's section.
+#
+# The criterion names six things and it names them for a reason: a
+# limitations section that lists three and paraphrases the rest is the
+# failure mode, because the items that get dropped are always the ones that
+# cost the most to admit. Each entry below quotes its clause VERBATIM, so a
+# failure here tells the reader which part of a ROADMAP criterion is missing
+# rather than which regex did not match.
+# ---------------------------------------------------------------------------
+
+LIMITATIONS_BEGIN = "<!-- limitations:begin -->"
+LIMITATIONS_END = "<!-- limitations:end -->"
+
+# (clause verbatim, substrings any one of which satisfies it, why those)
+SKEPTIC_ITEMS = (
+    (
+        "2008 vintage",
+        ("2008",),
+        "a year is unambiguous and cannot drift into a near-miss spelling",
+    ),
+    (
+        "single two-week window",
+        ("two-week", "two week", "fortnight"),
+        "three spellings of one fact -- matching only the hyphenated form "
+        "would fail on correct prose that used either of the others",
+    ),
+    (
+        "one retailer",
+        ("retailer",),
+        "deliberately just the noun: 'one retailer', 'a single retailer' "
+        "and \"this retailer's customers\" all satisfy the criterion, and a "
+        "tighter pattern would fail the second and third",
+    ),
+    (
+        "the winner's-curse on threshold selection named explicitly",
+        ("winner's curse", "winners curse"),
+        "THE ONE ITEM WHERE A SYNONYM IS DELIBERATELY NOT ACCEPTED. The "
+        "criterion's word is 'explicitly', so the term itself is the "
+        "assertion; an accurate paraphrase does not discharge it",
+    ),
+    (
+        "the counterfactual caveat stated plainly",
+        ("would have", "counterfactual"),
+        "either the term of art or the plain-English form, because the "
+        "criterion asks for it stated PLAINLY and the plain form is "
+        "'would have'",
+    ),
+)
+
+# "cost/margin as assumptions rather than data" is a CONJUNCTION and is
+# checked separately, because a single-substring entry would pass on a
+# section that said "margin" and never said "assumption". Both halves are
+# required.
+COST_MARGIN_TOKENS = ("margin", "cost")
+ASSUMPTION_TOKENS = ("assumption", "assumptions", "assumed", "not data")
+
+# Connectives that recover a claim. `but` carries word boundaries so it does
+# not fire on "contributed", "distributed" or "attribute" -- an unanchored
+# match here is exactly the kind of false positive a later reader repairs in
+# the wrong direction, by deleting the assertion instead of anchoring it.
+SOFTENING = (
+    re.compile(r"\bbut\b", re.IGNORECASE),
+    re.compile(r"\bhowever\b", re.IGNORECASE),
+    re.compile(r"that said", re.IGNORECASE),
+    re.compile(r"\bnevertheless\b", re.IGNORECASE),
+)
+
+
+def _limitations_section(text):
+    """Return the limitations region, failing loudly if it is absent or empty.
+
+    Same contract as `_first_screen` and `_method_section`, and the same
+    reason: an empty region makes every assertion below vacuously pass.
+    """
+    begin = text.find(LIMITATIONS_BEGIN)
+    end = text.find(LIMITATIONS_END)
+    assert begin != -1, (
+        f"README.md has no {LIMITATIONS_BEGIN} marker. ROADMAP Phase 7 "
+        "criterion 3 requires a limitations section to be PRESENT in the "
+        "README, not only in the depth documents."
+    )
+    assert end != -1, f"README.md has no {LIMITATIONS_END} marker."
+    assert begin < end, (
+        f"{LIMITATIONS_BEGIN} appears at offset {begin}, after "
+        f"{LIMITATIONS_END} at {end}. The markers are inverted."
+    )
+    region = text[begin + len(LIMITATIONS_BEGIN) : end]
+    assert region.strip(), (
+        "the limitations region exists but is empty. Criterion 3 is not "
+        "discharged by a pair of markers."
+    )
+    return region
+
+
+def test_readme_limitations_names_every_skeptic_item():
+    """All six of criterion 3's named items are present, none softened.
+
+    EVERY FAILURE IS COLLECTED AND REPORTED TOGETHER rather than failing on
+    the first. Someone repairing this section wants the whole list; a test
+    that reveals one missing item per run makes the repair four commits
+    long.
+
+    `tests/test_reports.py::test_policy_report_states_the_k_star_selection_caveat`
+    asserts the same property one document down. This is its README-facing
+    counterpart -- the reasoning is there and is not duplicated here. What
+    is different is the audience: `policy.md` is read by someone who came
+    looking, and the README is read by someone who did not.
+    """
+    text = _readme()
+    region = _limitations_section(text)
+    lowered = region.lower()
+
+    missing = []
+    for clause, candidates, _why in SKEPTIC_ITEMS:
+        if not any(candidate.lower() in lowered for candidate in candidates):
+            missing.append(
+                f"  - {clause!r}: none of {candidates} appears in the "
+                "limitations section"
+            )
+
+    if not any(token in lowered for token in COST_MARGIN_TOKENS) or not any(
+        token in lowered for token in ASSUMPTION_TOKENS
+    ):
+        missing.append(
+            "  - 'cost/margin as assumptions rather than data': the section "
+            "must contain BOTH a cost-or-margin token and an "
+            "assumption token. Naming the quantity without saying it is an "
+            "assumption is the half that misleads."
+        )
+
+    assert not missing, (
+        "ROADMAP Phase 7 criterion 3 names six things the limitations "
+        "section must state. These are not in it:\n"
+        + "\n".join(missing)
+        + "\nA partial list is the failure mode this criterion exists to "
+        "catch -- the items that get dropped are the ones that cost the "
+        "most to admit."
+    )
+
+    # D-02 GUARD. The not-detectable label belongs beside the dollar figure
+    # on the first screen. A limitations section that migrated above the
+    # fold would be the first symptom of that locked decision being unwound,
+    # and it would arrive looking like a formatting change.
+    headline_end = text.find(HEADLINE_END)
+    limitations_begin = text.find(LIMITATIONS_BEGIN)
+    assert limitations_begin > headline_end, (
+        f"the limitations section begins at offset {limitations_begin}, "
+        f"above the end of the first screen at {headline_end}. D-02 is "
+        "locked: the 'not detectable at this depth' label sits in the same "
+        "block as the dollar figure, and this section may refer to that "
+        "fact but must not become where a reader first meets it."
+    )
+
+    for pattern in SOFTENING:
+        match = pattern.search(region)
+        assert match is None, (
+            f"the limitations section contains {match.group()!r}. A "
+            "limitation that argues its way back out is not a limitation. "
+            "The value of this section is that it reads as though a "
+            "skeptic wrote it, and a recovering clause reads as though the "
+            "author did."
+        )
+
+
+def test_readme_limitations_numbers_trace_to_the_manifest():
+    """The skeptic's section is held to the same provenance standard.
+
+    `test_readme_first_screen_publishes_no_untraceable_number` is bounded
+    to the headline region by design -- plan 07-03 recorded why a whole-file
+    sweep stops being evidence. That leaves this section outside it, and
+    without this test the limitations section would be the one
+    reader-facing part of the README publishing unchecked numbers. The
+    skeptic's section is the last place this project can afford one.
+
+    Three numbers are authorised and all three are derived here, none
+    typed: the two cost breakpoints at three decimals and the
+    miscalibration ratio at two, the same grain the method section uses.
+    """
+    manifest = _manifest()
+    region = _limitations_section(_readme())
+
+    cost = manifest["cost_exhibit"]
+    expected = {
+        "cost_exhibit.first_breakpoint": f"{cost['first_breakpoint']:.3f}",
+        "cost_exhibit.first_ratio_with_k_star_zero": (
+            f"{cost['first_ratio_with_k_star_zero']:.3f}"
+        ),
+        "optimism.miscalibration.visit.ratio_at_capacity": (
+            f"{manifest['optimism']['miscalibration']['visit']['ratio_at_capacity']:.2f}"
+        ),
+    }
+
+    for field, quoted in expected.items():
+        assert quoted in region, (
+            f"the limitations section does not quote {field}, which formats "
+            f"to {quoted!r}. The cost breakpoints are the evidence that the "
+            "cost and margin caveat is a measured sweep rather than an "
+            "invented constant, and the ratio is what stops the optimism "
+            "claim from being an assurance that it is small."
+        )
+
+    # THE REVERSE DIRECTION, NARROWED. The first-screen sweep covers every
+    # numeric literal; here it is narrowed to DECIMAL literals only.
+    #
+    # The narrowing is recorded rather than silent: this section's prose
+    # legitimately carries "2008", "13" (the policy.md section number),
+    # "21,347" (the frame size) and "six" spelled as a word. A sweep over
+    # every integer would have to allowlist a year, a section number and a
+    # frame size to say nothing new, and an allowlist that long stops being
+    # evidence -- which is the same argument 07-03 recorded for bounding
+    # the first-screen sweep to a region. A decimal literal, by contrast,
+    # is always a measurement in this section, so every one of them must
+    # trace.
+    allowed = set(expected.values())
+    for match in re.finditer(r"\d+\.\d+", region):
+        literal = match.group()
+        if literal in allowed:
+            continue
+        start = max(0, match.start() - 40)
+        context = region[start : match.end() + 40].replace("\n", " ")
+        raise AssertionError(
+            f"{literal!r} appears in the limitations section but traces to "
+            f"no committed artifact.\n"
+            f"  context: ...{context}...\n"
+            "Every decimal in this section is a measurement. Trace it to "
+            "data/processed/manifest.json and derive it, or remove it."
+        )
