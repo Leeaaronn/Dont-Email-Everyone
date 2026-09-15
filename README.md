@@ -119,7 +119,12 @@ Four write-ups carry the evidence. The README is the front door; these are the r
 
 ## Setup and reproduction
 
-Required interpreter: **Python 3.11**.
+**Two interpreters are in play, and both statements are true.**
+
+- **Reproduction and development run on Python 3.11.** The local environment is 3.11.5, and `requirements.txt` was resolved and verified as a set against `cp311-win_amd64` with `--only-binary=:all:`. The commands in this section, and the fresh-clone reproduction claim below, are all about 3.11.
+- **The deployed app runs Python 3.14.7.** Streamlit Community Cloud selects its own runtime; this version was read from the Cloud console and its build log on 2026-09-13, where all 42 serve-time packages resolved.
+
+The two never meet: the 3.11 pin is about reproducing the *analysis*, while the deployment installs only the slim serve-time requirements and runs no part of the pipeline.
 
 ```
 py -3.11 -m venv .venv
@@ -133,23 +138,30 @@ Run the data pipeline:
 python -m dont_email_everyone.pipeline all
 ```
 
-`all` runs `ingest` (the four checksum and schema gates, writing the three input tables) then `analyze` (every Phase 2 estimator, writing the analysis artifacts and figures). Either subcommand can be run on its own; `analyze` reads the committed Parquet inputs and never re-reads the raw CSV.
+`all` chains four stages in order:
 
-This produces seven committed artifacts under `data/processed/`:
+1. `ingest` — the four checksum and schema gates, writing the three input tables
+2. `analyze` — the experiment-validity estimators, writing the balance, effect and coverage artifacts
+3. `train` — the uplift models and their permutation nulls
+4. `policy` — the policy curve, its bootstrap bands and the headline value
 
-- `analysis_table.parquet` — the validated 64,000 x 12 table
-- `mens_vs_control.parquet` — the mens-email-vs-control analysis frame
-- `womens_vs_control.parquet` — the womens-email-vs-control analysis frame
-- `balance.parquet` — the 33-row standardized-mean-difference table across all three pairwise arm comparisons, with the per-covariate tests joined on
-- `ate.parquet` — the six pre-registered treatment effects with HC3-robust intervals, covariate-adjusted estimates and Holm-adjusted p-values
-- `coverage.parquet` — the five-row Welch-interval coverage-vs-cell-size sweep
-- `ate.json` — the scalar headline block (effects, seeded bootstrap, omnibus balance test, both winsorization variants, balance and coverage summaries) for quoting without a Parquet read
+Any subcommand can be run on its own; `analyze` reads the committed Parquet inputs and never re-reads the raw CSV.
 
-and three committed deliverables under `reports/`:
+A full `all` run was **measured at 846 seconds** — about 14 minutes — dominated by `train`'s eight refit permutation nulls at 200 shuffles each. That is a measurement from an actual run, not an estimate.
 
-- `validity.md` — the Phase 2 write-up: acceptance criteria, balance evidence, the ATE table against its published targets, robustness, and coverage interpretation
-- `figures/love_plot.png` — the covariate Love plot with the ±0.1 acceptance band on the canvas
-- `figures/ate_forest.png` — the six treatment effects with confidence intervals, panelled by unit
+It produces **15 artifacts** under `data/processed/` and **19 figures** under `reports/figures/`. The ones a reader is most likely to open by hand:
+
+- `manifest.json` — the scalar headline block; every number on this README's first screen is read from it
+- `ate.json` — the six pre-registered treatment effects with intervals, Holm-adjusted p-values and the seeded bootstrap
+- `scored_holdout.parquet` — the held-out customers with their predicted uplift scores
+- `policy_curve.parquet` — the policy value at all 101 targeting depths
+- `policy_bands.parquet` — the bootstrap confidence bands around that curve
+
+The authoritative lists of the rest are not repeated here, because a list that long in a README is one nobody reads and everybody lets rot. They live in two tested allowlists — `ARTIFACT_NAMES` in `tests/test_artifacts.py` and `FIGURE_NAMES` in `tests/test_reports.py` — which run as presence checks on every commit, so the counts above cannot silently drift from what is committed.
+
+The four `reports/*.md` write-ups are linked from [Going deeper](#going-deeper) above.
+
+**A fresh clone reproduces all of it.** `tests/test_fresh_clone.py` runs the whole chain from the vendored CSV into a throwaway tree, seeded with nothing, and compares the result against the committed artifact and figure sets in both directions. It is `slow`-marked, so `-m "not slow"` skips it.
 
 Run the test suite:
 
